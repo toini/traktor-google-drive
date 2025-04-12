@@ -1,0 +1,53 @@
+﻿@page "/music"
+@inject IJSRuntime JS
+@inject HttpClient Http
+@using System.Text.Json
+
+<h3>Drive Music</h3>
+
+@if (files is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    @foreach (var file in files)
+    {
+        <div style="margin-bottom: 1rem;">
+            <p>@file.Name</p>
+            <audio @ref="file.AudioRef" controls style="width: 100%;"></audio>
+            <button @onclick="() => Play(file)">Play ▶️</button>
+        </div>
+    }
+}
+
+@code {
+    record FileEntry(string Name, string Id)
+    {
+        public ElementReference AudioRef;
+    }
+
+    List<FileEntry> files;
+    string token;
+
+    async Task Play(FileEntry file)
+    {
+        await JS.InvokeVoidAsync("setAudioSrc", file.AudioRef, file.Id, token);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+
+        var result = await Http.GetFromJsonAsync<JsonElement>(
+            $"https://www.googleapis.com/drive/v3/files?q=mimeType='audio/mpeg'&fields=files(id,name)&access_token={token}"
+        );
+
+        files = result.GetProperty("files").EnumerateArray()
+            .Select(f => new FileEntry(
+                f.GetProperty("name").GetString(),
+                f.GetProperty("id").GetString()
+            ))
+            .ToList();
+    }
+}

@@ -1,0 +1,35 @@
+﻿@page "/login"
+@layout MinimalLayout
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<h3>Login</h3>
+<button @onclick="SignIn">Sign in with Google</button>
+
+@code {
+    async Task SignIn()
+    {
+        await JS.InvokeVoidAsync("googleLogin");
+
+        string token = null;
+        var retries = 10;
+
+        while (retries-- > 0)
+        {
+            token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+            if (!string.IsNullOrWhiteSpace(token))
+                break;
+
+            await Task.Delay(300);
+        }
+
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            Navigation.NavigateTo("/music", true);
+        }
+        else
+        {
+            Console.WriteLine("⚠️ Google login failed or timed out.");
+        }
+    }
+}
