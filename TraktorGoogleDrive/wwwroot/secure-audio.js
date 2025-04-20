@@ -6,21 +6,30 @@
 // <script src="https://cdn.jsdelivr.net/npm/libflacjs@5/dist/libflac.min.wasm.js"></script>
 
 let audioContext = null;
+let currentSource = null;
+let currentBuffer = null;
 
-window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg") => {
+window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg", seekSeconds = 0) => {
     console.log("Starting secure stream", fileId, mime);
 
+    if (audioContext == null || audioContext.state === "closed") {
+        audioContext = new AudioContext();
+    }
+    if (currentSource) {
+        currentSource.stop();
+    }
+
     if (mime === "audio/flac") {
-        return streamFlac(fileId, token);
+        return streamFlac(fileId, token, seekSeconds);
     } else if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav") {
-        return streamWav(fileId, token);
+        return streamWav(fileId, token, seekSeconds);
     }
 
     console.error("Only FLAC and WAV are currently supported in secureStreamToAudio");
 };
 
 // FLAC decoding using barebones libflac.js API + AudioContext
-async function streamFlac(fileId, token) {
+async function streamFlac(fileId, token, seekSeconds = 0) {
     console.log("streamFlac called");
 
     const flacReady = () => new Promise(resolve => {
@@ -36,9 +45,6 @@ async function streamFlac(fileId, token) {
     await flacReady();
     console.log("FLAC decoder ready");
 
-    if (audioContext == null || audioContext.state === "closed") {
-        audioContext = new AudioContext();
-    }
     const context = audioContext;
 
     const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
@@ -142,22 +148,21 @@ async function streamFlac(fileId, token) {
         }
     }
 
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(context.destination);
+    currentBuffer = buffer;
+    currentSource = context.createBufferSource();
+    currentSource.buffer = buffer;
+    currentSource.connect(context.destination);
 
     await context.resume();
-    source.onended = () => console.log("Playback finished");
-    console.log("Starting playback", context.currentTime, buffer.duration);
+    currentSource.onended = () => console.log("Playback finished");
 
-    source.start();
+    const seekOffset = Math.min(seekSeconds, buffer.duration);
+    console.log("Starting playback from", seekOffset, "of", buffer.duration);
+    currentSource.start(0, seekOffset);
 }
 
 // WAV decoding using AudioContext.decodeAudioData
-async function streamWav(fileId, token) {
-    if (audioContext == null || audioContext.state === "closed") {
-        audioContext = new AudioContext();
-    }
+async function streamWav(fileId, token, seekSeconds = 0) {
     const context = audioContext;
 
     const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
@@ -167,13 +172,35 @@ async function streamWav(fileId, token) {
     const buffer = await response.arrayBuffer();
     const audioBuffer = await context.decodeAudioData(buffer);
 
-    const source = context.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(context.destination);
+    currentBuffer = audioBuffer;
+    currentSource = context.createBufferSource();
+    currentSource.buffer = audioBuffer;
+    currentSource.connect(context.destination);
 
     await context.resume();
-    source.onended = () => console.log("WAV Playback finished");
-    console.log("Starting WAV playback", context.currentTime, audioBuffer.duration);
+    currentSource.onended = () => console.log("WAV Playback finished");
 
-    source.start();
+    const offset = Math.min(seekSeconds, audioBuffer.duration);
+    console.log("Starting WAV playback from", offset, "of", audioBuffer.duration);
+    currentSource.start(0, offset);
 }
+
+// Public helper to trigger seeking externally
+window.seekToSecond = (seconds) => {
+    if (!currentBuffer || !audioContext) return;
+
+    if (currentSource) currentSource.stop();
+
+    const context = audioContext;
+    currentSource = context.createBufferSource();
+    currentSource.buffer = currentBuffer;
+    currentSource.connect(context.destination);
+    currentSource.onended = () => console.log("Seeked playback ended");
+
+    context.resume();
+    const offset = Math.min(seconds, currentBuffer.duration);
+    console.log("Seeking to second", offset);
+    currentSource.start(0, offset);
+};
+
+window.getCurrentDuration = () => currentBuffer?.duration ?? 0;

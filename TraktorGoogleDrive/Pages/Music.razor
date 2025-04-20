@@ -13,9 +13,16 @@ else
 {
     @foreach (var file in files)
     {
-        <div style="margin-bottom: 1rem;" @key="file.Id">
+        <div style="margin-bottom: 1.5rem;" @key="file.Id">
             <p>@file.Name</p>
-            <button @onclick="@(() => StreamAudio(file))">▶️ Stream</button>
+            <button @onclick="@(() => Play(file.Id))">▶️ Play</button>
+            <button @onclick="@PauseAll">⏸ Pause</button>
+
+            <div style="position: relative; height: 20px; background: #ccc; cursor: pointer; width: 100%;"
+                 @onclick="@((e) => Seek(file.Id, e))">
+                <div id="@($"progress-{file.Id}")"
+                     style="position: absolute; height: 100%; background: #007bff; width: 0%;"></div>
+            </div>
         </div>
     }
 }
@@ -29,17 +36,43 @@ else
         //public ElementReference AudioRef { get; set; }
     }
 
-    List<FileEntry> files;
-    string token;
-    HashSet<string> streamed = new();
+    List<FileEntry> files = new();
+    string? token;
+    //HashSet<string> streamed = new();
 
-    async Task StreamAudio(FileEntry file)
+    // async Task StreamAudio(FileEntry file)
+    // {
+    //     if (streamed.Contains(file.Id)) return;
+    //     streamed.Add(file.Id);
+
+    //     Console.WriteLine($"Streaming: {file.Id}");
+    //     await JS.InvokeVoidAsync("secureStreamToAudio", file.Id, token, file.MimeType);
+    // }
+
+    string? currentlyPlayingId;
+
+    async Task Play(string id)
     {
-        if (streamed.Contains(file.Id)) return;
-        streamed.Add(file.Id);
+        if (currentlyPlayingId == id) return;
 
-        Console.WriteLine($"Streaming: {file.Id}");
-        await JS.InvokeVoidAsync("secureStreamToAudio", file.Id, token, file.MimeType);
+        currentlyPlayingId = id;
+        await JS.InvokeVoidAsync("secureStreamToAudio", id, token, files.First(f => f.Id == id).MimeType);
+    }
+
+    async Task PauseAll()
+    {
+        currentlyPlayingId = null;
+        await JS.InvokeVoidAsync("seekToSecond", 999999); // a workaround to stop playback
+    }
+
+    // Called when user clicks progress bar
+    async Task Seek(string id, MouseEventArgs e)
+    {
+        var width = 300.0; // Match to real pixel width if set via CSS
+        var percent = e.OffsetX / width;
+        var duration = await JS.InvokeAsync<double>("getCurrentDuration");
+        var seconds = percent * duration;
+        await JS.InvokeVoidAsync("seekToSecond", seconds);
     }
 
     protected override async Task OnInitializedAsync()
