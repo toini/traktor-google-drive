@@ -15,11 +15,6 @@ else
     {
         <div style="margin-bottom: 1rem;" @key="file.Id">
             <p>@file.Name</p>
-            <audio controls
-                   style="width: 100%;"
-                   data-seekstart="0"
-                   @ref="file.AudioRef">
-            </audio>
             <button @onclick="@(() => StreamAudio(file))">▶️ Stream</button>
         </div>
     }
@@ -30,7 +25,8 @@ else
     {
         public string Name { get; set; }
         public string Id { get; set; }
-        public ElementReference AudioRef { get; set; }
+        public string MimeType { get; set; }
+        //public ElementReference AudioRef { get; set; }
     }
 
     List<FileEntry> files;
@@ -42,24 +38,24 @@ else
         if (streamed.Contains(file.Id)) return;
         streamed.Add(file.Id);
 
-        await Task.Delay(100); // Ensure @ref is populated
-        Console.WriteLine($"Streaming: {file.Id}, ref={file.AudioRef.Id}");
-
-        await JS.InvokeVoidAsync("secureStreamToAudio", file.AudioRef, file.Id, token);
+        Console.WriteLine($"Streaming: {file.Id}");
+        await JS.InvokeVoidAsync("secureStreamToAudio", file.Id, token, file.MimeType);
     }
+
     protected override async Task OnInitializedAsync()
     {
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
         var result = await Http.GetFromJsonAsync<JsonElement>(
-            $"https://www.googleapis.com/drive/v3/files?q=mimeType contains 'audio/'&fields=files(id,name)&access_token={token}"
+            $"https://www.googleapis.com/drive/v3/files?q=mimeType contains 'audio/'&fields=files(id,name,mimeType)&access_token={token}"
         );
 
         files = result.GetProperty("files").EnumerateArray()
             .Select(f => new FileEntry
                 {
+                    Id = f.GetProperty("id").GetString(),
                     Name = f.GetProperty("name").GetString(),
-                    Id = f.GetProperty("id").GetString()
+                    MimeType = f.GetProperty("mimeType").GetString()                    
                 })
             .ToList();
     }
