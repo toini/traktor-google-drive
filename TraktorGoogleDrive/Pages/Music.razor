@@ -34,19 +34,5 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-
-        // var result = await Http.GetFromJsonAsync<JsonElement>(
-        //     $"https://www.googleapis.com/drive/v3/files?q=mimeType contains 'audio/'&fields=files(id,name,mimeType)&access_token={token}"
-        // );
-
-        // files = result.GetProperty("files").EnumerateArray()
-        //     .Select(f => new FileEntry
-        //         {
-        //             Id = f.GetProperty("id").GetString(),
-        //             Name = f.GetProperty("name").GetString(),
-        //             MimeType = f.GetProperty("mimeType").GetString()
-        //         })
-        //     .ToList();
     }
 }
