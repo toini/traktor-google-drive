@@ -1,0 +1,64 @@
+﻿@using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
+
+<div style="margin-bottom: 0.5rem;">
+    <b>@Name</b>
+</div>
+
+<div style="display: flex; align-items: center; gap: 1rem;">
+    <button @onclick="Play">▶️</button>
+    <button @onclick="Pause">⏸️</button>
+    <div style="width: 300px; height: 8px; background: #222; cursor: pointer;">
+        <div style="@($"background:#00bfff;height:8px;width:{Progress * 100}%")"></div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Id { get; set; }
+    [Parameter] public string Name { get; set; }
+    [Parameter] public string MimeType { get; set; }
+    [Parameter] public string Token { get; set; }
+
+    double Progress = 0;
+    System.Timers.Timer timer;
+
+    async Task Play()
+    {
+        await JS.InvokeVoidAsync("secureStreamToAudio", Id, Token, MimeType);
+        StartTimer();
+    }
+
+    async Task Pause()
+    {
+        await JS.InvokeVoidAsync("seekToSecond", 999999); // crude stop workaround
+        timer?.Stop();
+    }
+
+    async Task Seek(MouseEventArgs e)
+    {
+        var percent = e.OffsetX / 300.0;
+        var duration = await JS.InvokeAsync<double>("getCurrentDuration");
+        var seconds = percent * duration;
+        await JS.InvokeVoidAsync("seekToSecond", seconds);
+    }
+
+    void StartTimer()
+    {
+        timer?.Stop();
+        timer = new System.Timers.Timer(500);
+        timer.Elapsed += async (_, _) =>
+        {
+            var cur = await JS.InvokeAsync<double>("getCurrentTime");
+            var dur = await JS.InvokeAsync<double>("getCurrentDuration");
+            Progress = dur > 0 ? cur / dur : 0;
+            await InvokeAsync(StateHasChanged);
+        };
+        timer.Start();
+    }
+
+    public void Dispose()
+    {
+        timer?.Stop();
+        timer?.Dispose();
+    }
+}

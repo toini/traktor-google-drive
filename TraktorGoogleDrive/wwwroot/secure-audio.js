@@ -1,206 +1,143 @@
-﻿// This version detects FLAC and WAV and uses dedicated decoding strategies
-// FLAC decoder must be loaded via:
-// <script>
-//   window.FLAC_SCRIPT_LOCATION = "https://cdn.jsdelivr.net/npm/libflacjs@5/dist/";
-// </script>
-// <script src="https://cdn.jsdelivr.net/npm/libflacjs@5/dist/libflac.min.wasm.js"></script>
-
-let audioContext = null;
+﻿let audioContext = null;
 let currentSource = null;
 let currentBuffer = null;
+let startTime = 0;
+let offsetAtStart = 0;
 
 window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg", seekSeconds = 0) => {
-    console.log("Starting secure stream", fileId, mime);
-
-    if (audioContext == null || audioContext.state === "closed") {
+    if (!audioContext || audioContext.state === "closed")
         audioContext = new AudioContext();
-    }
-    if (currentSource) {
+    if (currentSource)
         currentSource.stop();
-    }
 
-    if (mime === "audio/flac") {
+    if (mime === "audio/flac")
         return streamFlac(fileId, token, seekSeconds);
-    } else if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav") {
+    if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav")
         return streamWav(fileId, token, seekSeconds);
-    }
 
-    console.error("Only FLAC and WAV are currently supported in secureStreamToAudio");
+    console.error("Unsupported mime type", mime);
 };
 
-// FLAC decoding using barebones libflac.js API + AudioContext
-async function streamFlac(fileId, token, seekSeconds = 0) {
-    console.log("streamFlac called");
-
-    const flacReady = () => new Promise(resolve => {
-        if (Flac.isReady()) resolve();
-        else Flac.on('ready', () => resolve());
-    });
-
-    if (typeof Flac === 'undefined') {
-        console.error("libflac.js is not loaded");
-        return;
-    }
-
-    await flacReady();
-    console.log("FLAC decoder ready");
-
+async function streamWav(fileId, token, seekSeconds = 0) {
     const context = audioContext;
-
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${token}` }
     });
+    const buf = await res.arrayBuffer();
+    const decoded = await context.decodeAudioData(buf);
 
-    const decoder = Flac.create_libflac_decoder(true);
-    if (!decoder) {
-        console.error("Failed to create FLAC decoder");
+    currentBuffer = decoded;
+    currentSource = context.createBufferSource();
+    currentSource.buffer = decoded;
+    currentSource.connect(context.destination);
+    await context.resume();
+
+    offsetAtStart = Math.min(seekSeconds, decoded.duration);
+    startTime = context.currentTime;
+    currentSource.start(0, offsetAtStart);
+}
+
+async function streamFlac(fileId, token, seekSeconds = 0) {
+    if (typeof Flac === 'undefined') {
+        console.error("libflac.js not loaded");
         return;
     }
 
-    const reader = response.body.getReader();
-    const flacData = [];
+    await new Promise(resolve => {
+        if (Flac.isReady()) resolve();
+        else Flac.on('ready', resolve);
+    });
+
+    const context = audioContext;
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+    const reader = res.body.getReader();
+    const chunks = [];
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        console.log("push value one by one; length", value.length);
-        if (value) for (let i = 0; i < value.length; i++) flacData.push(value[i]);
+        chunks.push(...value);
     }
-
-    const data = new Uint8Array(flacData);
+    const data = new Uint8Array(chunks);
     let offset = 0;
-
-    const read_callback_fn = (bufferSize) => {
-        const end = offset >= data.length ? -1 : Math.min(offset + bufferSize, data.length);
-        if (end === -1) return { buffer: null, readDataLength: 0, error: false };
-        const chunk = data.subarray(offset, end);
-        const readLen = end - offset;
-        offset = end;
-        return { buffer: chunk, readDataLength: readLen, error: false };
-    };
+    const decoder = Flac.create_libflac_decoder(true);
 
     const pcmChunks = [];
     let metadata = null;
 
-    const write_callback_fn = (channelsBuffer, frame) => {
-        console.log("push to pcmChunks", metadata?.bitsPerSample);
+    const read_cb = size => {
+        const end = offset >= data.length ? -1 : Math.min(offset + size, data.length);
+        if (end === -1) return { buffer: null, readDataLength: 0, error: false };
+        const chunk = data.subarray(offset, end);
+        offset = end;
+        return { buffer: chunk, readDataLength: chunk.length, error: false };
+    };
 
-        const bps = metadata?.bitsPerSample ?? 16;
-        const scale = 1 / (1 << (bps - 1));
-
-        const converted = channelsBuffer.map(intBuf => {
-            const floatBuf = new Float32Array(intBuf.length);
-            for (let i = 0; i < intBuf.length; i++) {
-                floatBuf[i] = intBuf[i] * scale;
-            }
-            return floatBuf;
+    const write_cb = (chBufs) => {
+        const scale = 1 / (1 << ((metadata?.bitsPerSample ?? 16) - 1));
+        const converted = chBufs.map(buf => {
+            const out = new Float32Array(buf.length);
+            for (let i = 0; i < buf.length; i++) out[i] = buf[i] * scale;
+            return out;
         });
-
         pcmChunks.push(converted);
-        console.log("First few PCM samples of channel 0:", converted[0].slice(0, 10));
     };
 
-    const metadata_callback_fn = (meta) => {
-        console.log("metadata_callback_fn", meta);
-        metadata = meta;
-    };
-
-    const error_callback_fn = (code, msg) => {
-        console.error("FLAC decode error", code, msg);
-    };
+    const meta_cb = m => metadata = m;
+    const err_cb = (c, m) => console.error("FLAC error", c, m);
 
     Flac.FLAC__stream_decoder_set_metadata_respond(decoder);
+    const ok = Flac.init_decoder_stream(decoder, read_cb, write_cb, err_cb, meta_cb);
+    if (ok !== 0) return;
 
-    const status_decoder = Flac.init_decoder_stream(
-        decoder,
-        read_callback_fn,
-        write_callback_fn,
-        error_callback_fn,
-        metadata_callback_fn
-    );
-
-    if (status_decoder !== 0) {
-        console.error("Failed to init FLAC decoder");
-        return;
-    }
-
-    const processSuccess = Flac.FLAC__stream_decoder_process_until_end_of_stream(decoder);
+    Flac.FLAC__stream_decoder_process_until_end_of_stream(decoder);
     Flac.FLAC__stream_decoder_finish(decoder);
     Flac.FLAC__stream_decoder_delete(decoder);
 
-    console.log("pcmChunks.length", pcmChunks.length);
-    console.log("metadata", metadata);
+    const ch = metadata.channels;
+    const rate = metadata.sampleRate;
+    const len = pcmChunks.reduce((sum, c) => sum + c[0].length, 0);
+    const buf = context.createBuffer(ch, len, rate);
 
-    if (!pcmChunks.length || !metadata || !metadata.sampleRate || !metadata.channels) {
-        console.error("No PCM data or metadata", { pcmChunksLength: pcmChunks.length, metadata });
-        return;
-    }
-
-    const channels = metadata.channels;
-    const totalSamples = pcmChunks.reduce((acc, chunk) => acc + chunk[0].length, 0);
-    const buffer = context.createBuffer(channels, totalSamples, metadata.sampleRate);
-
-    for (let ch = 0; ch < channels; ch++) {
-        const chData = buffer.getChannelData(ch);
+    for (let i = 0; i < ch; i++) {
+        const chanData = buf.getChannelData(i);
         let pos = 0;
-        for (const chunk of pcmChunks) {
-            chData.set(chunk[ch], pos);
-            pos += chunk[ch].length;
+        for (const c of pcmChunks) {
+            chanData.set(c[i], pos);
+            pos += c[i].length;
         }
     }
 
-    currentBuffer = buffer;
+    currentBuffer = buf;
     currentSource = context.createBufferSource();
-    currentSource.buffer = buffer;
+    currentSource.buffer = buf;
     currentSource.connect(context.destination);
-
     await context.resume();
-    currentSource.onended = () => console.log("Playback finished");
 
-    const seekOffset = Math.min(seekSeconds, buffer.duration);
-    console.log("Starting playback from", seekOffset, "of", buffer.duration);
-    currentSource.start(0, seekOffset);
+    offsetAtStart = Math.min(seekSeconds, buf.duration);
+    startTime = context.currentTime;
+    currentSource.start(0, offsetAtStart);
 }
 
-// WAV decoding using AudioContext.decodeAudioData
-async function streamWav(fileId, token, seekSeconds = 0) {
-    const context = audioContext;
-
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-        headers: { Authorization: `Bearer ${token}` }
-    });
-
-    const buffer = await response.arrayBuffer();
-    const audioBuffer = await context.decodeAudioData(buffer);
-
-    currentBuffer = audioBuffer;
-    currentSource = context.createBufferSource();
-    currentSource.buffer = audioBuffer;
-    currentSource.connect(context.destination);
-
-    await context.resume();
-    currentSource.onended = () => console.log("WAV Playback finished");
-
-    const offset = Math.min(seekSeconds, audioBuffer.duration);
-    console.log("Starting WAV playback from", offset, "of", audioBuffer.duration);
-    currentSource.start(0, offset);
-}
-
-// Public helper to trigger seeking externally
 window.seekToSecond = (seconds) => {
-    if (!currentBuffer || !audioContext) return;
-
+    if (!audioContext || !currentBuffer) return;
     if (currentSource) currentSource.stop();
 
-    const context = audioContext;
-    currentSource = context.createBufferSource();
+    const ctx = audioContext;
+    currentSource = ctx.createBufferSource();
     currentSource.buffer = currentBuffer;
-    currentSource.connect(context.destination);
-    currentSource.onended = () => console.log("Seeked playback ended");
+    currentSource.connect(ctx.destination);
+    currentSource.onended = () => console.log("Seek end");
 
-    context.resume();
-    const offset = Math.min(seconds, currentBuffer.duration);
-    console.log("Seeking to second", offset);
-    currentSource.start(0, offset);
+    offsetAtStart = Math.min(seconds, currentBuffer.duration);
+    startTime = ctx.currentTime;
+    ctx.resume();
+    currentSource.start(0, offsetAtStart);
 };
 
 window.getCurrentDuration = () => currentBuffer?.duration ?? 0;
+window.getCurrentTime = () => {
+    if (!audioContext || !currentBuffer) return 0;
+    return offsetAtStart + (audioContext.currentTime - startTime);
+};
