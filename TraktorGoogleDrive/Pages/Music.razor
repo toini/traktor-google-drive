@@ -13,41 +13,54 @@ else
 {
     @foreach (var file in files)
     {
-        <div style="margin-bottom: 1rem;">
+        <div style="margin-bottom: 1rem;" @key="file.Id">
             <p>@file.Name</p>
-            <audio @ref="file.AudioRef" controls style="width: 100%;"></audio>
-            <button @onclick="() => Play(file)">Play ▶️</button>
+            <audio controls
+                   style="width: 100%;"
+                   data-seekstart="0"
+                   @ref="file.AudioRef">
+            </audio>
+            <button @onclick="@(() => StreamAudio(file))">▶️ Stream</button>
         </div>
     }
 }
 
 @code {
-    record FileEntry(string Name, string Id)
+    class FileEntry
     {
-        public ElementReference AudioRef;
+        public string Name { get; set; }
+        public string Id { get; set; }
+        public ElementReference AudioRef { get; set; }
     }
 
     List<FileEntry> files;
     string token;
+    HashSet<string> streamed = new();
 
-    async Task Play(FileEntry file)
+    async Task StreamAudio(FileEntry file)
     {
-        await JS.InvokeVoidAsync("setAudioSrc", file.AudioRef, file.Id, token);
-    }
+        if (streamed.Contains(file.Id)) return;
+        streamed.Add(file.Id);
 
+        await Task.Delay(100); // Ensure @ref is populated
+        Console.WriteLine($"Streaming: {file.Id}, ref={file.AudioRef.Id}");
+
+        await JS.InvokeVoidAsync("secureStreamToAudio", file.AudioRef, file.Id, token);
+    }
     protected override async Task OnInitializedAsync()
     {
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
         var result = await Http.GetFromJsonAsync<JsonElement>(
-            $"https://www.googleapis.com/drive/v3/files?q=mimeType='audio/mpeg'&fields=files(id,name)&access_token={token}"
+            $"https://www.googleapis.com/drive/v3/files?q=mimeType contains 'audio/'&fields=files(id,name)&access_token={token}"
         );
 
         files = result.GetProperty("files").EnumerateArray()
-            .Select(f => new FileEntry(
-                f.GetProperty("name").GetString(),
-                f.GetProperty("id").GetString()
-            ))
+            .Select(f => new FileEntry
+                {
+                    Name = f.GetProperty("name").GetString(),
+                    Id = f.GetProperty("id").GetString()
+                })
             .ToList();
     }
 }
