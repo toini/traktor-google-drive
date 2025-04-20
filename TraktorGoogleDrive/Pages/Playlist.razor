@@ -1,0 +1,78 @@
+﻿@page "/playlist/{Uuid}"
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject CollectionService CollectionService
+@using TraktorGoogleDrive.Services
+@using TraktorGoogleDrive.Components
+@using System.Text.Json
+
+<h3>@Name</h3>
+
+@if (files is null)
+{
+    <p>Loading tracks...</p>
+}
+else
+{
+    @foreach (var file in files)
+    {
+        <div style="margin-bottom: 1rem;">
+            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string Uuid { get; set; }
+    private string? Name;
+
+    class FileEntry
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string MimeType { get; set; } = "";
+    }
+
+    List<FileEntry>? files;
+    string? token;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await FetchPlaylistFilesAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await FetchPlaylistFilesAsync();
+    }
+
+    async Task FetchPlaylistFilesAsync()
+    {
+        var playlist = await CollectionService.GetPlaylistByUuidAsync(Uuid);
+        if (playlist is null) return;
+
+        Name = playlist.Name;
+        token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+
+        // Extract unique filenames from track paths
+        var filenames = playlist.Tracks
+            .Select(t => Path.GetFileName(t.Path.Replace("Macintosh HD/:Users/:toni/:Google Drive/", "").Replace(":/", "/")));
+
+        // Construct query to match any of the filenames using OR
+        var nameConditions = string.Join(" or ", filenames.Select(name => $"name = '{name.Replace("'", "\\'")}'"));
+        var query = $"mimeType contains 'audio/' and ({nameConditions})";
+
+        var json = await Http.GetFromJsonAsync<JsonElement>(
+            $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
+        );
+
+        files = json.GetProperty("files").EnumerateArray()
+            .Select(f => new FileEntry
+                {
+                    Id = f.GetProperty("id").GetString()!,
+                    Name = f.GetProperty("name").GetString()!,
+                    MimeType = f.GetProperty("mimeType").GetString()!
+                })
+            .ToList();
+    }
+}

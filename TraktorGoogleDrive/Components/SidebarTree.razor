@@ -1,0 +1,35 @@
+﻿@typeparam TItem
+
+<div style="margin-left:@(Level * 1.2)rem">
+    <div @onclick="Toggle">
+        <b>@Label</b>
+    </div>
+
+    @if (Expanded)
+    {
+        @if (Children?.Any() is true)
+        {
+            @foreach (var child in Children)
+            {
+                <SidebarTree TItem="TItem"
+                             Label="@ItemSelector(child)"
+                             Children="@ChildSelector(child)"
+                             ItemSelector="ItemSelector"
+                             ChildSelector="ChildSelector"
+                             Level="@(Level + 1)" />
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; }
+    [Parameter] public IEnumerable<TItem>? Children { get; set; }
+    [Parameter] public Func<TItem, string> ItemSelector { get; set; }
+    [Parameter] public Func<TItem, IEnumerable<TItem>?> ChildSelector { get; set; }
+    [Parameter] public int Level { get; set; } = 0;
+
+    bool Expanded = true;
+
+    void Toggle() => Expanded = !Expanded;
+}

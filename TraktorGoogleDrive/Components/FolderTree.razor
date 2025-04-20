@@ -1,0 +1,35 @@
+﻿@inject IJSRuntime JS
+@inject HttpClient Http
+@inject CollectionService CollectionService
+@using TraktorGoogleDrive.Services
+@using TraktorNmlParser.Models
+@using System.Text.Json
+
+<div class="folder-tree nav flex-column">
+    @foreach (var folder in Folders)
+    {
+        <div class="nav-item">
+            <details>
+                <summary class="nav-link">@folder.Name</summary>
+                <div class="ps-3">
+                    @foreach (var playlist in folder.Playlists)
+                    {
+                        <NavLink class="nav-link" href="@($"/playlist/{playlist.Uuid}")">🎵 @playlist.Name</NavLink>
+                    }
+                </div>
+            </details>
+        </div>
+    }
+</div>
+
+@code {
+    List<Folder> Folders = [];
+    DriveService? _driveService;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+        var collection = await CollectionService.GetCollectionAsync();
+        Folders = collection.Folders;
+    }
+}

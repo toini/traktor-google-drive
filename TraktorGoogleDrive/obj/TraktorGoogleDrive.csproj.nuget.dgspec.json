@@ -29,7 +29,8 @@
           "C:\\Program Files\\dotnet\\library-packs": {},
           "https://api.nuget.org/v3/index.json": {},
           "https://nuget.pkg.github.com/homevolt/index.json": {},
-          "https://nuget.pkg.github.com/tibber/index.json": {}
+          "https://nuget.pkg.github.com/tibber/index.json": {},
+          "https://nuget.pkg.github.com/toini/index.json": {}
         },
         "frameworks": {
           "net9.0": {
@@ -53,6 +54,14 @@
         "net9.0": {
           "targetAlias": "net9.0",
           "dependencies": {
+            "Google.Apis.Auth": {
+              "target": "Package",
+              "version": "[1.69.0, )"
+            },
+            "Google.Apis.Drive.v3": {
+              "target": "Package",
+              "version": "[1.69.0.3740, )"
+            },
             "Microsoft.AspNetCore.Components.WebAssembly": {
               "target": "Package",
               "version": "[9.0.3, )"
@@ -73,6 +82,10 @@
               "target": "Package",
               "version": "[9.0.4, )",
               "autoReferenced": true
+            },
+            "TraktorNmlParser": {
+              "target": "Package",
+              "version": "[0.0.10, )"
             }
           },
           "imports": [

@@ -1,9 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "CpvnKl5hDPs=",
+  "dgSpecHash": "mZK46XAWuzU=",
   "success": true,
   "projectFilePath": "C:\\Users\\toni\\source\\toini\\traktor-google-drive\\TraktorGoogleDrive\\TraktorGoogleDrive.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\toni\\.nuget\\packages\\google.apis\\1.69.0\\google.apis.1.69.0.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\google.apis.auth\\1.69.0\\google.apis.auth.1.69.0.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\google.apis.core\\1.69.0\\google.apis.core.1.69.0.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\google.apis.drive.v3\\1.69.0.3740\\google.apis.drive.v3.1.69.0.3740.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.aspnetcore.authorization\\9.0.3\\microsoft.aspnetcore.authorization.9.0.3.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.aspnetcore.components\\9.0.3\\microsoft.aspnetcore.components.9.0.3.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.aspnetcore.components.analyzers\\9.0.3\\microsoft.aspnetcore.components.analyzers.9.0.3.nupkg.sha512",
@@ -30,6 +34,10 @@
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.jsinterop.webassembly\\9.0.3\\microsoft.jsinterop.webassembly.9.0.3.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.net.illink.tasks\\9.0.3\\microsoft.net.illink.tasks.9.0.3.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.net.sdk.webassembly.pack\\9.0.4\\microsoft.net.sdk.webassembly.pack.9.0.4.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\newtonsoft.json\\13.0.3\\newtonsoft.json.13.0.3.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\system.codedom\\7.0.0\\system.codedom.7.0.0.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\system.management\\7.0.2\\system.management.7.0.2.nupkg.sha512",
+    "C:\\Users\\toni\\.nuget\\packages\\traktornmlparser\\0.0.10\\traktornmlparser.0.0.10.nupkg.sha512",
     "C:\\Users\\toni\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.4\\microsoft.netcore.app.ref.9.0.4.nupkg.sha512"
   ],
   "logs": []
