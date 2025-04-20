@@ -1,4 +1,4 @@
-﻿// This version detects FLAC and uses a dedicated WASM decoder (libflac.js)
+﻿// This version detects FLAC and WAV and uses dedicated decoding strategies
 // FLAC decoder must be loaded via:
 // <script>
 //   window.FLAC_SCRIPT_LOCATION = "https://cdn.jsdelivr.net/npm/libflacjs@5/dist/";
@@ -12,9 +12,11 @@ window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg") => {
 
     if (mime === "audio/flac") {
         return streamFlac(fileId, token);
+    } else if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav") {
+        return streamWav(fileId, token);
     }
 
-    console.error("Only FLAC is currently supported in secureStreamToAudio");
+    console.error("Only FLAC and WAV are currently supported in secureStreamToAudio");
 };
 
 // FLAC decoding using barebones libflac.js API + AudioContext
@@ -36,9 +38,6 @@ async function streamFlac(fileId, token) {
 
     if (audioContext == null || audioContext.state === "closed") {
         audioContext = new AudioContext();
-        document.body.addEventListener('click', () => {
-            if (audioContext.state !== "running") audioContext.resume();
-        }, { once: true });
     }
     const context = audioContext;
 
@@ -152,6 +151,29 @@ async function streamFlac(fileId, token) {
     console.log("Starting playback", context.currentTime, buffer.duration);
 
     source.start();
+}
 
-    // Optional: hook up your own playback UI and controls using AudioContext time.
+// WAV decoding using AudioContext.decodeAudioData
+async function streamWav(fileId, token) {
+    if (audioContext == null || audioContext.state === "closed") {
+        audioContext = new AudioContext();
+    }
+    const context = audioContext;
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const buffer = await response.arrayBuffer();
+    const audioBuffer = await context.decodeAudioData(buffer);
+
+    const source = context.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(context.destination);
+
+    await context.resume();
+    source.onended = () => console.log("WAV Playback finished");
+    console.log("Starting WAV playback", context.currentTime, audioBuffer.duration);
+
+    source.start();
 }
