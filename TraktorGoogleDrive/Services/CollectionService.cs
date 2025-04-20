@@ -35,42 +35,11 @@ public class CollectionService
         return _collection;
     }
 
-    public async Task<Playlist?> GetPlaylistByUuidAsync(string uuid)
+    public async Task<Playlist?> GetPlaylistByUuid(string uuid)
     {
         var collection = await GetCollectionAsync();
         return collection.Folders.SelectMany(f => f.Playlists).FirstOrDefault(p => p.Uuid == uuid);
     }
-
-    //async Task<string> GetCollectionFileString(string token)
-    //{
-    //    var fileId = await GetCollectionFileId(token);
-    //    if (fileId is null) throw new ApplicationException("Collection file not found");
-
-    //    var result = await _http.GetFromJsonAsync<JsonElement>(
-    //        $"https://www.googleapis.com/drive/v3/files/{fileId}?fields=id,name,mimeType,webContentLink&access_token={token}"
-    //    );
-
-    //    var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
-    //    request.Headers.Authorization = new("Bearer", token);
-
-    //    var response = await _http.SendAsync(request);
-    //    response.EnsureSuccessStatusCode();
-    //    return await response.Content.ReadAsStringAsync();
-    //}
-
-    //async Task<Stream> GetCollectionFile(string token)
-    //{
-    //    var fileId = await GetCollectionFileId(token);
-    //    if (fileId is null) throw new ApplicationException("Collection file not found");
-
-    //    var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
-    //    request.Headers.Authorization = new("Bearer", token);
-
-    //    var response = await _http.SendAsync(request);
-    //    response.EnsureSuccessStatusCode();
-
-    //    return await response.Content.ReadAsStreamAsync();
-    //}
 
     async Task<string?> GetCollectionFileId(string token)
     {

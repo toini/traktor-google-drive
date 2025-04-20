@@ -2,29 +2,59 @@
 @inject HttpClient Http
 @inject IJSRuntime JS
 @inject CollectionService CollectionService
+
 @using TraktorGoogleDrive.Services
 @using TraktorGoogleDrive.Components
+@using TraktorNmlParser.Models
 @using System.Text.Json
 
 <h3>@Name</h3>
 
-@if (files is null)
+@if (tracks is null)
 {
     <p>Loading tracks...</p>
 }
 else
 {
-    @foreach (var file in files)
-    {
-        <div style="margin-bottom: 1rem;">
-            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
-        </div>
-    }
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Artist</th>
+                <th>Release</th>
+                <th>Label</th>
+                <th>Comment</th>
+                <th>Playtime</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var track in tracks)
+            {
+                var filename = Path.GetFileName(track.Path);
+                var file = files.FirstOrDefault(f => f.Name == filename);
+
+                <tr>
+                    <td>@track.Title</td>
+                    <td>@track.Artist</td>
+                    <td>@Path.GetFileName(Path.GetDirectoryName(track.Path))</td>
+                    <td>@track.Label</td>
+                    <td>@track.Comment</td>
+                    <td>@(track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                    <td>
+                        @if (file is not null)
+                        {
+                            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
 }
 
 @code {
     [Parameter] public string Uuid { get; set; }
-    private string? Name;
 
     class FileEntry
     {
@@ -33,46 +63,36 @@ else
         public string MimeType { get; set; } = "";
     }
 
-    List<FileEntry>? files;
+    string? Name;
+    List<Track>? tracks;
+    List<FileEntry> files = [];
     string? token;
-
-    protected override async Task OnInitializedAsync()
-    {
-        await FetchPlaylistFilesAsync();
-    }
 
     protected override async Task OnParametersSetAsync()
     {
-        await FetchPlaylistFilesAsync();
-    }
-
-    async Task FetchPlaylistFilesAsync()
-    {
-        var playlist = await CollectionService.GetPlaylistByUuidAsync(Uuid);
+        var playlist = await CollectionService.GetPlaylistByUuid(Uuid);
         if (playlist is null) return;
 
         Name = playlist.Name;
+        tracks = playlist.Tracks;
+
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
-        // Extract unique filenames from track paths
-        var filenames = playlist.Tracks
-            .Select(t => Path.GetFileName(t.Path.Replace("Macintosh HD/:Users/:toni/:Google Drive/", "").Replace(":/", "/")));
+        // Extract unique filenames
+        var filenames = tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
 
-        // Construct query to match any of the filenames using OR
-        var nameConditions = string.Join(" or ", filenames.Select(name => $"name = '{name.Replace("'", "\\'")}'"));
+        var nameConditions = string.Join(" or ", filenames.Select(f => $"name = '{f.Replace("'", "\\'")}'"));
         var query = $"mimeType contains 'audio/' and ({nameConditions})";
 
         var json = await Http.GetFromJsonAsync<JsonElement>(
             $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
         );
 
-        files = json.GetProperty("files").EnumerateArray()
-            .Select(f => new FileEntry
-                {
-                    Id = f.GetProperty("id").GetString()!,
-                    Name = f.GetProperty("name").GetString()!,
-                    MimeType = f.GetProperty("mimeType").GetString()!
-                })
-            .ToList();
+        files = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
+            {
+                Id = f.GetProperty("id").GetString()!,
+                Name = f.GetProperty("name").GetString()!,
+                MimeType = f.GetProperty("mimeType").GetString()!
+            }).ToList();
     }
 }
