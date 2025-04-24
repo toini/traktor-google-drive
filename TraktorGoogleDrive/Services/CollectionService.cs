@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Diagnostics;
+using System.Net.Http.Json;
 using System.Text.Json;
 
 using Microsoft.JSInterop;
@@ -21,17 +22,25 @@ public class CollectionService
 
     public async Task<Collection> GetCollectionAsync()
     {
+        var watch = Stopwatch.StartNew();
+        Console.WriteLine($"Collection service start load {watch.Elapsed.TotalSeconds}s");
         if (_collection is not null) return _collection;
 
         var token = await _js.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+        Console.WriteLine($"Collection GetCollectionFileId {watch.Elapsed.TotalSeconds}s");
         var fileId = await GetCollectionFileId(token);
+
+        Console.WriteLine($"Collection query collection file by id {watch.Elapsed.TotalSeconds}s");
         var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
         request.Headers.Authorization = new("Bearer", token);
         var response = await _http.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
 
+        Console.WriteLine($"Collection start parsing {watch.Elapsed.TotalSeconds}s");
         var parser = new TraktorNmlParser.NmlParser();
         _collection = parser.Load(content);
+
+        Console.WriteLine($"Collection start parsing done {watch.Elapsed.TotalSeconds}s");
         return _collection;
     }
 

@@ -54,14 +54,6 @@
         "net9.0": {
           "targetAlias": "net9.0",
           "dependencies": {
-            "Google.Apis.Auth": {
-              "target": "Package",
-              "version": "[1.69.0, )"
-            },
-            "Google.Apis.Drive.v3": {
-              "target": "Package",
-              "version": "[1.69.0.3740, )"
-            },
             "Microsoft.AspNetCore.Components.WebAssembly": {
               "target": "Package",
               "version": "[9.0.3, )"

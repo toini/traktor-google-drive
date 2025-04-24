@@ -4,6 +4,7 @@
 @using TraktorGoogleDrive.Services
 @using TraktorNmlParser.Models
 @using System.Text.Json
+@using System.Diagnostics;
 
 <div class="folder-tree nav flex-column">
     @foreach (var folder in Folders)
@@ -24,12 +25,15 @@
 
 @code {
     List<Folder> Folders = [];
-    DriveService? _driveService;
 
     protected override async Task OnInitializedAsync()
     {
+        var watch = Stopwatch.StartNew();
+        Console.WriteLine($"Folder tree start load {watch.Elapsed.TotalSeconds}s");
         var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+        
         var collection = await CollectionService.GetCollectionAsync();
         Folders = collection.Folders;
+        Console.WriteLine($"Folder tree done load {watch.Elapsed.TotalSeconds}s");
     }
 }

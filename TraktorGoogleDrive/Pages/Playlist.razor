@@ -7,6 +7,7 @@
 @using TraktorGoogleDrive.Components
 @using TraktorNmlParser.Models
 @using System.Text.Json
+@using System.Diagnostics;
 
 <h3>@Name</h3>
 
@@ -70,8 +71,10 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
+        var watch = Stopwatch.StartNew();
         var playlist = await CollectionService.GetPlaylistByUuid(Uuid);
         if (playlist is null) return;
+        Console.WriteLine($"Playlist loaded at {watch.Elapsed.TotalSeconds}s");
 
         Name = playlist.Name;
         tracks = playlist.Tracks;
@@ -81,18 +84,20 @@ else
         // Extract unique filenames
         var filenames = tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
 
+        Console.WriteLine($"Start drive query {watch.Elapsed.TotalSeconds}s");
         var nameConditions = string.Join(" or ", filenames.Select(f => $"name = '{f.Replace("'", "\\'")}'"));
         var query = $"mimeType contains 'audio/' and ({nameConditions})";
 
         var json = await Http.GetFromJsonAsync<JsonElement>(
             $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
         );
-
+        Console.WriteLine($"Drive query done {watch.Elapsed.TotalSeconds}s");
         files = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
             {
                 Id = f.GetProperty("id").GetString()!,
                 Name = f.GetProperty("name").GetString()!,
                 MimeType = f.GetProperty("mimeType").GetString()!
             }).ToList();
+        Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
     }
 }
