@@ -1,4 +1,4 @@
-﻿let audioContext = null;
+let audioContext = null;
 let currentSource = null;
 let currentBuffer = null;
 let startTime = 0;
@@ -14,6 +14,9 @@ window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg", seekSeco
         return streamFlac(fileId, token, seekSeconds);
     if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav")
         return streamWav(fileId, token, seekSeconds);
+    if (mime.startsWith("audio/")) {
+        return streamViaBlob(fileId, token, mime);
+    }
 
     console.error("Unsupported mime type", mime);
 };
@@ -118,6 +121,23 @@ async function streamFlac(fileId, token, seekSeconds = 0) {
     offsetAtStart = Math.min(seekSeconds, buf.duration);
     startTime = context.currentTime;
     currentSource.start(0, offsetAtStart);
+}
+
+async function streamViaBlob(fileId, token, mime) {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+
+    const audio = new Audio();
+    audio.src = url;
+    audio.type = mime;
+    audio.controls = true;
+    audio.autoplay = true;
+
+    document.body.appendChild(audio); // or replace existing player
 }
 
 window.seekToSecond = (seconds) => {
