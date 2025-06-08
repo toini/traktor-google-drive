@@ -55,7 +55,7 @@ else
 }
 
 @code {
-    [Parameter] public string Uuid { get; set; }
+    [Parameter] public string? Uuid { get; set; }
 
     class FileEntry
     {
@@ -72,6 +72,7 @@ else
     protected override async Task OnParametersSetAsync()
     {
         var watch = Stopwatch.StartNew();
+        Console.WriteLine($"Loading playlist with UUID: {Uuid}");
         var playlist = await CollectionService.GetPlaylistByUuid(Uuid);
         if (playlist is null) return;
         Console.WriteLine($"Playlist loaded at {watch.Elapsed.TotalSeconds}s");

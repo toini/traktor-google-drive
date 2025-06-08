@@ -14,22 +14,24 @@
 </div>
 
 @code {
-    [Parameter] public string Id { get; set; }
-    [Parameter] public string Name { get; set; }
-    [Parameter] public string MimeType { get; set; }
-    [Parameter] public string Token { get; set; }
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? MimeType { get; set; }
+    [Parameter] public string? Token { get; set; }
 
     double Progress = 0;
-    System.Timers.Timer timer;
+    System.Timers.Timer? timer = null;
 
     async Task Play()
     {
+        Console.WriteLine($"AudioTrack.Play: Id={Id}, Name={Name}, MimeType={MimeType}");
         await JS.InvokeVoidAsync("secureStreamToAudio", Id, Token, MimeType);
         StartTimer();
     }
 
     async Task Pause()
     {
+        Console.WriteLine($"AudioTrack.Pause: Id={Id}");
         await JS.InvokeVoidAsync("seekToSecond", 999999); // crude stop workaround
         timer?.Stop();
     }
@@ -39,6 +41,7 @@
         var percent = e.OffsetX / 300.0;
         var duration = await JS.InvokeAsync<double>("getCurrentDuration");
         var seconds = percent * duration;
+        Console.WriteLine($"AudioTrack.Seek: Id={Id}, SeekTo={seconds}s");
         await JS.InvokeVoidAsync("seekToSecond", seconds);
     }
 
@@ -51,6 +54,7 @@
             var cur = await JS.InvokeAsync<double>("getCurrentTime");
             var dur = await JS.InvokeAsync<double>("getCurrentDuration");
             Progress = dur > 0 ? cur / dur : 0;
+            Console.WriteLine($"AudioTrack.Timer: Id={Id}, Progress={Progress}");
             await InvokeAsync(StateHasChanged);
         };
         timer.Start();
@@ -60,5 +64,6 @@
     {
         timer?.Stop();
         timer?.Dispose();
+        Console.WriteLine($"AudioTrack.Dispose: Id={Id}");
     }
 }

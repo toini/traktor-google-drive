@@ -11,7 +11,7 @@
     {
         await JS.InvokeVoidAsync("googleLogin");
 
-        string token = null;
+        string? token = default;
         var retries = 100;
 
         while (retries-- > 0)

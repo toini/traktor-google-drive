@@ -12,7 +12,7 @@ public class CollectionService
 {
     private readonly HttpClient _http;
     private readonly IJSRuntime _js;
-    private Collection? _collection;
+    private Collection? _collection = null;
 
     public CollectionService(HttpClient http, IJSRuntime js)
     {
@@ -23,24 +23,23 @@ public class CollectionService
     public async Task<Collection> GetCollectionAsync()
     {
         var watch = Stopwatch.StartNew();
-        Console.WriteLine($"Collection service start load {watch.Elapsed.TotalSeconds}s");
-        if (_collection is not null) return _collection;
-
+        Console.WriteLine($"[CollectionService] Start load {watch.Elapsed.TotalSeconds}s");
+        if (_collection is not null) {
+            Console.WriteLine($"[CollectionService] Returning cached collection {watch.Elapsed.TotalSeconds}s");
+            return _collection;
+        }
         var token = await _js.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-        Console.WriteLine($"Collection GetCollectionFileId {watch.Elapsed.TotalSeconds}s");
+        Console.WriteLine($"[CollectionService] Got token {watch.Elapsed.TotalSeconds}s");
         var fileId = await GetCollectionFileId(token);
-
-        Console.WriteLine($"Collection query collection file by id {watch.Elapsed.TotalSeconds}s");
+        Console.WriteLine($"[CollectionService] Got fileId {fileId} {watch.Elapsed.TotalSeconds}s");
         var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
         request.Headers.Authorization = new("Bearer", token);
         var response = await _http.SendAsync(request);
         var content = await response.Content.ReadAsStringAsync();
-
-        Console.WriteLine($"Collection start parsing {watch.Elapsed.TotalSeconds}s");
+        Console.WriteLine($"[CollectionService] Downloaded content {content.Length} bytes {watch.Elapsed.TotalSeconds}s");
         var parser = new TraktorNmlParser.NmlParser();
         _collection = parser.Load(content);
-
-        Console.WriteLine($"Collection start parsing done {watch.Elapsed.TotalSeconds}s");
+        Console.WriteLine($"[CollectionService] Parsed collection {watch.Elapsed.TotalSeconds}s");
         return _collection;
     }
 

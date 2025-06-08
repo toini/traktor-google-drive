@@ -24,9 +24,9 @@ else
 @code {
     class FileEntry
     {
-        public string Name { get; set; }
-        public string Id { get; set; }
-        public string MimeType { get; set; }
+        public string? Name { get; set; }
+        public string? Id { get; set; }
+        public string? MimeType { get; set; }
     }
 
     List<FileEntry> files = new();
@@ -34,5 +34,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Console.WriteLine("Initializing component...");
+        token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+        // Simulate an async operation
+        await Task.Delay(1000);
+        Console.WriteLine($"Component initialized. Token: {token}");
     }
 }

@@ -3,9 +3,10 @@
 ## Deploy
 
 Build image and push
-s
 
 ```bash
+dotnet restore
+
 DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=./.github_token -t traktor-google-drive .
 docker tag traktor-google-drive tonijuvani/traktor-google-drive:$(date +%Y%m%d)
 docker tag traktor-google-drive tonijuvani/traktor-google-drive:latest

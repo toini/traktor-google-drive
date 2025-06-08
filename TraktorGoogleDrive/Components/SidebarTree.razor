@@ -23,10 +23,10 @@
 </div>
 
 @code {
-    [Parameter] public string Label { get; set; }
+    [Parameter] public string Label { get; set; } = null!;
     [Parameter] public IEnumerable<TItem>? Children { get; set; }
-    [Parameter] public Func<TItem, string> ItemSelector { get; set; }
-    [Parameter] public Func<TItem, IEnumerable<TItem>?> ChildSelector { get; set; }
+    [Parameter] public Func<TItem, string> ItemSelector { get; set; } = null!;
+    [Parameter] public Func<TItem, IEnumerable<TItem>?> ChildSelector { get; set; } = null!;
     [Parameter] public int Level { get; set; } = 0;
 
     bool Expanded = true;
