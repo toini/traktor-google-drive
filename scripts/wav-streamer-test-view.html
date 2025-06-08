@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WAV Chunk Streamer with WaveSurfer</title>
+  <script src="https://unpkg.com/wavesurfer.js@7"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+    #waveform { height: 120px; background: #f3f3f3; border: 1px solid #ccc; }
+    button { margin: 10px 5px; padding: 8px 12px; }
+    input[type="number"] { width: 80px; }
+  </style>
+</head>
+<body>
+  <h2>WAV Chunk Streamer from Google Drive</h2>
+  <div id="waveform"></div>
+
+  <div>
+    <button onclick="wavesurfer.playPause()">Play / Pause</button>
+    <button onclick="wavesurfer.stop()">Stop</button>
+    <input id="seekInput" type="number" value="0" min="0" step="1" />
+    <button onclick="loadChunk()">Load Chunk</button>
+  </div>
+
+<script>
+const token = ``;
+const fileId = `1uR4S_XEN_p6PsqDKT3K0OT3bwS484w_4`;
+
+const context = new AudioContext();
+let wavesurfer = WaveSurfer.create({
+  container: '#waveform',
+  waveColor: '#6ab04c',
+  progressColor: '#130f40',
+  height: 120,
+});
+let currentBlobUrl = null;
+
+async function loadChunk() {
+  const seekSeconds = parseFloat(document.getElementById("seekInput").value || "0");
+  const secondsToLoad = 5;
+
+  console.log(`[🔁] Starting chunk load from ${seekSeconds}s`);
+
+  // Step 1: Fetch WAV header
+  const headerRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Range: 'bytes=0-99'
+    }
+  });
+  const headerBuf = await headerRes.arrayBuffer();
+  const view = new DataView(headerBuf);
+  const sampleRate = view.getUint32(24, true);
+  const byteRate = view.getUint32(28, true);
+  const numChannels = view.getUint16(22, true);
+  const bitsPerSample = view.getUint16(34, true);
+
+  console.log(`[ℹ️] Header: sampleRate=${sampleRate}, byteRate=${byteRate}, channels=${numChannels}, bits=${bitsPerSample}`);
+
+  // Step 2: Fetch WAV chunk
+  const offset = 44 + Math.floor(seekSeconds * byteRate);
+  const chunkLength = Math.floor(secondsToLoad * byteRate);
+  const rangeEnd = offset + chunkLength - 1;
+
+  console.log(`[📡] Requesting bytes=${offset}-${rangeEnd}`);
+
+  const chunkRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Range: `bytes=${offset}-${rangeEnd}`
+    }
+  });
+  const chunkArrayBuffer = await chunkRes.arrayBuffer();
+  const chunk = new Uint8Array(chunkArrayBuffer);
+
+  console.log(`[✅] Received ${chunk.length} bytes from Google Drive`);
+
+  // Step 3: Build WAV and load
+  const wavData = buildWav(chunk, sampleRate, numChannels, bitsPerSample);
+  console.log(`[🎧] Total WAV size sent to WaveSurfer: ${wavData.length} bytes`);
+
+  const blob = new Blob([wavData], { type: "audio/wav" });
+  if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+  currentBlobUrl = URL.createObjectURL(blob);
+
+  wavesurfer.load(currentBlobUrl);
+}
+
+function buildWav(samples, sampleRate, channels, bitsPerSample) {
+  const byteRate = sampleRate * channels * bitsPerSample / 8;
+  const blockAlign = channels * bitsPerSample / 8;
+  const dataSize = samples.length;
+  const totalSize = 44 + dataSize;
+
+  const buffer = new ArrayBuffer(totalSize);
+  const view = new DataView(buffer);
+
+  const writeStr = (i, s) => [...s].forEach((c, j) => view.setUint8(i + j, c.charCodeAt(0)));
+  writeStr(0, 'RIFF');
+  view.setUint32(4, totalSize - 8, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  new Uint8Array(buffer).set(samples, 44);
+  return new Uint8Array(buffer);
+}
+</script>
+</body>
+</html>

@@ -12,12 +12,18 @@ window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg", seekSeco
         audioEl.remove();
         audioEl = null;
     }
+    console.log("Start streaming for file id", fileId, mime);
+    console.log("Seek to", seekSeconds, currentSource);
+
     if (currentSource) currentSource.stop();
 
     // Prefer browser <audio> for all "normal" types except flac/wav
     if (mime === "audio/flac") return streamFlac(fileId, token, seekSeconds);
+
+    // Try wav with <audio>
     if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav")
         return streamWav(fileId, token, seekSeconds);
+        //return streamViaBlob(fileId, token, mime, seekSeconds);
 
     // Default: use Blob+audio for seeking & browser-native support
     if (mime.startsWith("audio/")) return streamViaBlob(fileId, token, mime, seekSeconds);
@@ -68,6 +74,7 @@ async function streamFlac(fileId, token, seekSeconds = 0) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(...value);
+        console.log(`Read ${value.length} bytes, total: ${chunks.length}`);
     }
     const data = new Uint8Array(chunks);
     let offset = 0;
@@ -76,12 +83,21 @@ async function streamFlac(fileId, token, seekSeconds = 0) {
     const pcmChunks = [];
     let metadata = null;
 
+    let flacReadCbCount = 0;
     const read_cb = size => {
-        const end = offset >= data.length ? -1 : Math.min(offset + size, data.length);
-        if (end === -1) return { buffer: null, readDataLength: 0, error: false };
+        flacReadCbCount++;
+        if (flacReadCbCount > 10000) {
+            console.error("FLAC read_cb called too many times, aborting to prevent stack overflow");
+            return { buffer: null, readDataLength: 0, error: true };
+        }
+        if (size <= 0) return { buffer: null, readDataLength: 0, error: false };
+        if (offset >= data.length)
+            return { buffer: null, readDataLength: 0, error: true }; // Proper end!
+        const end = Math.min(offset + size, data.length);
         const chunk = data.subarray(offset, end);
+        const readLen = end - offset;
         offset = end;
-        return { buffer: chunk, readDataLength: chunk.length, error: false };
+        return { buffer: chunk, readDataLength: readLen, error: false };
     };
 
     const write_cb = (chBufs) => {
@@ -135,7 +151,9 @@ async function streamWav(fileId, token, seekSeconds = 0) {
     const context = audioContext || new AudioContext();
     audioContext = context;
 
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    var url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    console.log("Start streaming for url", url);
+    const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` }
     });
     const buf = await res.arrayBuffer();
@@ -158,6 +176,7 @@ window.seekToSecond = (seconds) => {
     // Prefer <audio> seeking if available (handles big files, mp3, ogg, etc)
     if (audioEl) {
         audioEl.currentTime = seconds;
+        console.log(`Seeking to ${seconds} seconds`);
         return;
     }
     // Fallback for wav/flac
