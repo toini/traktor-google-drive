@@ -3,55 +3,62 @@ let currentSource = null;
 let currentBuffer = null;
 let startTime = 0;
 let offsetAtStart = 0;
+let audioEl = null;
 
 window.secureStreamToAudio = async (fileId, token, mime = "audio/mpeg", seekSeconds = 0) => {
-    if (!audioContext || audioContext.state === "closed")
-        audioContext = new AudioContext();
-    if (currentSource)
-        currentSource.stop();
+    if (audioEl) {
+        audioEl.pause();
+        URL.revokeObjectURL(audioEl.src);
+        audioEl.remove();
+        audioEl = null;
+    }
+    if (currentSource) currentSource.stop();
 
-    if (mime === "audio/flac")
-        return streamFlac(fileId, token, seekSeconds);
+    // Prefer browser <audio> for all "normal" types except flac/wav
+    if (mime === "audio/flac") return streamFlac(fileId, token, seekSeconds);
     if (mime === "audio/wav" || mime === "audio/wave" || mime === "audio/x-wav")
         return streamWav(fileId, token, seekSeconds);
-    if (mime.startsWith("audio/")) {
-        return streamViaBlob(fileId, token, mime);
-    }
+
+    // Default: use Blob+audio for seeking & browser-native support
+    if (mime.startsWith("audio/")) return streamViaBlob(fileId, token, mime, seekSeconds);
 
     console.error("Unsupported mime type", mime);
 };
 
-async function streamWav(fileId, token, seekSeconds = 0) {
-    const context = audioContext;
+async function streamViaBlob(fileId, token, mime, seekSeconds = 0) {
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${token}` }
     });
-    const buf = await res.arrayBuffer();
-    const decoded = await context.decodeAudioData(buf);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
 
-    currentBuffer = decoded;
-    currentSource = context.createBufferSource();
-    currentSource.buffer = decoded;
-    currentSource.connect(context.destination);
-    await context.resume();
+    audioEl = new Audio();
+    audioEl.src = url;
+    audioEl.type = mime;
+    audioEl.controls = true;
+    audioEl.autoplay = true;
 
-    offsetAtStart = Math.min(seekSeconds, decoded.duration);
-    startTime = context.currentTime;
-    currentSource.start(0, offsetAtStart);
+    // Seek after metadata is loaded
+    audioEl.addEventListener("loadedmetadata", () => {
+        if (seekSeconds > 0 && audioEl.duration) audioEl.currentTime = seekSeconds;
+    });
+
+    document.body.appendChild(audioEl);
 }
 
+// FLAC: see previous thread (requires libflac.js loaded!)
 async function streamFlac(fileId, token, seekSeconds = 0) {
     if (typeof Flac === 'undefined') {
         console.error("libflac.js not loaded");
         return;
     }
-
     await new Promise(resolve => {
         if (Flac.isReady()) resolve();
         else Flac.on('ready', resolve);
     });
 
-    const context = audioContext;
+    const context = audioContext || new AudioContext();
+    audioContext = context;
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${token}` }
     });
@@ -123,24 +130,37 @@ async function streamFlac(fileId, token, seekSeconds = 0) {
     currentSource.start(0, offsetAtStart);
 }
 
-async function streamViaBlob(fileId, token, mime) {
+// WAV: decode fully for seeking/sample accuracy
+async function streamWav(fileId, token, seekSeconds = 0) {
+    const context = audioContext || new AudioContext();
+    audioContext = context;
+
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { Authorization: `Bearer ${token}` }
     });
+    const buf = await res.arrayBuffer();
+    const decoded = await context.decodeAudioData(buf);
 
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    currentBuffer = decoded;
+    currentSource = context.createBufferSource();
+    currentSource.buffer = decoded;
+    currentSource.connect(context.destination);
+    await context.resume();
 
-    const audio = new Audio();
-    audio.src = url;
-    audio.type = mime;
-    audio.controls = true;
-    audio.autoplay = true;
-
-    document.body.appendChild(audio); // or replace existing player
+    offsetAtStart = Math.min(seekSeconds, decoded.duration);
+    startTime = context.currentTime;
+    currentSource.start(0, offsetAtStart);
 }
 
+// --- Seeking ---
+
 window.seekToSecond = (seconds) => {
+    // Prefer <audio> seeking if available (handles big files, mp3, ogg, etc)
+    if (audioEl) {
+        audioEl.currentTime = seconds;
+        return;
+    }
+    // Fallback for wav/flac
     if (!audioContext || !currentBuffer) return;
     if (currentSource) currentSource.stop();
 
@@ -149,15 +169,27 @@ window.seekToSecond = (seconds) => {
     currentSource.buffer = currentBuffer;
     currentSource.connect(ctx.destination);
     currentSource.onended = () => console.log("Seek end");
-
     offsetAtStart = Math.min(seconds, currentBuffer.duration);
     startTime = ctx.currentTime;
     ctx.resume();
     currentSource.start(0, offsetAtStart);
 };
 
-window.getCurrentDuration = () => currentBuffer?.duration ?? 0;
+window.getCurrentDuration = () => {
+    if (audioEl) return audioEl.duration ?? 0;
+    return currentBuffer?.duration ?? 0;
+};
+
 window.getCurrentTime = () => {
+    if (audioEl) return audioEl.currentTime ?? 0;
     if (!audioContext || !currentBuffer) return 0;
     return offsetAtStart + (audioContext.currentTime - startTime);
+};
+
+window.pauseCurrentAudio = () => {
+    if (window.audioEl) {
+        window.audioEl.pause();
+        return;
+    }
+    if (window.currentSource) window.currentSource.stop();
 };
