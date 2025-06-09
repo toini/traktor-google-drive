@@ -144,7 +144,7 @@ const formatTime = (seconds) => {
 };
 const timeEl = document.getElementById('time');
 const durationEl = document.getElementById('duration');
-wavesurfer.on('decode', dur => durationEl.textContent = formatTime(dur));
+wavesurfer.on('decode', dur => durationEl.textContent = formatTime(secondsToLoad));
 wavesurfer.on('timeupdate', cur => timeEl.textContent = formatTime(cur));
 
 document.getElementById('playBtn').addEventListener('click', async () => {
@@ -173,8 +173,21 @@ document.getElementById('playBtn').addEventListener('click', async () => {
     console.log(`✅ Chunk loaded: ${(chunk.length / (1024 * 1024)).toFixed(2)} MB`);
 
     const wav = buildWav(chunk);
-    const audioBuffer = await wavesurfer.audioContext.decodeAudioData(wav.buffer);
-    wavesurfer.loadDecodedBuffer(audioBuffer, { duration: totalDuration, startPosition: seekSeconds });
+    const blob = new Blob([wav], { type: 'audio/wav' });
+    wavesurfer.loadBlob(blob);
+    wavesurfer.once('ready', () => wavesurfer.play(0));
+
+    // Update waveform dimensions
+    canvas.width = waveform.clientWidth;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(wavesurfer.drawer.canvas, 0, 0, canvas.width, canvas.height);
+
+    // Set hover width to zero initially
+    hover.style.width = '0';
+    hover.style.opacity = '0';
+
+    console.log('✅ Audio chunk decoded and ready to play');
+
   } catch (err) {
     console.error('❌ Error fetching or decoding chunk:', err);
     alert('Something went wrong while streaming the audio. See console for details.');
