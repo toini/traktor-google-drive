@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug .NET Web App",
+      "type": "blazorwasm",
+      "request": "launch",
+      "project": "${workspaceFolder}/TraktorGoogleDrive/TraktorGoogleDrive.csproj",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "stopAtEntry": false
+    }
+  ]
+}

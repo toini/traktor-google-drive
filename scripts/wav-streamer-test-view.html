@@ -2,104 +2,199 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WAV Chunk Streamer with WaveSurfer</title>
+  <title>WAV Player - SoundCloud Style</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://unpkg.com/wavesurfer.js@7"></script>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-    #waveform { height: 120px; background: #f3f3f3; border: 1px solid #ccc; }
-    button { margin: 10px 5px; padding: 8px 12px; }
-    input[type="number"] { width: 80px; }
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 900px;
+      margin: auto;
+    }
+    #waveform {
+      position: relative;
+      height: 120px;
+      background: #f3f3f3;
+      border: 1px solid #ccc;
+      cursor: pointer;
+    }
+    #hover {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: 10;
+      pointer-events: none;
+      height: 100%;
+      width: 0;
+      mix-blend-mode: overlay;
+      background: rgba(255, 255, 255, 0.5);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    #waveform:hover #hover {
+      opacity: 1;
+    }
+    #time, #duration {
+      position: absolute;
+      z-index: 11;
+      top: 50%;
+      margin-top: -1px;
+      transform: translateY(-50%);
+      font-size: 11px;
+      background: rgba(0, 0, 0, 0.75);
+      padding: 2px;
+      color: #ddd;
+    }
+    #time { left: 0; }
+    #duration { right: 0; }
+    .controls { margin-top: 20px; }
+    button { padding: 8px 12px; margin-right: 10px; }
+    #loginBtn { display: none; margin-bottom: 1em; }
   </style>
 </head>
 <body>
-  <h2>WAV Chunk Streamer from Google Drive</h2>
-  <div id="waveform"></div>
-
-  <div>
-    <button onclick="wavesurfer.playPause()">Play / Pause</button>
-    <button onclick="wavesurfer.stop()">Stop</button>
+  <h2>SoundCloud-style Chunked WAV Player</h2>
+  <button id="loginBtn">Login with Google</button>
+  <div id="waveform">
+    <div id="time">0:00</div>
+    <div id="duration">0:00</div>
+    <div id="hover"></div>
+  </div>
+  <div class="controls">
     <input id="seekInput" type="number" value="0" min="0" step="1" />
-    <button onclick="loadChunk()">Load Chunk</button>
+    <button id="playBtn">Play from Second</button>
   </div>
 
 <script>
-const token = ``;
-const fileId = `1uR4S_XEN_p6PsqDKT3K0OT3bwS484w_4`;
+const fileId = `16dVOEEC_tTfUukFZYehUzkBErUWB04h6`;
+const secondsToLoad = 10;
+let sampleRate = 44100, byteRate = 176400, totalDuration = 300;
 
-const context = new AudioContext();
-let wavesurfer = WaveSurfer.create({
+let token = sessionStorage.getItem("access_token") ?? null;
+
+window.googleLogin = () => {
+  if (!window.tokenClient) {
+    window.tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: '219145501841-n6pki0jbvkue0u3vusmnguld6m4fugp9.apps.googleusercontent.com',
+      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: (tokenResponse) => {
+        if (tokenResponse && tokenResponse.access_token) {
+          sessionStorage.setItem('access_token', tokenResponse.access_token);
+          token = tokenResponse.access_token;
+          document.getElementById("loginBtn").style.display = "none";
+          console.log('✅ Access token acquired');
+        } else {
+          console.error('Token response invalid:', tokenResponse);
+        }
+      }
+    });
+  }
+  window.tokenClient.requestAccessToken();
+};
+
+if (!token) {
+  document.getElementById("loginBtn").style.display = "inline-block";
+  document.getElementById("loginBtn").addEventListener("click", googleLogin);
+} else {
+  document.getElementById("loginBtn").style.display = "none";
+}
+
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+canvas.height = 120;
+
+const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 1.35);
+gradient.addColorStop(0, '#656666');
+gradient.addColorStop(0.7, '#656666');
+gradient.addColorStop(0.701, '#ffffff');
+gradient.addColorStop(0.702, '#ffffff');
+gradient.addColorStop(0.703, '#B1B1B1');
+gradient.addColorStop(1, '#B1B1B1');
+
+const progressGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 1.35);
+progressGradient.addColorStop(0, '#EE772F');
+progressGradient.addColorStop(0.7, '#EB4926');
+progressGradient.addColorStop(0.701, '#ffffff');
+progressGradient.addColorStop(0.702, '#ffffff');
+progressGradient.addColorStop(0.703, '#F6B094');
+progressGradient.addColorStop(1, '#F6B094');
+
+const wavesurfer = WaveSurfer.create({
   container: '#waveform',
-  waveColor: '#6ab04c',
-  progressColor: '#130f40',
-  height: 120,
+  waveColor: gradient,
+  progressColor: progressGradient,
+  barWidth: 2,
+  interact: false
 });
 let currentBlobUrl = null;
 
-async function loadChunk() {
-  const seekSeconds = parseFloat(document.getElementById("seekInput").value || "0");
-  const secondsToLoad = 5;
+wavesurfer.on('interaction', () => wavesurfer.playPause());
 
-  console.log(`[🔁] Starting chunk load from ${seekSeconds}s`);
+const hover = document.querySelector('#hover');
+const waveform = document.querySelector('#waveform');
+waveform.addEventListener('pointermove', (e) => {
+  hover.style.width = `${e.offsetX}px`
+});
 
-  // Step 1: Fetch WAV header
-  const headerRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Range: 'bytes=0-99'
-    }
-  });
-  const headerBuf = await headerRes.arrayBuffer();
-  const view = new DataView(headerBuf);
-  const sampleRate = view.getUint32(24, true);
-  const byteRate = view.getUint32(28, true);
-  const numChannels = view.getUint16(22, true);
-  const bitsPerSample = view.getUint16(34, true);
+const formatTime = (seconds) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
+const timeEl = document.getElementById('time');
+const durationEl = document.getElementById('duration');
+wavesurfer.on('decode', dur => durationEl.textContent = formatTime(dur));
+wavesurfer.on('timeupdate', cur => timeEl.textContent = formatTime(cur));
 
-  console.log(`[ℹ️] Header: sampleRate=${sampleRate}, byteRate=${byteRate}, channels=${numChannels}, bits=${bitsPerSample}`);
-
-  // Step 2: Fetch WAV chunk
+document.getElementById('playBtn').addEventListener('click', async () => {
+  const seekSeconds = parseFloat(document.getElementById('seekInput').value || '0');
   const offset = 44 + Math.floor(seekSeconds * byteRate);
-  const chunkLength = Math.floor(secondsToLoad * byteRate);
-  const rangeEnd = offset + chunkLength - 1;
+  const length = Math.floor(secondsToLoad * byteRate);
+  const rangeEnd = offset + length - 1;
 
-  console.log(`[📡] Requesting bytes=${offset}-${rangeEnd}`);
+  console.log(`📦 Fetching chunk: bytes=${offset}-${rangeEnd} (${(length / (1024 * 1024)).toFixed(2)} MB)`);
 
-  const chunkRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Range: `bytes=${offset}-${rangeEnd}`
+  try {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Range: `bytes=${offset}-${rangeEnd}`
+      }
+    });
+
+    if (!res.ok) {
+      console.error(`❌ Chunk fetch failed: ${res.status} ${res.statusText}`);
+      alert(`Authentication failed (HTTP ${res.status}). Please check your token.`);
+      return;
     }
-  });
-  const chunkArrayBuffer = await chunkRes.arrayBuffer();
-  const chunk = new Uint8Array(chunkArrayBuffer);
 
-  console.log(`[✅] Received ${chunk.length} bytes from Google Drive`);
+    const chunk = new Uint8Array(await res.arrayBuffer());
+    console.log(`✅ Chunk loaded: ${(chunk.length / (1024 * 1024)).toFixed(2)} MB`);
 
-  // Step 3: Build WAV and load
-  const wavData = buildWav(chunk, sampleRate, numChannels, bitsPerSample);
-  console.log(`[🎧] Total WAV size sent to WaveSurfer: ${wavData.length} bytes`);
+    const wav = buildWav(chunk);
+    const audioBuffer = await wavesurfer.audioContext.decodeAudioData(wav.buffer);
+    wavesurfer.loadDecodedBuffer(audioBuffer, { duration: totalDuration, startPosition: seekSeconds });
+  } catch (err) {
+    console.error('❌ Error fetching or decoding chunk:', err);
+    alert('Something went wrong while streaming the audio. See console for details.');
+  }
+});
 
-  const blob = new Blob([wavData], { type: "audio/wav" });
-  if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
-  currentBlobUrl = URL.createObjectURL(blob);
-
-  wavesurfer.load(currentBlobUrl);
-}
-
-function buildWav(samples, sampleRate, channels, bitsPerSample) {
-  const byteRate = sampleRate * channels * bitsPerSample / 8;
+function buildWav(samples) {
+  const channels = 2;
+  const bitsPerSample = 16;
   const blockAlign = channels * bitsPerSample / 8;
+  const byteRate = sampleRate * blockAlign;
   const dataSize = samples.length;
-  const totalSize = 44 + dataSize;
-
-  const buffer = new ArrayBuffer(totalSize);
+  const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
+  const write = (i, s) => [...s].forEach((c, j) => view.setUint8(i + j, c.charCodeAt(0)));
 
-  const writeStr = (i, s) => [...s].forEach((c, j) => view.setUint8(i + j, c.charCodeAt(0)));
-  writeStr(0, 'RIFF');
-  view.setUint32(4, totalSize - 8, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
+  write(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, 'WAVE');
+  write(12, 'fmt ');
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true);
   view.setUint16(22, channels, true);
@@ -107,7 +202,7 @@ function buildWav(samples, sampleRate, channels, bitsPerSample) {
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitsPerSample, true);
-  writeStr(36, 'data');
+  write(36, 'data');
   view.setUint32(40, dataSize, true);
 
   new Uint8Array(buffer).set(samples, 44);
