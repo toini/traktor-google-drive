@@ -22,6 +22,7 @@
         ],
         "sources": {
           "https://api.nuget.org/v3/index.json": {},
+          "https://nuget.pkg.github.com/toini/index.json": {},
           "https://nuget.pkg.github.com/toini/index.json": {}
         },
         "frameworks": {
@@ -48,12 +49,12 @@
           "dependencies": {
             "Microsoft.AspNetCore.Components.WebAssembly": {
               "target": "Package",
-              "version": "[9.0.3, )"
+              "version": "[9.0.5, )"
             },
             "Microsoft.AspNetCore.Components.WebAssembly.DevServer": {
               "suppressParent": "All",
               "target": "Package",
-              "version": "[9.0.3, )"
+              "version": "[9.0.5, )"
             },
             "Microsoft.NET.ILLink.Tasks": {
               "suppressParent": "All",
@@ -69,7 +70,7 @@
             },
             "TraktorNmlParser": {
               "target": "Package",
-              "version": "[0.0.10, )"
+              "version": "[0.0.11, )"
             }
           },
           "imports": [
