@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <title>WAV Player - SoundCloud Style</title>
@@ -12,6 +13,7 @@
       max-width: 900px;
       margin: auto;
     }
+
     #waveform {
       position: relative;
       height: 120px;
@@ -19,6 +21,7 @@
       border: 1px solid #ccc;
       cursor: pointer;
     }
+
     #hover {
       position: absolute;
       left: 0;
@@ -32,10 +35,13 @@
       opacity: 0;
       transition: opacity 0.2s ease;
     }
+
     #waveform:hover #hover {
       opacity: 1;
     }
-    #time, #duration {
+
+    #time,
+    #duration {
       position: absolute;
       z-index: 11;
       top: 50%;
@@ -46,13 +52,22 @@
       padding: 2px;
       color: #ddd;
     }
-    #time { left: 0; }
-    #duration { right: 0; }
-    .controls { margin-top: 20px; }
-    button { padding: 8px 12px; margin-right: 10px; }
-    #loginBtn { display: none; margin-bottom: 1em; }
+
+    #time {
+      left: 0;
+    }
+
+    #duration {
+      right: 0;
+    }
+
+    #loginBtn {
+      display: none;
+      margin-bottom: 1em;
+    }
   </style>
 </head>
+
 <body>
   <h2>SoundCloud-style Chunked WAV Player</h2>
   <button id="loginBtn">Login with Google</button>
@@ -61,166 +76,141 @@
     <div id="duration">0:00</div>
     <div id="hover"></div>
   </div>
-  <div class="controls">
-    <input id="seekInput" type="number" value="0" min="0" step="1" />
-    <button id="playBtn">Play from Second</button>
-  </div>
 
-<script>
-const fileId = `16dVOEEC_tTfUukFZYehUzkBErUWB04h6`;
-const secondsToLoad = 10;
-let sampleRate = 44100, byteRate = 176400, totalDuration = 300;
+  <script>
+    const fileId = `16dVOEEC_tTfUukFZYehUzkBErUWB04h6`;
+    const totalDuration = 7200; // known from metadata (NML)
+    const byteRate = 176400;
+    const chunkSeconds = 10;
+    const sampleRate = 44100;
+    let token = sessionStorage.getItem("access_token") ?? null;
 
-let token = sessionStorage.getItem("access_token") ?? null;
+    let audioCtx = null;
+    let sourceNode = null;
 
-window.googleLogin = () => {
-  if (!window.tokenClient) {
-    window.tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: '219145501841-n6pki0jbvkue0u3vusmnguld6m4fugp9.apps.googleusercontent.com',
-      scope: 'https://www.googleapis.com/auth/drive.readonly',
-      callback: (tokenResponse) => {
-        if (tokenResponse && tokenResponse.access_token) {
-          sessionStorage.setItem('access_token', tokenResponse.access_token);
-          token = tokenResponse.access_token;
-          document.getElementById("loginBtn").style.display = "none";
-          console.log('✅ Access token acquired');
-        } else {
-          console.error('Token response invalid:', tokenResponse);
-        }
+    window.googleLogin = () => {
+      if (!window.tokenClient) {
+        window.tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: '219145501841-n6pki0jbvkue0u3vusmnguld6m4fugp9.apps.googleusercontent.com',
+          scope: 'https://www.googleapis.com/auth/drive.readonly',
+          callback: (res) => {
+            if (res?.access_token) {
+              sessionStorage.setItem('access_token', res.access_token);
+              location.reload();
+            }
+          }
+        });
       }
-    });
-  }
-  window.tokenClient.requestAccessToken();
-};
+      window.tokenClient.requestAccessToken();
+    };
 
-if (!token) {
-  document.getElementById("loginBtn").style.display = "inline-block";
-  document.getElementById("loginBtn").addEventListener("click", googleLogin);
-} else {
-  document.getElementById("loginBtn").style.display = "none";
-}
-
-const canvas = document.createElement('canvas');
-const ctx = canvas.getContext('2d');
-canvas.height = 120;
-
-const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 1.35);
-gradient.addColorStop(0, '#656666');
-gradient.addColorStop(0.7, '#656666');
-gradient.addColorStop(0.701, '#ffffff');
-gradient.addColorStop(0.702, '#ffffff');
-gradient.addColorStop(0.703, '#B1B1B1');
-gradient.addColorStop(1, '#B1B1B1');
-
-const progressGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 1.35);
-progressGradient.addColorStop(0, '#EE772F');
-progressGradient.addColorStop(0.7, '#EB4926');
-progressGradient.addColorStop(0.701, '#ffffff');
-progressGradient.addColorStop(0.702, '#ffffff');
-progressGradient.addColorStop(0.703, '#F6B094');
-progressGradient.addColorStop(1, '#F6B094');
-
-const wavesurfer = WaveSurfer.create({
-  container: '#waveform',
-  waveColor: gradient,
-  progressColor: progressGradient,
-  barWidth: 2,
-  interact: false
-});
-let currentBlobUrl = null;
-
-wavesurfer.on('interaction', () => wavesurfer.playPause());
-
-const hover = document.querySelector('#hover');
-const waveform = document.querySelector('#waveform');
-waveform.addEventListener('pointermove', (e) => {
-  hover.style.width = `${e.offsetX}px`
-});
-
-const formatTime = (seconds) => {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-};
-const timeEl = document.getElementById('time');
-const durationEl = document.getElementById('duration');
-wavesurfer.on('decode', dur => durationEl.textContent = formatTime(secondsToLoad));
-wavesurfer.on('timeupdate', cur => timeEl.textContent = formatTime(cur));
-
-document.getElementById('playBtn').addEventListener('click', async () => {
-  const seekSeconds = parseFloat(document.getElementById('seekInput').value || '0');
-  const offset = 44 + Math.floor(seekSeconds * byteRate);
-  const length = Math.floor(secondsToLoad * byteRate);
-  const rangeEnd = offset + length - 1;
-
-  console.log(`📦 Fetching chunk: bytes=${offset}-${rangeEnd} (${(length / (1024 * 1024)).toFixed(2)} MB)`);
-
-  try {
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Range: `bytes=${offset}-${rangeEnd}`
-      }
-    });
-
-    if (!res.ok) {
-      console.error(`❌ Chunk fetch failed: ${res.status} ${res.statusText}`);
-      alert(`Authentication failed (HTTP ${res.status}). Please check your token.`);
-      return;
+    if (!token) {
+      document.getElementById("loginBtn").style.display = "inline-block";
+      document.getElementById("loginBtn").addEventListener("click", googleLogin);
+    } else {
+      document.getElementById("loginBtn").style.display = "none";
+      loadChunk(0);
     }
 
-    const chunk = new Uint8Array(await res.arrayBuffer());
-    console.log(`✅ Chunk loaded: ${(chunk.length / (1024 * 1024)).toFixed(2)} MB`);
+    const formatTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    const timeEl = document.getElementById('time');
+    const durationEl = document.getElementById('duration');
+    durationEl.textContent = formatTime(totalDuration);
 
-    const wav = buildWav(chunk);
-    const blob = new Blob([wav], { type: 'audio/wav' });
-    wavesurfer.loadBlob(blob);
-    wavesurfer.once('ready', () => wavesurfer.play(0));
+    const hover = document.getElementById('hover');
+    document.getElementById('waveform').addEventListener('pointermove', e => {
+      hover.style.width = `${e.offsetX}px`;
+    });
 
-    // Update waveform dimensions
-    canvas.width = waveform.clientWidth;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(wavesurfer.drawer.canvas, 0, 0, canvas.width, canvas.height);
+    const longTrack = totalDuration >= 1200;
 
-    // Set hover width to zero initially
-    hover.style.width = '0';
-    hover.style.opacity = '0';
+    const wavesurfer = !longTrack ? WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#888',
+      progressColor: '#FF5500',
+      barWidth: 2,
+      interact: true,
+    }) : null;
 
-    console.log('✅ Audio chunk decoded and ready to play');
+    if (wavesurfer) {
+      wavesurfer.on('timeupdate', t => timeEl.textContent = formatTime(t));
+      wavesurfer.on('interaction', () => wavesurfer.playPause());
+    }
 
-  } catch (err) {
-    console.error('❌ Error fetching or decoding chunk:', err);
-    alert('Something went wrong while streaming the audio. See console for details.');
-  }
-});
+    async function loadChunk(seekSeconds) {
+      const offset = 44 + Math.floor(seekSeconds * byteRate);
+      const length = chunkSeconds * byteRate;
+      const rangeEnd = offset + length - 1;
 
-function buildWav(samples) {
-  const channels = 2;
-  const bitsPerSample = 16;
-  const blockAlign = channels * bitsPerSample / 8;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = samples.length;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-  const write = (i, s) => [...s].forEach((c, j) => view.setUint8(i + j, c.charCodeAt(0)));
+      console.log(`📦 Fetching chunk: bytes=${offset}-${rangeEnd}`);
 
-  write(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  write(8, 'WAVE');
-  write(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitsPerSample, true);
-  write(36, 'data');
-  view.setUint32(40, dataSize, true);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Range: `bytes=${offset}-${rangeEnd}`
+        }
+      });
 
-  new Uint8Array(buffer).set(samples, 44);
-  return new Uint8Array(buffer);
-}
-</script>
+      if (!res.ok) {
+        console.error(`❌ Chunk fetch failed: ${res.status} ${res.statusText}`);
+        return;
+      }
+
+      const chunk = new Uint8Array(await res.arrayBuffer());
+      console.log(`✅ Chunk loaded: ${chunk.length} bytes`);
+
+      const wav = buildWav(chunk);
+      const blob = new Blob([wav], { type: 'audio/wav' });
+      console.log(`Load WAV blob: ${blob.size} bytes; ${seekSeconds} / ${totalDuration}`);
+
+      if (wavesurfer) {
+        await wavesurfer.loadBlob(blob);
+        wavesurfer.play();
+      } else {
+        if (!audioCtx) audioCtx = new AudioContext();
+        const arrayBuffer = await blob.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+        if (sourceNode) {
+          sourceNode.stop();
+          sourceNode.disconnect();
+        }
+
+        sourceNode = audioCtx.createBufferSource();
+        sourceNode.buffer = audioBuffer;
+        sourceNode.connect(audioCtx.destination);
+        sourceNode.start();
+        console.log(`🎧 Playing chunk with AudioContext at ${seekSeconds}s`);
+      }
+    }
+
+    function buildWav(samples) {
+      const channels = 2, bitsPerSample = 16;
+      const blockAlign = channels * bitsPerSample / 8;
+      const byteRate = sampleRate * blockAlign;
+      const dataSize = samples.length;
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+      const write = (i, s) => [...s].forEach((c, j) => view.setUint8(i + j, c.charCodeAt(0)));
+
+      write(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      write(8, 'WAVE');
+      write(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, byteRate, true);
+      view.setUint16(32, blockAlign, true);
+      view.setUint16(34, bitsPerSample, true);
+      write(36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      new Uint8Array(buffer).set(samples, 44);
+      return new Uint8Array(buffer);
+    }
+  </script>
 </body>
+
 </html>
