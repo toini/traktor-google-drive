@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>WaveSurfer Local WAV + Peaks</title>
+  <script src="https://unpkg.com/wavesurfer.js@7"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 900px;
+      margin: auto;
+    }
+
+    #waveform {
+      height: 128px;
+      margin-bottom: 1em;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>WaveSurfer Local WAV + Peaks</h2>
+  <div id="waveform"></div>
+  <button id="playBtn">▶️ Play</button>
+
+  <script type="module">
+    const wavUrl = './Z17.1 Psytech 2024-03-17.wav';
+    const peaksUrl = './Z17.1 Psytech 2024-03-17.wav.peaks.json';
+    const duration = 7326; // 2:02:06
+
+    const init = async () => {
+      const peaksRes = await fetch(peaksUrl);
+      const flatPeaks = await peaksRes.json();
+      console.log(`🎧 Peaks loaded: ${flatPeaks.length} samples`);
+
+      const waveform = WaveSurfer.create({
+        container: '#waveform',
+        waveColor: 'lightgray',
+        progressColor: 'orange',
+        height: 128,
+        barWidth: 1,
+        duration,
+        url: wavUrl,
+        peaks: [flatPeaks],
+      });
+
+      document.getElementById('playBtn').onclick = () => waveform.playPause();
+
+      waveform.on('interaction', () => waveform.play());
+      waveform.on('finish', () => waveform.setTime(0));
+    };
+
+    init();
+  </script>
+</body>
+
+</html>
