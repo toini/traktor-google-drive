@@ -10,7 +10,12 @@
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "launchBrowser": {
+        "enabled": false,
+        "url": "https://localhost:5001",
+        "browser": "default"
+      },
     }
   ]
 }

@@ -105,6 +105,7 @@ StyleCopReport.xml
 *.pidb
 *.svclog
 *.scc
+obj/
 
 # Chutzpah Test files
 _Chutzpah*
@@ -484,3 +485,4 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+*.wav
