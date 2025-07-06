@@ -88,7 +88,7 @@ dotnet run --project TraktorGoogleDrive/TraktorGoogleDrive.csproj
 To run the built Docker image locally:
 
 ```sh
-docker run --rm -p 8080:80 gcr.io/traktor-toni-2025/traktor-google-drive:latest
+docker run --rm -p 8080:8080 gcr.io/traktor-toni-2025/traktor-google-drive:latest
 ```
 
 - Visit http://localhost:8080 in your browser.
