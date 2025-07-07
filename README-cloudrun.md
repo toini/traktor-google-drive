@@ -15,19 +15,17 @@ This guide explains how to deploy `traktor-google-drive` to Google Cloud Run, re
 gcloud auth configure-docker
 
 # Build the Docker image
-DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=./.github_token -t gcr.io/YOUR_PROJECT_ID/traktor-google-drive:latest .
+DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=./.github_token -t gcr.io/traktor-toni-2025/traktor-google-drive:latest .
 
 # Push the image to Google Container Registry
-docker push gcr.io/YOUR_PROJECT_ID/traktor-google-drive:latest
+docker push gcr.io/traktor-toni-2025/traktor-google-drive:latest
 ```
-
-Replace `YOUR_PROJECT_ID` with your actual Google Cloud project ID.
 
 ## 3. Deploy to Cloud Run
 
 ```bash
 gcloud run deploy traktor-google-drive \
-  --image gcr.io/YOUR_PROJECT_ID/traktor-google-drive:latest \
+  --image gcr.io/traktor-toni-2025/traktor-google-drive:latest \
   --platform managed \
   --region europe-north1 \
   --allow-unauthenticated \
@@ -101,7 +99,23 @@ docker run --rm -p 8080:8080 gcr.io/traktor-toni-2025/traktor-google-drive:lates
 1. Build and push the image:
 
 ```sh
-DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=.github_token -t gcr.io/traktor-toni-2025/traktor-google-drive:latest .
+#DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=.github_token -t gcr.io/traktor-toni-2025/traktor-google-drive:latest .
+
+#docker buildx create --name multiarch --use
+docker buildx create --name amd64-builder --use
+
+docker buildx inspect --bootstrap
+#docker buildx build \
+#  --platform linux/amd64,linux/arm64 \
+#  --secret id=github_token,src=.github_token \
+#  -t gcr.io/traktor-toni-2025/traktor-google-drive:latest \
+#  --push .
+
+docker buildx build \
+  --platform linux/amd64 \
+  --secret id=github_token,src=.github_token \
+  -t gcr.io/traktor-toni-2025/traktor-google-drive:latest \
+  --push .
 
 gcloud auth configure-docker
 docker push gcr.io/traktor-toni-2025/traktor-google-drive:latest
@@ -114,8 +128,7 @@ gcloud run deploy traktor-google-drive \
   --image gcr.io/traktor-toni-2025/traktor-google-drive:latest \
   --platform managed \
   --region europe-north1 \
-  --allow-unauthenticated \
-  --port 80
+  --allow-unauthenticated
 ```
 
 - Cloud Run will provide a public HTTPS URL after deployment.
