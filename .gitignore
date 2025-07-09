@@ -487,3 +487,5 @@ $RECYCLE.BIN/
 *.swp
 *.wav
 /out
+TraktorGoogleDrive.Server/wwwroot
+client-out/

@@ -8,7 +8,22 @@ This guide explains how to deploy `traktor-google-drive` to Google Cloud Run, re
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
 - Docker installed
 
-## 2. Build and Push Docker Image
+## 2. Build project
+
+```bash
+dotnet restore TraktorGoogleDrive.sln
+
+# debug
+dotnet publish TraktorGoogleDrive.Server.csproj -o out
+
+# release
+dotnet publish TraktorGoogleDrive.Server.csproj -c Release -o out -p:RunAOTCompilation=true
+
+# New: use script
+./publish.sh
+```
+
+## 3. Build and Push Docker Image
 
 ```bash
 # Authenticate Docker with Google
