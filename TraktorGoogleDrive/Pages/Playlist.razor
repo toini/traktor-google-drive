@@ -5,6 +5,7 @@
 
 @using TraktorGoogleDrive.Components
 @using TraktorNmlParser.Models
+@using TraktorGoogleDrive.Models
 @using System.Text.Json
 @using System.Diagnostics;
 
@@ -30,21 +31,20 @@ else
             </tr>
         </thead>
         <tbody>
-            @foreach (var track in tracks)
+            @foreach (var file in files)
             {
-                var file = files.FirstOrDefault(f => Path.GetFileName(track.Path) == f.Name);
                 <tr>
-                    <td>@track.Title</td>
-                    <td>@track.Artist</td>
-                    <td>@Path.GetFileName(Path.GetDirectoryName(track.Path))</td>
-                    <td>@track.Label</td>
-                    <td>@track.Comment</td>
-                    <td>@(track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
-                    <td>@track.Path</td>
+                    <td>@file.Track.Title</td>
+                    <td>@file.Track.Artist</td>
+                    <td>@Path.GetFileName(Path.GetDirectoryName(file.Track.Path))</td>
+                    <td>@file.Track.Label</td>
+                    <td>@file.Track.Comment</td>
+                    <td>@(file.Track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                    <td>@file.Track.Path</td>
                     <td>
-                        @if (file is not null && !string.IsNullOrEmpty(file.Id))
+                        @if (!string.IsNullOrEmpty(file.Id))
                         {
-                            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
+                            <AudioTrack File="@file" Token="@token" />
                         }
                     </td>
                 </tr>
@@ -56,17 +56,7 @@ else
 @code {
     [Parameter] public string? Uuid { get; set; }
 
-    class FileEntry
-    {
-        public string Id { get; set; } = "";
-        public string Name { get; set; } = "";
-        public string MimeType { get; set; } = "";
-        public int Duration { get; set; } = 0;
-        public string PeaksUrl { get; set; } = "";
-    }
-
     string? Name;
-    List<Track>? tracks;
     List<FileEntry> files = [];
     string? token;
 
@@ -79,10 +69,9 @@ else
         Console.WriteLine($"Playlist loaded at {watch.Elapsed.TotalSeconds}s");
 
         Name = playlist.Name;
-        tracks = playlist.Tracks;
 
         // Log all paths
-        foreach (var t in tracks)
+        foreach (var t in playlist.Tracks)
         {
             Console.WriteLine($"Track path: {t.Path}");
         }
@@ -90,7 +79,7 @@ else
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
         // Extract unique filenames
-        var filenames = tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
+        var filenames = playlist.Tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
         foreach (var t in filenames)
         {
             Console.WriteLine($"Filename: {t}");
@@ -120,11 +109,10 @@ else
             return new FileEntry
             {
                 Id = file?.Id ?? string.Empty,
-                Name = file?.Name ?? Path.GetFileName(t.Path),
                 MimeType = file?.MimeType ?? "audio/wav",
-                Duration = t.Playtime.HasValue ? (int)t.Playtime.Value : 0,
-                PeaksUrl = ""
-             };
+                PeaksUrl = "",
+                Track = t
+            };
         }).ToList();
 
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
