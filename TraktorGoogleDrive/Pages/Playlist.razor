@@ -122,9 +122,9 @@ else
                 Id = file?.Id ?? string.Empty,
                 Name = file?.Name ?? Path.GetFileName(t.Path),
                 MimeType = file?.MimeType ?? "audio/wav",
-                Duration = t.Playtime,
+                Duration = t.Playtime.HasValue ? (int)t.Playtime.Value : 0,
                 PeaksUrl = ""
-            };
+             };
         }).ToList();
 
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
