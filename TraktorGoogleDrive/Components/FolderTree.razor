@@ -1,7 +1,9 @@
-﻿@inject IJSRuntime JS
+﻿@* Namespace: TraktorGoogleDrive.Components *@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@inject IJSRuntime JS
 @inject HttpClient Http
-@inject CollectionService CollectionService
-@using TraktorGoogleDrive.Services
+@inject TraktorGoogleDrive.Services.CollectionService CollectionService
 @using TraktorNmlParser.Models
 @using System.Text.Json
 @using System.Diagnostics;
@@ -15,7 +17,9 @@
                 <div class="ps-3">
                     @foreach (var playlist in folder.Playlists)
                     {
-                        <NavLink class="nav-link" href="@($"/playlist/{playlist.Uuid}")">🎵 @playlist.Name</NavLink>
+                        <Microsoft.AspNetCore.Components.Routing.NavLink class="nav-link"
+                            href="@($"/playlist/{playlist.Uuid}")">🎵 @playlist.Name
+                        </Microsoft.AspNetCore.Components.Routing.NavLink>
                     }
                 </div>
             </details>
@@ -31,7 +35,7 @@
         var watch = Stopwatch.StartNew();
         Console.WriteLine($"Folder tree start load {watch.Elapsed.TotalSeconds}s");
         var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-        
+
         var collection = await CollectionService.GetCollectionAsync();
         Folders = collection.Folders;
         Console.WriteLine($"Folder tree done load {watch.Elapsed.TotalSeconds}s");

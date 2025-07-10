@@ -1,9 +1,8 @@
 ﻿@page "/playlist/{Uuid}"
 @inject HttpClient Http
 @inject IJSRuntime JS
-@inject CollectionService CollectionService
+@inject TraktorGoogleDrive.Services.CollectionService CollectionService
 
-@using TraktorGoogleDrive.Services
 @using TraktorGoogleDrive.Components
 @using TraktorNmlParser.Models
 @using System.Text.Json
@@ -26,15 +25,14 @@ else
                 <th>Label</th>
                 <th>Comment</th>
                 <th>Playtime</th>
+                <th>Path</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             @foreach (var track in tracks)
             {
-                var filename = Path.GetFileName(track.Path);
-                var file = files.FirstOrDefault(f => f.Name == filename);
-
+                var file = files.FirstOrDefault(f => Path.GetFileName(track.Path) == f.Name);
                 <tr>
                     <td>@track.Title</td>
                     <td>@track.Artist</td>
@@ -42,8 +40,9 @@ else
                     <td>@track.Label</td>
                     <td>@track.Comment</td>
                     <td>@(track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                    <td>@track.Path</td>
                     <td>
-                        @if (file is not null)
+                        @if (file is not null && !string.IsNullOrEmpty(file.Id))
                         {
                             <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
                         }
@@ -62,6 +61,8 @@ else
         public string Id { get; set; } = "";
         public string Name { get; set; } = "";
         public string MimeType { get; set; } = "";
+        public int Duration { get; set; } = 0;
+        public string PeaksUrl { get; set; } = "";
     }
 
     string? Name;
@@ -80,25 +81,52 @@ else
         Name = playlist.Name;
         tracks = playlist.Tracks;
 
+        // Log all paths
+        foreach (var t in tracks)
+        {
+            Console.WriteLine($"Track path: {t.Path}");
+        }
+
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
         // Extract unique filenames
         var filenames = tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
+        foreach (var t in filenames)
+        {
+            Console.WriteLine($"Filename: {t}");
+        }
 
         Console.WriteLine($"Start drive query {watch.Elapsed.TotalSeconds}s");
         var nameConditions = string.Join(" or ", filenames.Select(f => $"name = '{f.Replace("'", "\\'")}'"));
         var query = $"mimeType contains 'audio/' and ({nameConditions})";
 
         var json = await Http.GetFromJsonAsync<JsonElement>(
-            $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
+        $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
         );
-        Console.WriteLine($"Drive query done {watch.Elapsed.TotalSeconds}s");
-        files = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
+        Console.WriteLine($"Drive raw file query done {watch.Elapsed.TotalSeconds}s");
+
+        // Map files from playlist tracks, matching to Drive files by filename
+        var driveFiles = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
+        {
+            Id = f.GetProperty("id").GetString()!,
+            Name = f.GetProperty("name").GetString()!,
+            MimeType = f.GetProperty("mimeType").GetString()!,
+        }).ToList();
+
+        files = tracks.Select(t =>
+        {
+            var file = driveFiles.FirstOrDefault(f => f.Name == Path.GetFileName(t.Path));
+            Console.WriteLine($"Track path: {t.Path} | Matched file: {(file != null ? file.Name : "(none)")}");
+            return new FileEntry
             {
-                Id = f.GetProperty("id").GetString()!,
-                Name = f.GetProperty("name").GetString()!,
-                MimeType = f.GetProperty("mimeType").GetString()!
-            }).ToList();
+                Id = file?.Id ?? string.Empty,
+                Name = file?.Name ?? Path.GetFileName(t.Path),
+                MimeType = file?.MimeType ?? "audio/wav",
+                Duration = t.Playtime,
+                PeaksUrl = ""
+            };
+        }).ToList();
+
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
     }
 }
