@@ -11,7 +11,7 @@
 
 <h3>@Name</h3>
 
-@if (tracks is null)
+@if (files is null)
 {
     <p>Loading tracks...</p>
 }
@@ -42,7 +42,7 @@ else
                     <td>@(file.Track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
                     <td>@file.Track.Path</td>
                     <td>
-                        @if (!string.IsNullOrEmpty(file.Id))
+                        @if (!string.IsNullOrEmpty(file.DriveFileId))
                         {
                             <AudioTrack File="@file" Token="@token" />
                         }
@@ -97,22 +97,23 @@ else
         // Map files from playlist tracks, matching to Drive files by filename
         var driveFiles = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
         {
-            Id = f.GetProperty("id").GetString()!,
-            Name = f.GetProperty("name").GetString()!,
-            MimeType = f.GetProperty("mimeType").GetString()!,
+            DriveFileId = f.GetProperty("id").GetString()!,
+            DriveFileName = f.GetProperty("name").GetString()!,
+            DriveFileMimeType = f.GetProperty("mimeType").GetString()!,
         }).ToList();
 
-        files = tracks.Select(t =>
+        files = playlist.Tracks.Select(t =>
         {
-            var file = driveFiles.FirstOrDefault(f => f.Name == Path.GetFileName(t.Path));
-            Console.WriteLine($"Track path: {t.Path} | Matched file: {(file != null ? file.Name : "(none)")}");
-            return new FileEntry
+            var file = driveFiles.FirstOrDefault(f => f.DriveFileName == Path.GetFileName(t.Path));
+            Console.WriteLine($"Track path: {t.Path} | Matched file: {(file != null ? file.DriveFileName : "(none)")}");
+            if (file is null)
             {
-                Id = file?.Id ?? string.Empty,
-                MimeType = file?.MimeType ?? "audio/wav",
-                PeaksUrl = "",
-                Track = t
-            };
+                Console.WriteLine($"No matching file found for track: {t.Path}");
+                return new FileEntry { Track = t }; // Return empty FileEntry with track info
+            }
+
+            file.Track = t;
+            return file;
         }).ToList();
 
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
