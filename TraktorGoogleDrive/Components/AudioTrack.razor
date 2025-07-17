@@ -25,7 +25,7 @@
             var wavUrl = $"/api/proxy/drive/{File.DriveFileId}?token={Token}";
             Console.WriteLine($"[AudioTrack] Name={File.Title}, Id={File.DriveFileId}, MimeType={File.DriveFileMimeType}, PlaytimeFloat={File.PlaytimeFloat}, wavUrl={wavUrl}");
             waveSurferInstance = await JS.InvokeAsync<IJSObjectReference>(
-                "initWaveSurfer", WaveformId, wavUrl, File.PeaksUrl, File.PlaytimeFloat);
+                "initWaveSurfer", WaveformId, wavUrl, File.PlaytimeFloat, File.PeaksUrl);
         }
     }
 
