@@ -89,7 +89,7 @@ http {
 To run the app locally with the .NET development server and debugger:
 
 ```sh
-dotnet run --project TraktorGoogleDrive/TraktorGoogleDrive.csproj
+#dotnet run --project TraktorGoogleDrive/TraktorGoogleDrive.csproj
 ```
 
 - The app will be available at the URL shown in the output (typically http://localhost:5048 or similar).
@@ -98,10 +98,11 @@ dotnet run --project TraktorGoogleDrive/TraktorGoogleDrive.csproj
 
 ## Running Locally (via Docker)
 
-To run the built Docker image locally:
+Build ARM64 and run Docker image locally:
 
 ```sh
-docker run --rm -p 8080:8080 gcr.io/traktor-toni-2025/traktor-google-drive:latest
+docker build --secret id=github_token,src=.github_token -t traktor-google-drive:arm64 .
+docker run --rm -p 5500:8080 -e ASPNETCORE_URLS=http://localhost:5500 traktor-google-drive:arm64
 ```
 
 - Visit http://localhost:8080 in your browser.
