@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+
 using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,7 +16,7 @@ app.UseStaticFiles();
 app.UseHttpsRedirection();
 
 // Proxy endpoint
-app.MapGet("/api/proxy/drive/{fileId}", async (HttpRequest incomingRequest, HttpResponse outgoingResponse, string fileId, string token, IHttpClientFactory httpClientFactory) =>
+app.MapGet("/api/proxy/drive/{fileId}", async (HttpRequest incomingRequest, HttpResponse outgoingResponse, string fileId, [FromQuery] string token, IHttpClientFactory httpClientFactory) =>
 {
     var client = httpClientFactory.CreateClient();
     var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
