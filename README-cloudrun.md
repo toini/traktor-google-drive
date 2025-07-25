@@ -115,33 +115,28 @@ docker run --rm -p 5500:8080 traktor-google-drive:arm64
 1. Build and push the image:
 
 ```sh
-#DOCKER_BUILDKIT=1 docker build --secret id=github_token,src=.github_token -t gcr.io/traktor-toni-2025/traktor-google-drive:latest .
-
-#docker buildx create --name multiarch --use
+# Init builder
 docker buildx create --name amd64-builder --use
-
 docker buildx inspect --bootstrap
-#docker buildx build \
-#  --platform linux/amd64,linux/arm64 \
-#  --secret id=github_token,src=.github_token \
-#  -t gcr.io/traktor-toni-2025/traktor-google-drive:latest \
-#  --push .
 
+# Authenticate
+#gcloud auth configure-docker
+
+# Build and push
+export TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)
 docker buildx build \
   --platform linux/amd64 \
-  --secret id=github_token,src=.github_token \
+  -t gcr.io/traktor-toni-2025/traktor-google-drive:$TAG \
   -t gcr.io/traktor-toni-2025/traktor-google-drive:latest \
   --push .
-
-gcloud auth configure-docker
-docker push gcr.io/traktor-toni-2025/traktor-google-drive:latest
 ```
 
 2. Deploy to Cloud Run:
 
 ```sh
 gcloud run deploy traktor-google-drive \
-  --image gcr.io/traktor-toni-2025/traktor-google-drive:latest \
+  #--image gcr.io/traktor-toni-2025/traktor-google-drive:latest \
+  -t gcr.io/traktor-toni-2025/traktor-google-drive:$TAG \
   --platform managed \
   --region europe-north1 \
   --allow-unauthenticated
