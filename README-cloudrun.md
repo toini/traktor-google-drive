@@ -101,8 +101,8 @@ To run the app locally with the .NET development server and debugger:
 Build ARM64 and run Docker image locally:
 
 ```sh
-docker build --secret id=github_token,src=.github_token -t traktor-google-drive:arm64 .
-docker run --rm -p 5500:8080 -e ASPNETCORE_URLS=http://localhost:5500 traktor-google-drive:arm64
+docker build -t traktor-google-drive:arm64 .
+docker run --rm -p 5500:8080 traktor-google-drive:arm64
 ```
 
 - Visit http://localhost:8080 in your browser.
