@@ -2,33 +2,79 @@
     position: relative;
     display: flex;
     flex-direction: column;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 main {
     flex: 1;
+    background-color: #2a2a2a;
 }
 
 .sidebar {
-    background-image: linear-gradient(180deg, rgb(5, 39, 103) 0%, #3a0647 70%);
+    background: linear-gradient(180deg, #0d1117 0%, #161b22 50%, #21262d 100%);
+    border-right: 1px solid #30363d;
+}
+
+.traktor-logo {
+    padding: 1rem;
+    text-align: center;
+    border-bottom: 2px solid #ff6600;
+    margin-bottom: 1rem;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+}
+
+.traktor-logo h4 {
+    margin: 0;
+    color: #ff6600;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.traktor-logo small {
+    color: #e6e6e6;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
 .top-row {
-    background-color: #f7f7f7;
-    border-bottom: 1px solid #d6d5d5;
-    justify-content: flex-end;
+    background: linear-gradient(90deg, #1a1a1a 0%, #2a2a2a 100%);
+    border-bottom: 2px solid #ff6600;
+    justify-content: space-between;
     height: 3.5rem;
     display: flex;
     align-items: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.top-row-brand {
+    flex: 1;
+}
+
+.brand-text {
+    color: #e6e6e6;
+    font-size: 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
         margin-left: 1.5rem;
         text-decoration: none;
+        color: #ff6600;
+        font-weight: 500;
     }
 
     .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
-        text-decoration: underline;
+        text-decoration: none;
+        color: #ffaa44;
+        text-shadow: 0 0 10px rgba(255, 102, 0, 0.5);
     }
 
     .top-row ::deep a:first-child {
@@ -56,6 +102,8 @@ main {
         height: 100vh;
         position: sticky;
         top: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .top-row {

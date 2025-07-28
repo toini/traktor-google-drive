@@ -21,6 +21,9 @@ dotnet publish TraktorGoogleDrive.Server.csproj -c Release -o out -p:RunAOTCompi
 
 # New: use script
 ./publish.sh
+
+# for dev:
+./publish.sh --dev
 ```
 
 ## 3. Build and Push Docker Image

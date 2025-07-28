@@ -3,37 +3,120 @@
 @inject IJSRuntime JS
 @using TraktorGoogleDrive.Models
 
-<div style="margin-bottom: 0.5rem;">
-    <b>@File?.Title</b>
-</div>
-
-<div id="@WaveformId" style="width: 100%; height: 128px; margin-bottom: 1em;"></div>
-<button @onclick="PlayPause">▶️ Play/Pause</button>
+<button class="btn btn-sm btn-outline-primary play-button @(isPlaying ? "playing" : "")" @onclick="PlayPause" style="padding: 2px 8px; font-size: 12px;">
+    @if (isPlaying)
+    {
+        <span>⏸️</span>
+    }
+    else
+    {
+        <span>▶️</span>
+    }
+</button>
 
 @code {
     [Parameter] public FileEntry? File { get; set; }
     [Parameter] public string? Token { get; set; }
+    [Parameter] public EventCallback<string?> OnPlayStateChanged { get; set; }
 
-    string WaveformId = $"waveform_{Guid.NewGuid():N}";
-    IJSObjectReference? waveSurferInstance;
+    private bool isPlaying = false;
+    private IJSObjectReference? audioElement;
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override void OnParametersSet()
     {
-        Console.WriteLine($"[AudioTrack] OnAfterRenderAsync"); 
-        if (firstRender && File != null)
+        if (File != null)
         {
-            var wavUrl = $"/api/proxy/drive/{File.DriveFileId}?token={Token}";
-            Console.WriteLine($"[AudioTrack] Name={File.Title}, Id={File.DriveFileId}, MimeType={File.DriveFileMimeType}, PlaytimeFloat={File.PlaytimeFloat}, wavUrl={wavUrl}");
-            waveSurferInstance = await JS.InvokeAsync<IJSObjectReference>(
-                "initWaveSurfer", WaveformId, wavUrl, File.PlaytimeFloat, File.PeaksUrl);
+            // Check if this is the currently playing track
+            var currentlyPlayingId = GetCurrentlyPlayingId();
+            var wasPlaying = isPlaying;
+            isPlaying = currentlyPlayingId == File.DriveFileId;
+            
+            if (wasPlaying != isPlaying)
+            {
+                StateHasChanged();
+            }
         }
+    }
+
+    private string? GetCurrentlyPlayingId()
+    {
+        // This would ideally come from a shared service, but for now we'll use a simple approach
+        return null; // Will be managed by the parent component
     }
 
     async Task PlayPause()
     {
-        if (waveSurferInstance is not null)
+        if (File == null || string.IsNullOrEmpty(Token)) return;
+
+        try
         {
-            await JS.InvokeVoidAsync("waveSurferPlayPause", waveSurferInstance);
+            if (audioElement == null)
+            {
+                var audioUrl = $"/api/proxy/drive/{File.DriveFileId}?token={Token}";
+                audioElement = await JS.InvokeAsync<IJSObjectReference>("createAudioElement", audioUrl);
+                
+                // Add event listeners for audio end and pause
+                await JS.InvokeVoidAsync("addAudioEventListeners", audioElement, DotNetObjectReference.Create(this));
+            }
+
+            if (isPlaying)
+            {
+                await JS.InvokeVoidAsync("pauseAudio", audioElement);
+                isPlaying = false;
+                await OnPlayStateChanged.InvokeAsync(null);
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("playAudio", audioElement);
+                isPlaying = true;
+                await OnPlayStateChanged.InvokeAsync(File.DriveFileId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error playing audio: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnAudioEnded()
+    {
+        isPlaying = false;
+        await OnPlayStateChanged.InvokeAsync(null);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnAudioPaused()
+    {
+        isPlaying = false;
+        await OnPlayStateChanged.InvokeAsync(null);
+        StateHasChanged();
+    }
+
+    public async Task StopPlayback()
+    {
+        if (audioElement != null && isPlaying)
+        {
+            await JS.InvokeVoidAsync("pauseAudio", audioElement);
+            isPlaying = false;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (audioElement != null)
+        {
+            await audioElement.DisposeAsync();
         }
     }
 }
+
+<style>
+    .play-button {
+        min-width: 32px;
+        height: 28px;
+        border-radius: 4px;
+    }
+</style>

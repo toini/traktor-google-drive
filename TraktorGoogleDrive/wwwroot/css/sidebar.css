@@ -1,0 +1,79 @@
+.folder-tree {
+    padding: 1rem 0;
+    height: 100%;
+}
+
+.folder-tree .nav-item {
+    margin-bottom: 0.5rem;
+}
+
+.folder-tree details {
+    margin-bottom: 0.5rem;
+}
+
+.folder-tree summary {
+    cursor: pointer;
+    padding: 8px 16px;
+    background: linear-gradient(90deg, #21262d 0%, #30363d 100%);
+    color: #ff6600;
+    font-weight: 600;
+    font-size: 14px;
+    border-left: 3px solid transparent;
+    transition: all 0.2s ease;
+    list-style: none;
+    display: flex;
+    align-items: center;
+}
+
+.folder-tree summary::-webkit-details-marker {
+    display: none;
+}
+
+.folder-tree summary::before {
+    content: "▶";
+    margin-right: 8px;
+    font-size: 10px;
+    transition: transform 0.2s ease;
+}
+
+.folder-tree details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.folder-tree summary:hover {
+    background: linear-gradient(90deg, #30363d 0%, #484f58 100%);
+    border-left-color: #ff6600;
+    box-shadow: inset 0 0 10px rgba(255, 102, 0, 0.1);
+}
+
+.folder-tree .nav-link {
+    color: #e6e6e6 !important;
+    padding: 6px 16px 6px 40px;
+    font-size: 13px;
+    text-decoration: none;
+    border-left: 3px solid transparent;
+    transition: all 0.2s ease;
+    display: block;
+    background: transparent;
+}
+
+.folder-tree .nav-link:hover {
+    color: #ffffff !important;
+    background: linear-gradient(90deg, #2a2a2a 0%, #3a3a3a 100%);
+    border-left-color: #ffaa44;
+    box-shadow: inset 0 0 8px rgba(255, 170, 68, 0.1);
+}
+
+.folder-tree .nav-link.active {
+    color: #ffffff !important;
+    background: linear-gradient(90deg, #ff6600 0%, #ff8833 100%);
+    border-left-color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(255, 102, 0, 0.3);
+}
+
+.folder-tree .nav-link::before {
+    content: "🎵";
+    margin-right: 8px;
+    font-size: 12px;
+}

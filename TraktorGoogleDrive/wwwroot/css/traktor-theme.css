@@ -1,0 +1,100 @@
+/* Traktor DJ App Style Overrides */
+
+body {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #ff6600;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Loading indicator */
+.loading-progress {
+    position: relative;
+    display: block;
+    width: 8rem;
+    height: 8rem;
+    margin: 20vh auto 1rem auto;
+}
+
+.loading-progress circle {
+    fill: none;
+    stroke: #ff6600;
+    stroke-width: 0.6rem;
+    transform-origin: 50% 50%;
+    transform: rotate(-90deg);
+}
+
+.loading-progress circle:last-child {
+    stroke: #30363d;
+    stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+    transition: stroke-dasharray 0.05s ease-in-out;
+}
+
+.loading-progress-text {
+    position: absolute;
+    text-align: center;
+    font-weight: bold;
+    inset: calc(20vh + 3.25rem) 0 auto 0.2rem;
+    color: #ff6600;
+}
+
+.loading-progress-text::after {
+    content: var(--blazor-load-percentage-text, "Loading");
+}
+
+/* Error UI */
+#blazor-error-ui {
+    background: #21262d;
+    border: 2px solid #ff6600;
+    color: #ffffff;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+#blazor-error-ui .reload {
+    color: #ff6600;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+#blazor-error-ui .reload:hover {
+    color: #ffaa44;
+    text-shadow: 0 0 8px rgba(255, 102, 0, 0.5);
+}
+
+/* Custom scrollbar for Traktor look */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a1a;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #ff6600 0%, #ff8833 100%);
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #ffaa44 0%, #ff6600 100%);
+    box-shadow: 0 0 8px rgba(255, 102, 0, 0.5);
+}
+
+/* Selection colors */
+::selection {
+    background-color: rgba(255, 102, 0, 0.3);
+    color: #ffffff;
+}
+
+::-moz-selection {
+    background-color: rgba(255, 102, 0, 0.3);
+    color: #ffffff;
+}

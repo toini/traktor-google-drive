@@ -18,7 +18,7 @@
                     @foreach (var playlist in folder.Playlists)
                     {
                         <Microsoft.AspNetCore.Components.Routing.NavLink class="nav-link"
-                            href="@($"/playlist/{playlist.Uuid}")">🎵 @playlist.Name
+                            href="@($"/playlist/{playlist.Uuid}")">@playlist.Name
                         </Microsoft.AspNetCore.Components.Routing.NavLink>
                     }
                 </div>

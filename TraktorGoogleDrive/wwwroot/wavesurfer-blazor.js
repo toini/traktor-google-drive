@@ -53,3 +53,99 @@ window.waveSurferPlayPause = function (waveform) {
 window.waveSurferSeek = function (waveform, seconds) {
     if (waveform) waveform.setTime(seconds);
 };
+
+// Simple audio playback functions for compact player
+window.createAudioElement = function (url) {
+    const audio = new Audio(url);
+    audio.preload = 'metadata';
+    return audio;
+};
+
+window.playAudio = function (audio) {
+    if (audio) {
+        audio.play().catch(e => console.error('Audio play failed:', e));
+    }
+};
+
+window.pauseAudio = function (audio) {
+    if (audio) {
+        audio.pause();
+    }
+};
+
+// Add event listeners to audio elements
+window.addAudioEventListeners = function (audio, dotNetRef) {
+    if (audio && dotNetRef) {
+        audio.addEventListener('ended', () => {
+            dotNetRef.invokeMethodAsync('OnAudioEnded');
+        });
+        
+        audio.addEventListener('pause', () => {
+            dotNetRef.invokeMethodAsync('OnAudioPaused');
+        });
+    }
+};
+
+// Table column resizing functions
+window.initResizableTable = function (tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    
+    const headers = table.querySelectorAll('th');
+    const savedWidths = localStorage.getItem(`table-widths-${tableId}`);
+    
+    if (savedWidths) {
+        const widths = JSON.parse(savedWidths);
+        headers.forEach((header, index) => {
+            if (widths[index]) {
+                header.style.width = widths[index] + 'px';
+            }
+        });
+    }
+    
+    headers.forEach((header, index) => {
+        const resizer = document.createElement('div');
+        resizer.className = 'column-resizer';
+        resizer.style.cssText = `
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 5px;
+            height: 100%;
+            cursor: col-resize;
+            background: transparent;
+        `;
+        
+        header.style.position = 'relative';
+        header.appendChild(resizer);
+        
+        let startX, startWidth;
+        
+        resizer.addEventListener('mousedown', (e) => {
+            startX = e.pageX;
+            startWidth = parseInt(window.getComputedStyle(header).width, 10);
+            document.addEventListener('mousemove', doDrag);
+            document.addEventListener('mouseup', stopDrag);
+            e.preventDefault();
+        });
+        
+        function doDrag(e) {
+            const newWidth = startWidth + e.pageX - startX;
+            if (newWidth > 50) { // Minimum width
+                header.style.width = newWidth + 'px';
+            }
+        }
+        
+        function stopDrag() {
+            document.removeEventListener('mousemove', doDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            
+            // Save widths
+            const widths = [];
+            headers.forEach(h => {
+                widths.push(parseInt(h.style.width || h.offsetWidth));
+            });
+            localStorage.setItem(`table-widths-${tableId}`, JSON.stringify(widths));
+        }
+    });
+};

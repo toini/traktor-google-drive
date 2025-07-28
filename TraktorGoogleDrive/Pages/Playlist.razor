@@ -9,7 +9,16 @@
 @using System.Text.Json
 @using System.Diagnostics;
 
-<h3>@Name</h3>
+<div class="playlist-header">
+    <h3 class="playlist-title">
+        <span class="playlist-icon">♫</span>
+        @Name
+        @if (files?.Count > 0)
+        {
+            <small class="track-count">(@files.Count tracks)</small>
+        }
+    </h3>
+</div>
 
 @if (files is null)
 {
@@ -17,40 +26,42 @@
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Title</th>
-                <th>Artist</th>
-                <th>Release</th>
-                <th>Label</th>
-                <th>Comment</th>
-                <th>Playtime</th>
-                <th>Path</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var file in files)
-            {
+    <div class="table-responsive">
+        <table id="playlist-table" class="table table-striped table-hover">
+            <thead>
                 <tr>
-                    <td>@file.Track.Title</td>
-                    <td>@file.Track.Artist</td>
-                    <td>@Path.GetFileName(Path.GetDirectoryName(file.Track.Path))</td>
-                    <td>@file.Track.Label</td>
-                    <td>@file.Track.Comment</td>
-                    <td>@(file.Track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
-                    <td>@file.Track.Path</td>
-                    <td>
-                        @if (!string.IsNullOrEmpty(file.DriveFileId))
-                        {
-                            <AudioTrack File="@file" Token="@token" />
-                        }
-                    </td>
+                    <th style="width: 200px;">Title</th>
+                    <th style="width: 150px;">Artist</th>
+                    <th style="width: 120px;">Release</th>
+                    <th style="width: 100px;">Label</th>
+                    <th style="width: 100px;">Comment</th>
+                    <th style="width: 80px;">Playtime</th>
+                    <th style="width: 250px;">Path</th>
+                    <th style="width: 60px;">Play</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var file in files)
+                {
+                    <tr class="@(currentlyPlayingId == file.DriveFileId ? "currently-playing" : "")">
+                        <td class="text-truncate" style="max-width: 0;" title="@(file.Track?.Title ?? "")">@(file.Track?.Title ?? "")</td>
+                        <td class="text-truncate" style="max-width: 0;" title="@(file.Track?.Artist ?? "")">@(file.Track?.Artist ?? "")</td>
+                        <td class="text-truncate" style="max-width: 0;" title="@Path.GetFileName(Path.GetDirectoryName(file.Track?.Path ?? ""))">@Path.GetFileName(Path.GetDirectoryName(file.Track?.Path ?? ""))</td>
+                        <td class="text-truncate" style="max-width: 0;" title="@(file.Track?.Label ?? "")">@(file.Track?.Label ?? "")</td>
+                        <td class="text-truncate" style="max-width: 0;" title="@(file.Track?.Comment ?? "")">@(file.Track?.Comment ?? "")</td>
+                        <td class="text-nowrap">@(file.Track?.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                        <td class="text-truncate" style="max-width: 0;" title="@(file.Track?.Path ?? "")">@(file.Track?.Path ?? "")</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(file.DriveFileId))
+                            {
+                                <AudioTrack File="@file" Token="@token" OnPlayStateChanged="OnPlayStateChanged" />
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {
@@ -59,9 +70,12 @@ else
     string? Name;
     List<FileEntry> files = [];
     string? token;
+    string? currentlyPlayingId;
 
     protected override async Task OnParametersSetAsync()
     {
+        if (string.IsNullOrEmpty(Uuid)) return;
+        
         var watch = Stopwatch.StartNew();
         Console.WriteLine($"Loading playlist with UUID: {Uuid}");
         var playlist = await CollectionService.GetPlaylistByUuid(Uuid);
@@ -117,5 +131,19 @@ else
         }).ToList();
 
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
+    }
+
+    private void OnPlayStateChanged(string? playingFileId)
+    {
+        currentlyPlayingId = playingFileId;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && files?.Count > 0)
+        {
+            await JS.InvokeVoidAsync("initResizableTable", "playlist-table");
+        }
     }
 }
