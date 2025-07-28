@@ -24,7 +24,8 @@ public class CollectionService
     {
         var watch = Stopwatch.StartNew();
         Console.WriteLine($"[CollectionService] Start load {watch.Elapsed.TotalSeconds}s");
-        if (_collection is not null) {
+        if (_collection is not null)
+        {
             Console.WriteLine($"[CollectionService] Returning cached collection {watch.Elapsed.TotalSeconds}s");
             return _collection;
         }

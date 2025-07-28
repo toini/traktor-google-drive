@@ -1,0 +1,15 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "build-server",
+        "command": "dotnet",
+        "type": "process",
+        "args": [
+          "build",
+          "${workspaceFolder}/TraktorGoogleDrive.Server/TraktorGoogleDrive.Server.csproj"
+        ],
+        "problemMatcher": "$msCompile"
+      }
+    ]
+  }

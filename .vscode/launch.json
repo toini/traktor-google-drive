@@ -2,6 +2,27 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": ".NET Server (TraktorGoogleDrive.Server)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-server",
+      "program": "${workspaceFolder}/TraktorGoogleDrive.Server/bin/Debug/net9.0/TraktorGoogleDrive.Server.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/TraktorGoogleDrive.Server",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      },
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5500"
+      },
+      "sourceFileMap": {
+        "/Views": "${workspaceFolder}/TraktorGoogleDrive.Server/Views"
+      }
+    },
+    {
       "name": "Debug .NET Web App",
       "type": "blazorwasm",
       "request": "launch",
@@ -10,7 +31,12 @@
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "stopAtEntry": false
+      "stopAtEntry": false,
+      "launchBrowser": {
+        "enabled": false,
+        "url": "https://localhost:5001",
+        "browser": "default"
+      },
     }
   ]
 }

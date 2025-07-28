@@ -1,69 +1,39 @@
-﻿@using Microsoft.AspNetCore.Components.Web
+﻿@namespace TraktorGoogleDrive.Components
+@using Microsoft.JSInterop
 @inject IJSRuntime JS
+@using TraktorGoogleDrive.Models
 
 <div style="margin-bottom: 0.5rem;">
-    <b>@Name</b>
+    <b>@File?.Title</b>
 </div>
 
-<div style="display: flex; align-items: center; gap: 1rem;">
-    <button @onclick="Play">▶️</button>
-    <button @onclick="Pause">⏸️</button>
-    <div style="width: 300px; height: 8px; background: #222; cursor: pointer;">
-        <div style="@($"background:#00bfff;height:8px;width:{Progress * 100}%")"></div>
-    </div>
-</div>
+<div id="@WaveformId" style="width: 100%; height: 128px; margin-bottom: 1em;"></div>
+<button @onclick="PlayPause">▶️ Play/Pause</button>
 
 @code {
-    [Parameter] public string? Id { get; set; }
-    [Parameter] public string? Name { get; set; }
-    [Parameter] public string? MimeType { get; set; }
+    [Parameter] public FileEntry? File { get; set; }
     [Parameter] public string? Token { get; set; }
 
-    double Progress = 0;
-    System.Timers.Timer? timer = null;
+    string WaveformId = $"waveform_{Guid.NewGuid():N}";
+    IJSObjectReference? waveSurferInstance;
 
-    async Task Play()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        Console.WriteLine($"AudioTrack.Play: Id={Id}, Name={Name}, MimeType={MimeType}");
-        await JS.InvokeVoidAsync("secureStreamToAudio", Id, Token, MimeType);
-        StartTimer();
-    }
-
-    async Task Pause()
-    {
-        Console.WriteLine($"AudioTrack.Pause: Id={Id}");
-        await JS.InvokeVoidAsync("seekToSecond", 999999); // crude stop workaround
-        timer?.Stop();
-    }
-
-    async Task Seek(MouseEventArgs e)
-    {
-        var percent = e.OffsetX / 300.0;
-        var duration = await JS.InvokeAsync<double>("getCurrentDuration");
-        var seconds = percent * duration;
-        Console.WriteLine($"AudioTrack.Seek: Id={Id}, SeekTo={seconds}s");
-        await JS.InvokeVoidAsync("seekToSecond", seconds);
-    }
-
-    void StartTimer()
-    {
-        timer?.Stop();
-        timer = new System.Timers.Timer(500);
-        timer.Elapsed += async (_, _) =>
+        Console.WriteLine($"[AudioTrack] OnAfterRenderAsync"); 
+        if (firstRender && File != null)
         {
-            var cur = await JS.InvokeAsync<double>("getCurrentTime");
-            var dur = await JS.InvokeAsync<double>("getCurrentDuration");
-            Progress = dur > 0 ? cur / dur : 0;
-            Console.WriteLine($"AudioTrack.Timer: Id={Id}, Progress={Progress}");
-            await InvokeAsync(StateHasChanged);
-        };
-        timer.Start();
+            var wavUrl = $"/api/proxy/drive/{File.DriveFileId}?token={Token}";
+            Console.WriteLine($"[AudioTrack] Name={File.Title}, Id={File.DriveFileId}, MimeType={File.DriveFileMimeType}, PlaytimeFloat={File.PlaytimeFloat}, wavUrl={wavUrl}");
+            waveSurferInstance = await JS.InvokeAsync<IJSObjectReference>(
+                "initWaveSurfer", WaveformId, wavUrl, File.PlaytimeFloat, File.PeaksUrl);
+        }
     }
 
-    public void Dispose()
+    async Task PlayPause()
     {
-        timer?.Stop();
-        timer?.Dispose();
-        Console.WriteLine($"AudioTrack.Dispose: Id={Id}");
+        if (waveSurferInstance is not null)
+        {
+            await JS.InvokeVoidAsync("waveSurferPlayPause", waveSurferInstance);
+        }
     }
 }

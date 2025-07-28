@@ -7,43 +7,21 @@
 
 <h3>Drive Music</h3>
 
-@if (files is null)
-{
-    <p>Loading...</p>
-}
-else
-{
-    @foreach (var file in files)
-    {
-        <div style="margin-bottom: 1.5rem;" @key="file.Id">
-            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
-        </div>
-    }
-}
+<p>Select playlist</p>
 
 @code {
-    class FileEntry
-    {
-        public string? Name { get; set; }
-        public string? Id { get; set; }
-        public string? MimeType { get; set; }
-    }
 
-    List<FileEntry> files = new();
-    string? token;
 
     protected override async Task OnInitializedAsync()
     {
         Console.WriteLine("Initializing component...");
-        token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
+        var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
         if (string.IsNullOrEmpty(token))
             Console.WriteLine("[Music.razor] No access token found in sessionStorage.");
         else
             Console.WriteLine($"[Music.razor] Access token found: {token.Substring(0, Math.Min(8, token.Length))}...");
         // Simulate an async operation
-        await Task.Delay(1000);
-        Console.WriteLine($"Component initialized. Token: {token}");
-        if (files == null || files.Count == 0)
-            Console.WriteLine("[Music.razor] No files fetched or files list is empty after initialization.");
+        //await Task.Delay(1000);
+        //Console.WriteLine($"Component initialized. Token: {token}");
     }
 }

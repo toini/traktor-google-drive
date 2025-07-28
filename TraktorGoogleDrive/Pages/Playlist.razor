@@ -1,17 +1,17 @@
 ﻿@page "/playlist/{Uuid}"
 @inject HttpClient Http
 @inject IJSRuntime JS
-@inject CollectionService CollectionService
+@inject TraktorGoogleDrive.Services.CollectionService CollectionService
 
-@using TraktorGoogleDrive.Services
 @using TraktorGoogleDrive.Components
 @using TraktorNmlParser.Models
+@using TraktorGoogleDrive.Models
 @using System.Text.Json
 @using System.Diagnostics;
 
 <h3>@Name</h3>
 
-@if (tracks is null)
+@if (files is null)
 {
     <p>Loading tracks...</p>
 }
@@ -26,26 +26,25 @@ else
                 <th>Label</th>
                 <th>Comment</th>
                 <th>Playtime</th>
+                <th>Path</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var track in tracks)
+            @foreach (var file in files)
             {
-                var filename = Path.GetFileName(track.Path);
-                var file = files.FirstOrDefault(f => f.Name == filename);
-
                 <tr>
-                    <td>@track.Title</td>
-                    <td>@track.Artist</td>
-                    <td>@Path.GetFileName(Path.GetDirectoryName(track.Path))</td>
-                    <td>@track.Label</td>
-                    <td>@track.Comment</td>
-                    <td>@(track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                    <td>@file.Track.Title</td>
+                    <td>@file.Track.Artist</td>
+                    <td>@Path.GetFileName(Path.GetDirectoryName(file.Track.Path))</td>
+                    <td>@file.Track.Label</td>
+                    <td>@file.Track.Comment</td>
+                    <td>@(file.Track.PlaytimeFloat?.ToString("0.0") ?? "") s</td>
+                    <td>@file.Track.Path</td>
                     <td>
-                        @if (file is not null)
+                        @if (!string.IsNullOrEmpty(file.DriveFileId))
                         {
-                            <AudioTrack Name="@file.Name" Id="@file.Id" MimeType="@file.MimeType" Token="@token" />
+                            <AudioTrack File="@file" Token="@token" />
                         }
                     </td>
                 </tr>
@@ -57,15 +56,7 @@ else
 @code {
     [Parameter] public string? Uuid { get; set; }
 
-    class FileEntry
-    {
-        public string Id { get; set; } = "";
-        public string Name { get; set; } = "";
-        public string MimeType { get; set; } = "";
-    }
-
     string? Name;
-    List<Track>? tracks;
     List<FileEntry> files = [];
     string? token;
 
@@ -78,27 +69,53 @@ else
         Console.WriteLine($"Playlist loaded at {watch.Elapsed.TotalSeconds}s");
 
         Name = playlist.Name;
-        tracks = playlist.Tracks;
+
+        // Log all paths
+        foreach (var t in playlist.Tracks)
+        {
+            Console.WriteLine($"Track path: {t.Path}");
+        }
 
         token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
 
         // Extract unique filenames
-        var filenames = tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
+        var filenames = playlist.Tracks.Select(t => Path.GetFileName(t.Path)).Distinct();
+        foreach (var t in filenames)
+        {
+            Console.WriteLine($"Filename: {t}");
+        }
 
         Console.WriteLine($"Start drive query {watch.Elapsed.TotalSeconds}s");
         var nameConditions = string.Join(" or ", filenames.Select(f => $"name = '{f.Replace("'", "\\'")}'"));
         var query = $"mimeType contains 'audio/' and ({nameConditions})";
 
         var json = await Http.GetFromJsonAsync<JsonElement>(
-            $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
+        $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(query)}&fields=files(id,name,mimeType)&access_token={token}"
         );
-        Console.WriteLine($"Drive query done {watch.Elapsed.TotalSeconds}s");
-        files = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
+        Console.WriteLine($"Drive raw file query done {watch.Elapsed.TotalSeconds}s");
+
+        // Map files from playlist tracks, matching to Drive files by filename
+        var driveFiles = json.GetProperty("files").EnumerateArray().Select(f => new FileEntry
+        {
+            DriveFileId = f.GetProperty("id").GetString()!,
+            DriveFileName = f.GetProperty("name").GetString()!,
+            DriveFileMimeType = f.GetProperty("mimeType").GetString()!,
+        }).ToList();
+
+        files = playlist.Tracks.Select(t =>
+        {
+            var file = driveFiles.FirstOrDefault(f => f.DriveFileName == Path.GetFileName(t.Path));
+            Console.WriteLine($"Track path: {t.Path} | Matched file: {(file != null ? file.DriveFileName : "(none)")}");
+            if (file is null)
             {
-                Id = f.GetProperty("id").GetString()!,
-                Name = f.GetProperty("name").GetString()!,
-                MimeType = f.GetProperty("mimeType").GetString()!
-            }).ToList();
+                Console.WriteLine($"No matching file found for track: {t.Path}");
+                return new FileEntry { Track = t }; // Return empty FileEntry with track info
+            }
+
+            file.Track = t;
+            return file;
+        }).ToList();
+
         Console.WriteLine($"Page loaded {watch.Elapsed.TotalSeconds}s");
     }
 }

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>WaveSurfer Stream + Peaks</title>
+  <script src="https://unpkg.com/wavesurfer.js@7"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      max-width: 900px;
+      margin: auto;
+    }
+
+    #waveform {
+      height: 128px;
+      margin-bottom: 1em;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>WaveSurfer + Google Drive Streaming</h2>
+  <div id="waveform"></div>
+  <button id="playBtn">▶️ Play</button>
+
+  <script type="module">
+    const driveId = '1BxAF0U6SmzrqftpxxNOecyh3JxZKFoz4';
+    const proxyUrl = `https://corsproxy.io/?https://drive.google.com/uc?export=download&id=${driveId}`;
+    const duration = 7326; // 2:02:06
+    const peaksUrl = 'Z17.1 Psytech 2024-03-17.wav.peaks.json';
+
+    const waveform = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: 'lightgray',
+      progressColor: 'orange',
+      height: 128,
+    });
+
+    const init = async () => {
+      const peaksRes = await fetch(peaksUrl);
+      const peaks = await peaksRes.json();
+      console.log(`🎧 Peaks loaded: ${peaks.length} samples`);
+      await waveform.load(proxyUrl, { peaks, duration });
+    };
+
+    document.getElementById('playBtn').onclick = () => waveform.playPause();
+
+    init();
+  </script>
+</body>
+
+</html>

@@ -1,4 +1,5 @@
-﻿@typeparam TItem
+﻿@namespace TraktorGoogleDrive.Components
+@typeparam TItem
 
 <div style="margin-left:@(Level * 1.2)rem">
     <div @onclick="Toggle">
@@ -11,12 +12,8 @@
         {
             @foreach (var child in Children)
             {
-                <SidebarTree TItem="TItem"
-                             Label="@ItemSelector(child)"
-                             Children="@ChildSelector(child)"
-                             ItemSelector="ItemSelector"
-                             ChildSelector="ChildSelector"
-                             Level="@(Level + 1)" />
+                <SidebarTree TItem="TItem" Label="@ItemSelector(child)" Children="@ChildSelector(child)" ItemSelector="ItemSelector"
+                    ChildSelector="ChildSelector" Level="@(Level + 1)" />
             }
         }
     }

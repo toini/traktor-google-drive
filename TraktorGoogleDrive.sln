@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TraktorGoogleDrive", "TraktorGoogleDrive\TraktorGoogleDrive.csproj", "{A1862FDC-231C-4D17-8969-03A318FAA0CE}"
+Project("{FAE04EC0-301C-11D3-BF4B-00C04F79EFBC}") = "TraktorGoogleDrive", "TraktorGoogleDrive\TraktorGoogleDrive.csproj", "{A1862FDC-231C-4D17-8969-03A318FAA0CE}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
 	ProjectSection(SolutionItems) = preProject
@@ -11,6 +11,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.gitignore = .gitignore
 		README.md = README.md
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TraktorGoogleDrive.Server", "TraktorGoogleDrive.Server\TraktorGoogleDrive.Server.csproj", "{FD95B43A-A587-4C01-9056-BD541070E1FD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,6 +36,18 @@ Global
 		{A1862FDC-231C-4D17-8969-03A318FAA0CE}.Release|x64.Build.0 = Release|Any CPU
 		{A1862FDC-231C-4D17-8969-03A318FAA0CE}.Release|x86.ActiveCfg = Release|Any CPU
 		{A1862FDC-231C-4D17-8969-03A318FAA0CE}.Release|x86.Build.0 = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|x64.Build.0 = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Debug|x86.Build.0 = Debug|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|x64.ActiveCfg = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|x64.Build.0 = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|x86.ActiveCfg = Release|Any CPU
+		{FD95B43A-A587-4C01-9056-BD541070E1FD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
