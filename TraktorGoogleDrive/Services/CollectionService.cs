@@ -1,70 +1,91 @@
-﻿using System.Diagnostics;
-using System.Net.Http.Json;
-using System.Text.Json;
-
-using Microsoft.JSInterop;
-
 using TraktorNmlParser.Models;
 
 namespace TraktorGoogleDrive.Services;
 
 public class CollectionService
 {
-    private readonly HttpClient _http;
-    private readonly IJSRuntime _js;
-    private Collection? _collection = null;
+    // The Traktor collection.nml in Drive.
+    private const string CollectionFileId = "1yqP8GXUb9qLV8gXRLpvKpyy7DDY7CqAC";
 
-    public CollectionService(HttpClient http, IJSRuntime js)
+    // Traktor's own root node. It is a container, not a folder the user made,
+    // so it should never appear in the sidebar as if it were one.
+    private const string TraktorRootNodeName = "$ROOT";
+
+    private readonly DriveService _drive;
+    private readonly AuthService _auth;
+
+    private Collection? _collection;
+    private Task<Collection>? _inFlight;
+
+    public CollectionService(DriveService drive, AuthService auth)
     {
-        _http = http;
-        _js = js;
+        _drive = drive;
+        _auth = auth;
     }
 
-    public async Task<Collection> GetCollectionAsync()
+    /// <summary>
+    /// The collection is a single large download shared by every page, so
+    /// concurrent callers await one request rather than each starting their own.
+    /// </summary>
+    public Task<Collection> GetCollectionAsync()
     {
-        var watch = Stopwatch.StartNew();
-        Console.WriteLine($"[CollectionService] Start load {watch.Elapsed.TotalSeconds}s");
-        if (_collection is not null)
+        if (_collection is not null) return Task.FromResult(_collection);
+        return _inFlight ??= LoadAsync();
+    }
+
+    private async Task<Collection> LoadAsync()
+    {
+        try
         {
-            Console.WriteLine($"[CollectionService] Returning cached collection {watch.Elapsed.TotalSeconds}s");
+            var token = await _auth.GetTokenAsync()
+                ?? throw new DriveAuthException("No access token");
+
+            var content = await _drive.DownloadTextAsync(CollectionFileId, token);
+            var parser = new TraktorNmlParser.NmlParser();
+            _collection = parser.Load(content);
             return _collection;
         }
-        var token = await _js.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-        Console.WriteLine($"[CollectionService] Got token {watch.Elapsed.TotalSeconds}s");
-        var fileId = await GetCollectionFileId(token);
-        Console.WriteLine($"[CollectionService] Got fileId {fileId} {watch.Elapsed.TotalSeconds}s");
-        var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
-        request.Headers.Authorization = new("Bearer", token);
-        var response = await _http.SendAsync(request);
-        var content = await response.Content.ReadAsStringAsync();
-        Console.WriteLine($"[CollectionService] Downloaded content {content.Length} bytes {watch.Elapsed.TotalSeconds}s");
-        var parser = new TraktorNmlParser.NmlParser();
-        _collection = parser.Load(content);
-        Console.WriteLine($"[CollectionService] Parsed collection {watch.Elapsed.TotalSeconds}s");
-        return _collection;
+        finally
+        {
+            _inFlight = null;
+        }
+    }
+
+    /// <summary>
+    /// Folders worth showing: the parser hands back Traktor's $ROOT node as a
+    /// Folder alongside its own children, and folders with no playlists are
+    /// noise in a sidebar.
+    /// </summary>
+    public async Task<List<Folder>> GetFoldersAsync()
+    {
+        var collection = await GetCollectionAsync();
+        return collection.Folders
+            .Where(f => !string.Equals(f.Name, TraktorRootNodeName, StringComparison.Ordinal))
+            .Where(f => f.Playlists.Count > 0)
+            .ToList();
+    }
+
+    /// <summary>Playlists sitting directly under $ROOT, which have no folder of their own.</summary>
+    public async Task<List<Playlist>> GetRootPlaylistsAsync()
+    {
+        var collection = await GetCollectionAsync();
+        return collection.Folders
+            .Where(f => string.Equals(f.Name, TraktorRootNodeName, StringComparison.Ordinal))
+            .SelectMany(f => f.Playlists)
+            .ToList();
     }
 
     public async Task<Playlist?> GetPlaylistByUuid(string uuid)
     {
         var collection = await GetCollectionAsync();
-        return collection.Folders.SelectMany(f => f.Playlists).FirstOrDefault(p => p.Uuid == uuid);
+        return collection.Folders
+            .SelectMany(f => f.Playlists)
+            .FirstOrDefault(p => p.Uuid == uuid);
     }
 
-    async Task<string?> GetCollectionFileId(string token)
+    public void Invalidate()
     {
-        var musiikkiId = await FindChildId("root", "Musiikki", token);
-        if (musiikkiId is null) return null;
-
-        var nativeInstrumentsId = await FindChildId(musiikkiId, "Native Instruments", token);
-        if (nativeInstrumentsId is null) return null;
-
-        return await FindChildId(nativeInstrumentsId, "collection.nml", token);
-    }
-
-    async Task<string?> FindChildId(string parentId, string name, string token)
-    {
-        var url = $"https://www.googleapis.com/drive/v3/files?q='{parentId}'+in+parents+and+name='{name}'&fields=files(id)&access_token={token}";
-        var result = await _http.GetFromJsonAsync<JsonElement>(url);
-        return result.GetProperty("files").EnumerateArray().FirstOrDefault().GetProperty("id").GetString();
+        _collection = null;
+        _inFlight = null;
     }
 }
