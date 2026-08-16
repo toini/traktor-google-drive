@@ -1,22 +1,25 @@
-﻿@namespace TraktorGoogleDrive.Layout
+@namespace TraktorGoogleDrive.Layout
 @using TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Services
 @inherits LayoutComponentBase
+@inject AuthService Auth
+@inject NavigationManager Navigation
 
 <div class="page">
-    <div class="sidebar">
-        <div class="traktor-logo">
+    <aside class="sidebar">
+        <a class="traktor-logo" href="/music">
             <h4>TRAKTOR</h4>
             <small>Google Drive</small>
-        </div>
+        </a>
         <FolderTree />
-    </div>
+    </aside>
 
     <main>
         <div class="top-row px-4">
             <div class="top-row-brand">
                 <span class="brand-text">Music Collection</span>
             </div>
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+            <button class="link-button" @onclick="SignOut">Sign out</button>
         </div>
 
         <article class="content px-4">
@@ -24,3 +27,11 @@
         </article>
     </main>
 </div>
+
+@code {
+    async Task SignOut()
+    {
+        await Auth.SignOutAsync();
+        Navigation.NavigateTo("/login", forceLoad: true);
+    }
+}

@@ -1,43 +1,71 @@
-﻿@* Namespace: TraktorGoogleDrive.Components *@
-@using Microsoft.AspNetCore.Components
+@* Namespace: TraktorGoogleDrive.Components *@
 @using Microsoft.AspNetCore.Components.Routing
-@inject IJSRuntime JS
-@inject HttpClient Http
-@inject TraktorGoogleDrive.Services.CollectionService CollectionService
+@using TraktorGoogleDrive.Services
 @using TraktorNmlParser.Models
-@using System.Text.Json
-@using System.Diagnostics;
+@inject CollectionService CollectionService
+@inject AuthService Auth
 
-<div class="folder-tree nav flex-column">
-    @foreach (var folder in Folders)
+<nav class="folder-tree">
+    @if (loadError is not null)
     {
-        <div class="nav-item">
-            <details>
-                <summary class="nav-link">@folder.Name</summary>
-                <div class="ps-3">
-                    @foreach (var playlist in folder.Playlists)
-                    {
-                        <Microsoft.AspNetCore.Components.Routing.NavLink class="nav-link"
-                            href="@($"/playlist/{playlist.Uuid}")">@playlist.Name
-                        </Microsoft.AspNetCore.Components.Routing.NavLink>
-                    }
-                </div>
-            </details>
-        </div>
+        <p class="folder-tree-message error">@loadError</p>
     }
-</div>
+    else if (!loaded)
+    {
+        <p class="folder-tree-message">Loading collection…</p>
+    }
+    else
+    {
+        @foreach (var playlist in rootPlaylists)
+        {
+            <NavLink class="nav-link root-playlist" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
+        }
+
+        @foreach (var folder in folders)
+        {
+            <div class="nav-item">
+                <details open="@(folders.Count <= 3)">
+                    <summary class="nav-link">@folder.Name</summary>
+                    <div class="folder-children">
+                        @foreach (var playlist in folder.Playlists)
+                        {
+                            <NavLink class="nav-link" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
+                        }
+                    </div>
+                </details>
+            </div>
+        }
+
+        @if (folders.Count == 0 && rootPlaylists.Count == 0)
+        {
+            <p class="folder-tree-message">No playlists found.</p>
+        }
+    }
+</nav>
 
 @code {
-    List<Folder> Folders = [];
+    List<Folder> folders = [];
+    List<Playlist> rootPlaylists = [];
+    bool loaded;
+    string? loadError;
 
     protected override async Task OnInitializedAsync()
     {
-        var watch = Stopwatch.StartNew();
-        Console.WriteLine($"Folder tree start load {watch.Elapsed.TotalSeconds}s");
-        var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-
-        var collection = await CollectionService.GetCollectionAsync();
-        Folders = collection.Folders;
-        Console.WriteLine($"Folder tree done load {watch.Elapsed.TotalSeconds}s");
+        try
+        {
+            folders = await CollectionService.GetFoldersAsync();
+            rootPlaylists = await CollectionService.GetRootPlaylistsAsync();
+            loaded = true;
+        }
+        catch (DriveAuthException)
+        {
+            await Auth.HandleExpiredAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = "Could not load the collection.";
+            Console.Error.WriteLine($"[FolderTree] {ex}");
+            loaded = true;
+        }
     }
 }

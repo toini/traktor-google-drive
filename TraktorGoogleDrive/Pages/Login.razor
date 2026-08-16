@@ -1,35 +1,62 @@
-﻿@page "/login"
+@page "/login"
 @layout MinimalLayout
-@inject IJSRuntime JS
+@inject TraktorGoogleDrive.Services.AuthService Auth
 @inject NavigationManager Navigation
 
-<h3>Login</h3>
-<button @onclick="SignIn">Sign in with Google</button>
+<PageTitle>Sign in · Traktor</PageTitle>
+
+<div class="login-shell">
+    <div class="login-card">
+        <div class="login-brand">
+            <span class="login-logo">TRAKTOR</span>
+            <span class="login-sub">Google Drive</span>
+        </div>
+
+        <p class="login-lead">Stream your Traktor collection straight from Drive.</p>
+
+        @if (expired)
+        {
+            <p class="login-notice" role="status">Your session expired. Please sign in again.</p>
+        }
+        @if (failed)
+        {
+            <p class="login-notice error" role="alert">Sign-in was cancelled or failed. Try again.</p>
+        }
+
+        <button class="btn-google" @onclick="SignIn" disabled="@busy">
+            @(busy ? "Signing in…" : "Sign in with Google")
+        </button>
+
+        <p class="login-scope">Read-only access to your Drive files.</p>
+    </div>
+</div>
 
 @code {
+    [SupplyParameterFromQuery(Name = "expired")] public string? ExpiredFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "returnTo")] public string? ReturnTo { get; set; }
+
+    bool busy;
+    bool failed;
+
+    bool expired => !string.IsNullOrEmpty(ExpiredFlag);
+    string? returnTo => ReturnTo;
+
     async Task SignIn()
     {
-        await JS.InvokeVoidAsync("googleLogin");
+        busy = true;
+        failed = false;
 
-        string? token = default;
-        var retries = 100;
+        // Resolves when Google's callback fires, so no polling loop.
+        var token = await Auth.SignInAsync();
 
-        while (retries-- > 0)
+        busy = false;
+
+        if (string.IsNullOrWhiteSpace(token))
         {
-            token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-            if (!string.IsNullOrWhiteSpace(token))
-                break;
-
-            await Task.Delay(300);
+            failed = true;
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(token))
-        {
-            Navigation.NavigateTo("/music", true);
-        }
-        else
-        {
-            Console.WriteLine("⚠️ Google login failed or timed out.");
-        }
+        Navigation.NavigateTo(string.IsNullOrEmpty(returnTo) ? "/music" : returnTo, forceLoad: true);
     }
 }

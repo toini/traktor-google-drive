@@ -1,27 +1,10 @@
-﻿@page "/music"
+@page "/music"
 @layout MainLayout
-@inject IJSRuntime JS
-@inject HttpClient Http
-@using System.Text.Json
-@using TraktorGoogleDrive.Components
 
-<h3>Drive Music</h3>
+<PageTitle>Collection · Traktor</PageTitle>
 
-<p>Select playlist</p>
-
-@code {
-
-
-    protected override async Task OnInitializedAsync()
-    {
-        Console.WriteLine("Initializing component...");
-        var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-        if (string.IsNullOrEmpty(token))
-            Console.WriteLine("[Music.razor] No access token found in sessionStorage.");
-        else
-            Console.WriteLine($"[Music.razor] Access token found: {token.Substring(0, Math.Min(8, token.Length))}...");
-        // Simulate an async operation
-        //await Task.Delay(1000);
-        //Console.WriteLine($"Component initialized. Token: {token}");
-    }
-}
+<div class="empty-state">
+    <span class="empty-icon" aria-hidden="true">♫</span>
+    <h1>Your collection</h1>
+    <p>Pick a playlist from the sidebar to see its tracks.</p>
+</div>

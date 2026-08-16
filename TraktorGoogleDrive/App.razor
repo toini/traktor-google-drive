@@ -1,9 +1,9 @@
-﻿@inject IJSRuntime JS
+@inject TraktorGoogleDrive.Services.AuthService Auth
 @inject NavigationManager Navigation
 
 @if (!tokenChecked)
 {
-    <text>Checking authentication...</text>
+    <div class="app-booting">Checking authentication…</div>
 }
 else
 {
@@ -13,28 +13,32 @@ else
         </Found>
         <NotFound>
             <LayoutView Layout="@typeof(MainLayout)">
-                <p>Sorry, nothing found.</p>
+                <p class="state-message">Sorry, nothing found.</p>
             </LayoutView>
         </NotFound>
     </Router>
 }
 
 @code {
-    bool tokenChecked = false;
-    bool isAuthorized;
+    bool tokenChecked;
 
     protected override async Task OnInitializedAsync()
     {
-        var token = await JS.InvokeAsync<string>("sessionStorage.getItem", "access_token");
-        isAuthorized = !string.IsNullOrWhiteSpace(token);
+        var onLoginPage = Navigation.Uri.Contains("/login", StringComparison.OrdinalIgnoreCase);
 
-        if (!isAuthorized && !Navigation.Uri.Contains("/login"))
+        // Null covers both "never signed in" and "token expired" — auth.js
+        // clears an expired token rather than handing back a dead one.
+        var token = await Auth.GetTokenAsync();
+
+        if (string.IsNullOrWhiteSpace(token) && !onLoginPage)
         {
-            Navigation.NavigateTo("/login", true);
-            return; // prevent further render
+            var returnTo = Navigation.ToBaseRelativePath(Navigation.Uri);
+            Navigation.NavigateTo(
+                string.IsNullOrEmpty(returnTo) ? "/login" : $"/login?returnTo={Uri.EscapeDataString("/" + returnTo)}",
+                forceLoad: false);
+            return;
         }
 
         tokenChecked = true;
-        StateHasChanged(); // re-render with router
     }
 }

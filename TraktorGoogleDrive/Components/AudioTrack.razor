@@ -1,122 +1,51 @@
-﻿@namespace TraktorGoogleDrive.Components
+@namespace TraktorGoogleDrive.Components
 @using Microsoft.JSInterop
-@inject IJSRuntime JS
 @using TraktorGoogleDrive.Models
+@using TraktorGoogleDrive.Services
+@implements IDisposable
+@inject PlayerService Player
 
-<button class="btn btn-sm btn-outline-primary play-button @(isPlaying ? "playing" : "")" @onclick="PlayPause" style="padding: 2px 8px; font-size: 12px;">
-    @if (isPlaying)
+<button class="play-button @StateClass"
+        data-drive-file-id="@File?.DriveFileId"
+        data-state="@StateClass"
+        title="@(IsPlaying ? "Pause" : "Play") @(File?.Track?.Title)"
+        aria-label="@(IsPlaying ? "Pause" : "Play") @(File?.Track?.Title)"
+        @onclick="Toggle"
+        disabled="@(File is null || string.IsNullOrEmpty(File.DriveFileId))">
+    @if (IsLoading)
     {
-        <span>⏸️</span>
+        <span class="play-icon spinner" aria-hidden="true"></span>
+    }
+    else if (IsPlaying)
+    {
+        <span class="play-icon" aria-hidden="true">❚❚</span>
     }
     else
     {
-        <span>▶️</span>
+        <span class="play-icon" aria-hidden="true">▶</span>
     }
 </button>
 
 @code {
     [Parameter] public FileEntry? File { get; set; }
     [Parameter] public string? Token { get; set; }
-    [Parameter] public EventCallback<string?> OnPlayStateChanged { get; set; }
 
-    private bool isPlaying = false;
-    private IJSObjectReference? audioElement;
+    bool IsPlaying => File is not null && Player.IsPlaying(File.DriveFileId);
+    bool IsLoading => File is not null && Player.IsLoading(File.DriveFileId);
 
-    protected override void OnParametersSet()
+    string StateClass => IsLoading ? "loading" : IsPlaying ? "playing" : "idle";
+
+    protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
+
+    void OnPlayerChanged() => InvokeAsync(StateHasChanged);
+
+    async Task Toggle()
     {
-        if (File != null)
-        {
-            // Check if this is the currently playing track
-            var currentlyPlayingId = GetCurrentlyPlayingId();
-            var wasPlaying = isPlaying;
-            isPlaying = currentlyPlayingId == File.DriveFileId;
-            
-            if (wasPlaying != isPlaying)
-            {
-                StateHasChanged();
-            }
-        }
+        if (File is null || string.IsNullOrEmpty(File.DriveFileId) || string.IsNullOrEmpty(Token))
+            return;
+
+        await Player.ToggleAsync(File.DriveFileId, DriveAudio.UrlFor(File.DriveFileId, Token));
     }
 
-    private string? GetCurrentlyPlayingId()
-    {
-        // This would ideally come from a shared service, but for now we'll use a simple approach
-        return null; // Will be managed by the parent component
-    }
-
-    async Task PlayPause()
-    {
-        if (File == null || string.IsNullOrEmpty(Token)) return;
-
-        try
-        {
-            if (audioElement == null)
-            {
-                var audioUrl = $"/api/proxy/drive/{File.DriveFileId}?token={Token}";
-                audioElement = await JS.InvokeAsync<IJSObjectReference>("createAudioElement", audioUrl);
-                
-                // Add event listeners for audio end and pause
-                await JS.InvokeVoidAsync("addAudioEventListeners", audioElement, DotNetObjectReference.Create(this));
-            }
-
-            if (isPlaying)
-            {
-                await JS.InvokeVoidAsync("pauseAudio", audioElement);
-                isPlaying = false;
-                await OnPlayStateChanged.InvokeAsync(null);
-            }
-            else
-            {
-                await JS.InvokeVoidAsync("playAudio", audioElement);
-                isPlaying = true;
-                await OnPlayStateChanged.InvokeAsync(File.DriveFileId);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error playing audio: {ex.Message}");
-        }
-    }
-
-    [JSInvokable]
-    public async Task OnAudioEnded()
-    {
-        isPlaying = false;
-        await OnPlayStateChanged.InvokeAsync(null);
-        StateHasChanged();
-    }
-
-    [JSInvokable]
-    public async Task OnAudioPaused()
-    {
-        isPlaying = false;
-        await OnPlayStateChanged.InvokeAsync(null);
-        StateHasChanged();
-    }
-
-    public async Task StopPlayback()
-    {
-        if (audioElement != null && isPlaying)
-        {
-            await JS.InvokeVoidAsync("pauseAudio", audioElement);
-            isPlaying = false;
-            StateHasChanged();
-        }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (audioElement != null)
-        {
-            await audioElement.DisposeAsync();
-        }
-    }
+    public void Dispose() => Player.Changed -= OnPlayerChanged;
 }
-
-<style>
-    .play-button {
-        min-width: 32px;
-        height: 28px;
-        border-radius: 4px;
-    }
-</style>
