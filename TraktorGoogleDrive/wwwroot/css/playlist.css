@@ -83,6 +83,26 @@
     border-right: none;
 }
 
+#playlist-table th.sortable {
+    cursor: pointer;
+}
+
+#playlist-table th.sortable:hover {
+    color: #ffffff;
+}
+
+#playlist-table th.sortable[aria-sort="ascending"],
+#playlist-table th.sortable[aria-sort="descending"] {
+    color: #ffffff;
+}
+
+.sort-indicator {
+    display: inline-block;
+    width: 10px;
+    margin-left: 3px;
+    color: #ff6600;
+}
+
 #playlist-table tbody tr:nth-child(even) td {
     background-color: #1c2025;
 }

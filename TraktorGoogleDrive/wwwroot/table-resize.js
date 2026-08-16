@@ -52,6 +52,15 @@ window.initResizableTable = function (tableId) {
             startWidth = parseInt(window.getComputedStyle(header).width, 10);
             document.addEventListener('mousemove', doDrag);
             document.addEventListener('mouseup', stopDrag);
+
+            // A drag's mouseup (or even a stray click on the resizer strip)
+            // fires a click that bubbles into the header's sort handler.
+            // Swallow the very next click in the capture phase, before it
+            // can reach Blazor's delegated listener.
+            const swallowClick = (ev) => ev.stopPropagation();
+            document.addEventListener('click', swallowClick, { capture: true, once: true });
+            setTimeout(() => document.removeEventListener('click', swallowClick, { capture: true }), 0);
+
             e.preventDefault();
             e.stopPropagation();
         });

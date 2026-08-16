@@ -44,16 +44,16 @@ else
             <thead>
                 <tr>
                     <th scope="col" class="col-play"><span class="visually-hidden">Play</span></th>
-                    <th scope="col">Title</th>
-                    <th scope="col">Artist</th>
-                    <th scope="col">Folder</th>
-                    <th scope="col">Label</th>
-                    <th scope="col">Comment</th>
-                    <th scope="col" class="col-time">Length</th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Title)" @onclick="() => SortBy(SortColumn.Title)">Title<span class="sort-indicator">@Arrow(SortColumn.Title)</span></th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Artist)" @onclick="() => SortBy(SortColumn.Artist)">Artist<span class="sort-indicator">@Arrow(SortColumn.Artist)</span></th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Folder)" @onclick="() => SortBy(SortColumn.Folder)">Folder<span class="sort-indicator">@Arrow(SortColumn.Folder)</span></th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Label)" @onclick="() => SortBy(SortColumn.Label)">Label<span class="sort-indicator">@Arrow(SortColumn.Label)</span></th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment)" @onclick="() => SortBy(SortColumn.Comment)">Comment<span class="sort-indicator">@Arrow(SortColumn.Comment)</span></th>
+                    <th scope="col" class="col-time sortable" aria-sort="@AriaSort(SortColumn.Length)" @onclick="() => SortBy(SortColumn.Length)">Length<span class="sort-indicator">@Arrow(SortColumn.Length)</span></th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var file in files)
+                @foreach (var file in SortedFiles())
                 {
                     var missing = string.IsNullOrEmpty(file.DriveFileId);
                     <tr class="@RowClass(file)" title="@file.Track?.Path">
@@ -96,6 +96,13 @@ else
     string? loadError;
     int missingCount;
 
+    enum SortColumn { Title, Artist, Folder, Label, Comment, Length }
+
+    // Default: ascending by Title. Null column means Traktor's own playlist
+    // order — the mix order the user built, so it must stay reachable.
+    SortColumn? sortColumn = SortColumn.Title;
+    bool sortAscending = true;
+
     protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
 
     void OnPlayerChanged() => InvokeAsync(StateHasChanged);
@@ -108,6 +115,80 @@ else
     static string FolderOf(string? path) =>
         string.IsNullOrEmpty(path) ? "" : Path.GetFileName(Path.GetDirectoryName(path) ?? "");
 
+    async Task SortBy(SortColumn column)
+    {
+        if (sortColumn != column) { sortColumn = column; sortAscending = true; }
+        else if (sortAscending) { sortAscending = false; }
+        else { sortColumn = null; } // third click: back to Traktor's own order
+
+        await SaveSortStateAsync();
+    }
+
+    string Arrow(SortColumn column) =>
+        sortColumn != column ? "" : sortAscending ? "▲" : "▼";
+
+    string AriaSort(SortColumn column) =>
+        sortColumn != column ? "none" : sortAscending ? "ascending" : "descending";
+
+    IEnumerable<FileEntry> SortedFiles()
+    {
+        if (files is null) return [];
+        if (sortColumn is null) return files;
+
+        if (sortColumn == SortColumn.Length)
+        {
+            var byHasLength = files.OrderBy(f => f.Track?.PlaytimeFloat is null);
+            return sortAscending
+                ? byHasLength.ThenBy(f => f.Track?.PlaytimeFloat ?? 0)
+                : byHasLength.ThenByDescending(f => f.Track?.PlaytimeFloat ?? 0);
+        }
+
+        var column = sortColumn.Value;
+        var byHasText = files.OrderBy(f => string.IsNullOrEmpty(TextKey(f, column)));
+        return sortAscending
+            ? byHasText.ThenBy(f => TextKey(f, column), StringComparer.OrdinalIgnoreCase)
+            : byHasText.ThenByDescending(f => TextKey(f, column), StringComparer.OrdinalIgnoreCase);
+    }
+
+    static string? TextKey(FileEntry file, SortColumn column) => column switch
+    {
+        SortColumn.Title => file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""),
+        SortColumn.Artist => file.Track?.Artist,
+        SortColumn.Folder => FolderOf(file.Track?.Path),
+        SortColumn.Label => file.Track?.Label,
+        SortColumn.Comment => file.Track?.Comment,
+        _ => null,
+    };
+
+    string SortStorageKey => $"playlist-sort:{Uuid}";
+
+    async Task LoadSortStateAsync()
+    {
+        sortColumn = SortColumn.Title;
+        sortAscending = true;
+
+        string? raw;
+        try { raw = await JS.InvokeAsync<string?>("localStorage.getItem", SortStorageKey); }
+        catch { return; }
+
+        if (string.IsNullOrEmpty(raw)) return;
+        if (raw == "original") { sortColumn = null; return; }
+
+        var parts = raw.Split(':');
+        if (parts.Length == 2 && Enum.TryParse<SortColumn>(parts[0], out var column))
+        {
+            sortColumn = column;
+            sortAscending = parts[1] == "asc";
+        }
+    }
+
+    async Task SaveSortStateAsync()
+    {
+        var value = sortColumn is null ? "original" : $"{sortColumn}:{(sortAscending ? "asc" : "desc")}";
+        try { await JS.InvokeVoidAsync("localStorage.setItem", SortStorageKey, value); }
+        catch { /* storage unavailable — not worth failing the sort over */ }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(Uuid)) return;
@@ -118,6 +199,7 @@ else
         files = null;
         loadError = null;
         missingCount = 0;
+        await LoadSortStateAsync();
 
         var watch = Stopwatch.StartNew();
 
@@ -159,7 +241,10 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && files?.Count > 0)
+        // NOT gated on firstRender: tracks load asynchronously, so on the first
+        // render files is still null and the resizers were never created at all.
+        // initResizableTable is idempotent (it marks the table it has wired up).
+        if (files?.Count > 0)
         {
             await JS.InvokeVoidAsync("initResizableTable", "playlist-table");
         }
