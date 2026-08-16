@@ -39,24 +39,53 @@ app.UseStaticFiles(new StaticFileOptions
 // No UseHttpsRedirection: Cloud Run (and any CDN in front) terminates TLS and
 // forwards plain HTTP to the container, so redirecting here only risks a loop.
 
-/// Headers worth passing through from Drive so the browser can seek. Without
-/// Content-Length and Accept-Ranges the media element cannot range-request, and
-/// long sets become unseekable.
-static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing)
+/// Cloud Run caps a non-streamed response at 32 MiB, and a DJ set is 1-2 GB.
+/// Setting Content-Length makes the response buffered rather than chunked, so
+/// forwarding the real length (needed for seeking) tripped that cap and every
+/// large file 500'd. The fix is to answer range requests in bounded slices:
+/// small enough to stay under the cap, with Content-Range still reporting the
+/// true total so the browser knows the duration and can seek.
+const long MaxSliceBytes = 8L * 1024 * 1024;
+
+/// Parses "bytes=start-end". Returns the slice to ask Drive for, capped.
+static (long Start, long End)? ParseRange(string? header)
+{
+    if (string.IsNullOrWhiteSpace(header)) return null;
+
+    var m = System.Text.RegularExpressions.Regex.Match(header, @"bytes=(\d+)-(\d*)");
+    if (!m.Success) return null;
+
+    var start = long.Parse(m.Groups[1].Value);
+    var requestedEnd = m.Groups[2].Success && m.Groups[2].Value.Length > 0
+        ? long.Parse(m.Groups[2].Value)
+        : long.MaxValue;
+
+    // Chrome opens media with "bytes=0-", i.e. the whole file. Clamp it.
+    var end = Math.Min(requestedEnd, start + MaxSliceBytes - 1);
+    return (start, end);
+}
+
+static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing, bool ranged)
 {
     outgoing.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
-
-    if (upstream.Content.Headers.ContentLength is { } length)
-        outgoing.ContentLength = length;
-
-    if (upstream.Content.Headers.ContentRange is { } contentRange)
-        outgoing.Headers[HeaderNames.ContentRange] = contentRange.ToString();
-
-    outgoing.Headers[HeaderNames.AcceptRanges] =
-        upstream.Headers.AcceptRanges.Count > 0 ? string.Join(",", upstream.Headers.AcceptRanges) : "bytes";
+    outgoing.Headers[HeaderNames.AcceptRanges] = "bytes";
 
     // The URL carries a bearer token; never let a shared cache keep the body.
     outgoing.Headers[HeaderNames.CacheControl] = "private, no-store";
+
+    if (ranged)
+    {
+        // A bounded slice: safe to declare a length, and Content-Range carries
+        // the true total so the client can seek across the whole file.
+        if (upstream.Content.Headers.ContentRange is { } contentRange)
+            outgoing.Headers[HeaderNames.ContentRange] = contentRange.ToString();
+        if (upstream.Content.Headers.ContentLength is { } length)
+            outgoing.ContentLength = length;
+        return;
+    }
+
+    // Unranged: stream it. Deliberately NO Content-Length — that is what keeps
+    // the response chunked and exempt from Cloud Run's 32 MiB limit.
 }
 
 /// The proxy relays with the *caller's* token, so it cannot reach anything the
@@ -118,8 +147,9 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
         $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?alt=media");
     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-    if (incomingRequest.Headers.TryGetValue(HeaderNames.Range, out var rangeHeader))
-        request.Headers.TryAddWithoutValidation(HeaderNames.Range, rangeHeader.ToString());
+    var slice = ParseRange(incomingRequest.Headers[HeaderNames.Range].ToString());
+    if (slice is { } s)
+        request.Headers.TryAddWithoutValidation(HeaderNames.Range, $"bytes={s.Start}-{s.End}");
 
     using var upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
@@ -132,8 +162,9 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
         return;
     }
 
-    outgoingResponse.StatusCode = (int)upstream.StatusCode;
-    CopyMediaHeaders(upstream, outgoingResponse);
+    var ranged = slice is not null && upstream.StatusCode == System.Net.HttpStatusCode.PartialContent;
+    outgoingResponse.StatusCode = ranged ? StatusCodes.Status206PartialContent : StatusCodes.Status200OK;
+    CopyMediaHeaders(upstream, outgoingResponse, ranged);
 
     if (method == HttpMethod.Head) return;
 
