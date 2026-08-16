@@ -311,3 +311,50 @@ test.describe('added-at column', () => {
     expect(all[all.length - 1]).toBe('—');
   });
 });
+
+test.describe('recording -> playlist match', () => {
+  const RECORDED = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62';
+
+  test('expands a recording to the playlist built for that set', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${RECORDED}`);
+    await expect(page.getByText('Z11-3 2021-09-17')).toBeVisible();
+
+    await page.locator('.expander').first().click();
+    await expect(page.locator('.set-detail')).toBeVisible();
+
+    // ".rec" is the order actually played, so it must be the default pick over
+    // the base "Z11-3" playlist.
+    await expect(page.locator('#playlist-table select')).toHaveValue(
+      '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f61',
+    );
+    await expect(page.locator('.set-tracklist li')).toHaveCount(2);
+  });
+
+  test('lets the user override the match, and remembers it', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${RECORDED}`);
+    await page.locator('.expander').first().click();
+
+    const select = page.locator('#playlist-table select');
+    await select.selectOption('0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f60'); // the base playlist
+    await expect(page.locator('.set-tracklist li')).toHaveCount(3);
+
+    await page.reload();
+    await page.locator('.expander').first().click();
+    await expect(page.locator('#playlist-table select')).toHaveValue(
+      '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f60',
+    );
+  });
+
+  test('shows no expander on an ordinary track', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a');
+    await expect(page.getByText('Beta Pulse')).toBeVisible();
+    // Those tracks are not in a recordings folder.
+    await expect(page.locator('.expander')).toHaveCount(0);
+  });
+});

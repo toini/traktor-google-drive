@@ -62,3 +62,13 @@ test('capture the error surface', async ({ page }) => {
   await page.locator('.error-detail').waitFor();
   await page.screenshot({ path: `${OUT}/06-error.png`, fullPage: true });
 });
+
+test('capture an expanded set', async ({ page }) => {
+  await mockDrive(page);
+  await seedToken(page);
+  await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62');
+  await page.getByText('Z11-3 2021-09-17').waitFor();
+  await page.locator('.expander').first().click();
+  await page.locator('.set-tracklist').waitFor();
+  await page.screenshot({ path: `${OUT}/07-set-expanded.png`, fullPage: true });
+});

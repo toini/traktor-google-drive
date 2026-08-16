@@ -1,0 +1,112 @@
+@namespace TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Models
+@using TraktorGoogleDrive.Services
+@using TraktorNmlParser.Models
+@inject SetMatcher SetMatcher
+
+<div class="set-detail">
+    @if (loading)
+    {
+        <p class="state-message">Matching this recording to a playlist…</p>
+    }
+    else
+    {
+        <div class="set-detail-head">
+            <label for="@SelectId">Playlist for this set</label>
+            <select id="@SelectId" value="@(selected?.Uuid ?? "")" @onchange="OnPick">
+                <option value="">— none —</option>
+                @if (candidates.Count > 0)
+                {
+                    <optgroup label="Suggested">
+                        @foreach (var p in candidates)
+                        {
+                            <option value="@p.Uuid">@p.Name (@p.Tracks.Count)</option>
+                        }
+                    </optgroup>
+                }
+                <optgroup label="All playlists">
+                    @foreach (var p in all.Where(p => candidates.All(c => c.Uuid != p.Uuid)))
+                    {
+                        <option value="@p.Uuid">@p.Name (@p.Tracks.Count)</option>
+                    }
+                </optgroup>
+            </select>
+
+            @if (selected is not null)
+            {
+                <span class="set-detail-count">@selected.Tracks.Count tracks</span>
+            }
+            @if (isOverride)
+            {
+                <button class="link-button small" @onclick="ClearPick" title="Go back to the automatic match">reset</button>
+            }
+        </div>
+
+        @if (selected is null)
+        {
+            <p class="state-message subtle">
+                No playlist matched this recording. Pick one above — the choice is remembered.
+            </p>
+        }
+        else if (selected.Tracks.Count == 0)
+        {
+            <p class="state-message subtle">That playlist is empty.</p>
+        }
+        else
+        {
+            <ol class="set-tracklist">
+                @foreach (var t in selected.Tracks)
+                {
+                    <li>
+                        <span class="set-track-title">@(t.Title ?? Path.GetFileName(t.Path))</span>
+                        <span class="set-track-artist">@t.Artist</span>
+                        <span class="set-track-time">@TrackTime.Format(t.PlaytimeFloat)</span>
+                    </li>
+                }
+            </ol>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public FileEntry? Recording { get; set; }
+    [Parameter] public string? Token { get; set; }
+
+    IReadOnlyList<Playlist> candidates = [];
+    IReadOnlyList<Playlist> all = [];
+    Playlist? selected;
+    bool loading = true;
+    bool isOverride;
+
+    string SelectId => $"set-pick-{Recording?.DriveFileId}";
+    string FileName => Path.GetFileName(Recording?.Track?.Path ?? "");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Recording is null) { loading = false; return; }
+
+        candidates = await SetMatcher.CandidatesAsync(FileName);
+        all = await SetMatcher.AllPlaylistsAsync();
+        isOverride = await SetMatcher.GetOverrideAsync(Recording.DriveFileId) is not null;
+        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId);
+        loading = false;
+    }
+
+    async Task OnPick(ChangeEventArgs e)
+    {
+        if (Recording is null) return;
+        var uuid = e.Value?.ToString();
+
+        await SetMatcher.SetOverrideAsync(Recording.DriveFileId, uuid);
+        isOverride = !string.IsNullOrEmpty(uuid);
+        selected = string.IsNullOrEmpty(uuid) ? null : all.FirstOrDefault(p => p.Uuid == uuid);
+    }
+
+    async Task ClearPick()
+    {
+        if (Recording is null) return;
+        await SetMatcher.SetOverrideAsync(Recording.DriveFileId, null);
+        isOverride = false;
+        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId);
+    }
+}

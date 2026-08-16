@@ -6,6 +6,7 @@
 @inject TraktorGoogleDrive.Services.AuthService Auth
 @inject TraktorGoogleDrive.Services.PlayerService Player
 @inject TraktorGoogleDrive.Services.AppErrors Errors
+@inject TraktorGoogleDrive.Services.SetMatcher SetMatcher
 
 @using TraktorGoogleDrive.Components
 @using TraktorGoogleDrive.Models
@@ -43,6 +44,7 @@ else
         <table id="playlist-table" class="table table-hover playlist-table">
             <thead>
                 <tr>
+                    <th scope="col" class="col-expand"><span class="visually-hidden">Set</span></th>
                     <th scope="col" class="col-play"><span class="visually-hidden">Play</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Title)" @onclick="() => SortBy(SortColumn.Title)">Title<span class="sort-indicator">@Arrow(SortColumn.Title)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Artist)" @onclick="() => SortBy(SortColumn.Artist)">Artist<span class="sort-indicator">@Arrow(SortColumn.Artist)</span></th>
@@ -57,7 +59,18 @@ else
                 @foreach (var file in SortedFiles())
                 {
                     var missing = string.IsNullOrEmpty(file.DriveFileId);
+                    var recording = IsRecording(file);
+                    var open = expanded.Contains(file.DriveFileId);
                     <tr class="@RowClass(file)" title="@file.Track?.Path">
+                        <td class="col-expand">
+                            @if (recording)
+                            {
+                                <button class="expander @(open ? "open" : "")"
+                                        title="@(open ? "Hide" : "Show") the playlist for this set"
+                                        aria-expanded="@(open ? "true" : "false")"
+                                        @onclick="() => ToggleSet(file)">▸</button>
+                            }
+                        </td>
                         <td class="col-play">
                             @if (missing)
                             {
@@ -76,6 +89,15 @@ else
                         <td class="col-time">@TrackTime.Format(file.Track?.PlaytimeFloat)</td>
                         <td class="col-added">@TrackDate.Format(file.Track?.ImportDate)</td>
                     </tr>
+
+                    @if (recording && open)
+                    {
+                        <tr class="set-detail-row">
+                            <td colspan="9">
+                                <SetDetail Recording="@file" Token="@token" />
+                            </td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>
@@ -99,6 +121,22 @@ else
     int missingCount;
 
     enum SortColumn { Title, Artist, Folder, Label, Comment, Length, Added }
+
+    readonly HashSet<string> expanded = [];
+
+    // Only recordings map to a playlist; an ordinary track does not.
+    static bool IsRecording(FileEntry file)
+    {
+        var path = file.Track?.Path ?? "";
+        return path.Contains("/Setit/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/Gig preparation/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/Recordings/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    void ToggleSet(FileEntry file)
+    {
+        if (!expanded.Remove(file.DriveFileId)) expanded.Add(file.DriveFileId);
+    }
 
     // Default: ascending by Title. Null column means Traktor's own playlist
     // order — the mix order the user built, so it must stay reachable.

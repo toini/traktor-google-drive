@@ -15,7 +15,7 @@
 <NML VERSION="19">
   <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
   <MUSICFOLDERS></MUSICFOLDERS>
-  <COLLECTION ENTRIES="5">
+  <COLLECTION ENTRIES="6">
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
@@ -49,6 +49,16 @@
       <TEMPO BPM="145.000000"></TEMPO>
     </ENTRY>
 
+    <!--
+      A recording, in the folder shape the real collection uses. Its name has a
+      trailing date, so SetName must strip that to reach the set id "Z11-3" and
+      find the playlist family below.
+    -->
+    <ENTRY MODIFIED_DATE="2021/9/17" TITLE="Z11-3 2021-09-17" ARTIST="">
+      <LOCATION DIR="/:Users/:toni/:Google Drive/:Musiikki/:Traktor/:Setit/:" FILE="Z11-3 2021-09-17.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="7451" PLAYTIME_FLOAT="7451.0" IMPORT_DATE="2021/9/18"></INFO>
+    </ENTRY>
+
     <!-- Present in the collection but NOT referenced by any playlist. -->
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Delta Unlisted" ARTIST="Test Artist Four">
       <LOCATION DIR="/:Music/:Archive/:" FILE="delta.wav" VOLUME="Macintosh HD"></LOCATION>
@@ -59,7 +69,7 @@
 
   <PLAYLISTS>
     <NODE TYPE="FOLDER" NAME="$ROOT">
-      <SUBNODES COUNT="3">
+      <SUBNODES COUNT="4">
 
         <!-- Playlist directly under $ROOT — renders under the "$ROOT" pseudo-folder (B10). -->
         <NODE TYPE="PLAYLIST" NAME="Root Level Playlist">
@@ -69,7 +79,7 @@
         </NODE>
 
         <NODE TYPE="FOLDER" NAME="My Sets">
-          <SUBNODES COUNT="2">
+          <SUBNODES COUNT="4">
             <NODE TYPE="PLAYLIST" NAME="Psytech 2024">
               <PLAYLIST ENTRIES="4" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a">
                 <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:alpha.wav"></PRIMARYKEY></ENTRY>
@@ -78,11 +88,30 @@
                 <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Archive/:alpha.wav"></PRIMARYKEY></ENTRY>
               </PLAYLIST>
             </NODE>
+            <NODE TYPE="PLAYLIST" NAME="Z11-3">
+              <PLAYLIST ENTRIES="3" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f60">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:alpha.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:beta.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:gamma.wav"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+            <NODE TYPE="PLAYLIST" NAME="Z11-3.rec">
+              <PLAYLIST ENTRIES="2" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f61">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:beta.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:gamma.wav"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
             <NODE TYPE="PLAYLIST" NAME="Empty Set">
               <PLAYLIST ENTRIES="0" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5b">
               </PLAYLIST>
             </NODE>
           </SUBNODES>
+        </NODE>
+
+        <NODE TYPE="PLAYLIST" NAME="Recorded sets">
+          <PLAYLIST ENTRIES="1" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62">
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Users/:toni/:Google Drive/:Musiikki/:Traktor/:Setit/:Z11-3 2021-09-17.mp3"></PRIMARYKEY></ENTRY>
+          </PLAYLIST>
         </NODE>
 
         <NODE TYPE="FOLDER" NAME="Archive">

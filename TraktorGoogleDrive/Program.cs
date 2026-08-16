@@ -14,6 +14,7 @@ builder.Services.AddSingleton<AppErrors>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DriveService>();
 builder.Services.AddScoped<CollectionService>();
+builder.Services.AddScoped<SetMatcher>();
 // Singleton so every component shares one audio element — two tracks playing
 // at once is then not representable.
 builder.Services.AddSingleton<PlayerService>();

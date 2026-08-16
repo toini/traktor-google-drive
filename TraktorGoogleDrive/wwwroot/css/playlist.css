@@ -44,7 +44,7 @@
 #playlist-table {
     table-layout: fixed;
     width: 100%;
-    min-width: 960px;
+    min-width: 990px;
     background-color: #1a1a1a;
     color: #e6e6e6;
     margin-bottom: 0;
@@ -236,4 +236,88 @@
     text-align: right;
     font-variant-numeric: tabular-nums;
     color: #8b949e;
+}
+
+/* Expandable set detail ------------------------------------------------ */
+
+.col-expand {
+    width: 30px;
+    text-align: center;
+    padding-left: 4px;
+    padding-right: 0;
+    text-overflow: clip;
+}
+
+.expander {
+    background: none;
+    border: none;
+    color: #8b949e;
+    font-size: 12px;
+    line-height: 1;
+    padding: 2px 4px;
+    cursor: pointer;
+    transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.expander:hover { color: #ff6600; }
+.expander.open { transform: rotate(90deg); color: #ff6600; }
+
+#playlist-table tbody tr.set-detail-row td {
+    background: #14181d;
+    padding: 0;
+    border-bottom: 1px solid #2c3138;
+}
+
+.set-detail { padding: 0.9rem 1.1rem 1.1rem 2.4rem; }
+
+.set-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.7rem;
+}
+
+.set-detail-head label {
+    color: #ff9d4d;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.set-detail-head select {
+    background: #0d1117;
+    color: #e6e6e6;
+    border: 1px solid #30363d;
+    border-radius: 5px;
+    padding: 0.3rem 0.5rem;
+    font-size: 12px;
+    max-width: 460px;
+}
+
+.set-detail-count { color: #8b949e; font-size: 12px; }
+
+.link-button.small { font-size: 11px; }
+
+.set-tracklist {
+    margin: 0;
+    padding-left: 1.6rem;
+    color: #c9d1d9;
+    font-size: 12px;
+    columns: 2;
+    column-gap: 2.5rem;
+}
+
+.set-tracklist li {
+    padding: 2px 0;
+    break-inside: avoid;
+}
+
+.set-track-title { color: #ffffff; }
+.set-track-artist { color: #8b949e; }
+.set-track-artist::before { content: " — "; }
+.set-track-time { color: #6e7681; float: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+    .set-tracklist { columns: 1; }
 }

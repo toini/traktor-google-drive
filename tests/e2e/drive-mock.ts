@@ -47,6 +47,7 @@ export const DRIVE_FILES = [
   { id: 'drive-gamma', name: 'gamma.wav', mimeType: 'audio/wav', parents: ['folder-sets'] },
   { id: 'drive-alpha-archive', name: 'alpha.wav', mimeType: 'audio/wav', parents: ['folder-archive'] },
   { id: 'drive-delta', name: 'delta.wav', mimeType: 'audio/wav', parents: ['folder-archive'] },
+  { id: 'drive-z11-3', name: 'Z11-3 2021-09-17.mp3', mimeType: 'audio/mpeg', parents: ['folder-sets'] },
 ];
 
 /**
