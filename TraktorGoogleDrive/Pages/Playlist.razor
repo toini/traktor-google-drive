@@ -5,6 +5,7 @@
 @inject TraktorGoogleDrive.Services.DriveService Drive
 @inject TraktorGoogleDrive.Services.AuthService Auth
 @inject TraktorGoogleDrive.Services.PlayerService Player
+@inject TraktorGoogleDrive.Services.AppErrors Errors
 
 @using TraktorGoogleDrive.Components
 @using TraktorGoogleDrive.Models
@@ -144,14 +145,15 @@ else
             Console.WriteLine($"[Playlist] {playlist.Name}: {files.Count} tracks, "
                             + $"{missingCount} unmatched, {watch.Elapsed.TotalSeconds:0.00}s");
         }
-        catch (DriveAuthException)
+        catch (DriveAuthException ex)
         {
+            Errors.Report("Google rejected the access token", ex);
             await Auth.HandleExpiredAsync($"/playlist/{Uuid}");
         }
         catch (Exception ex)
         {
-            loadError = "Could not load this playlist.";
-            Console.Error.WriteLine($"[Playlist] {ex}");
+            loadError = ex.Message;
+            Errors.Report("Could not load this playlist", ex);
         }
     }
 

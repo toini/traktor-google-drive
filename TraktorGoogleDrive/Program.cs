@@ -9,6 +9,8 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+// Singleton so a failure raised on one page is still visible after navigating.
+builder.Services.AddSingleton<AppErrors>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DriveService>();
 builder.Services.AddScoped<CollectionService>();

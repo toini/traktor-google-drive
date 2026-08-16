@@ -232,3 +232,84 @@ h1, h2, h3, h4, h5, h6 {
     color: #6e7681;
     font-size: 11px;
 }
+
+/* Error banner ---------------------------------------------------------- */
+
+.error-banner {
+    margin: 0.75rem 1.5rem 0;
+    background: #2d1b1b;
+    border: 1px solid #a03b32;
+    border-left: 4px solid #f85149;
+    border-radius: 6px;
+    color: #ffd7d3;
+    font-size: 13px;
+}
+
+.error-banner-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(248, 81, 73, 0.25);
+}
+
+.error-banner-title {
+    font-weight: 600;
+    color: #ff9d95;
+    margin-right: auto;
+}
+
+.error-banner-toggle,
+.error-banner-close {
+    background: none;
+    border: 1px solid rgba(248, 81, 73, 0.4);
+    border-radius: 4px;
+    color: #ffb3ad;
+    font-size: 12px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+
+.error-banner-toggle:hover,
+.error-banner-close:hover {
+    background: rgba(248, 81, 73, 0.15);
+    color: #ffffff;
+}
+
+.error-list {
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+}
+
+.error-list li + li {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(248, 81, 73, 0.15);
+}
+
+.error-time {
+    color: #b98b87;
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.5rem;
+}
+
+.error-summary {
+    color: #ffd7d3;
+}
+
+/* Wraps and scrolls: Drive error bodies and .NET exception chains are long,
+   and truncating them defeats the point of showing them at all. */
+.error-detail {
+    margin: 0.4rem 0 0;
+    padding: 0.5rem;
+    max-height: 12rem;
+    overflow: auto;
+    background: #1a1010;
+    border: 1px solid rgba(248, 81, 73, 0.25);
+    border-radius: 4px;
+    color: #e6b3ae;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

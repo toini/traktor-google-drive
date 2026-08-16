@@ -19,10 +19,15 @@ public enum PlaybackState
 public class PlayerService : IAsyncDisposable
 {
     private readonly IJSRuntime _js;
+    private readonly AppErrors _errors;
     private IJSObjectReference? _module;
     private DotNetObjectReference<PlayerService>? _self;
 
-    public PlayerService(IJSRuntime js) => _js = js;
+    public PlayerService(IJSRuntime js, AppErrors errors)
+    {
+        _js = js;
+        _errors = errors;
+    }
 
     public string? CurrentFileId { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.Idle;
@@ -79,6 +84,22 @@ public class PlayerService : IAsyncDisposable
 
         if (state is "ended" or "idle") CurrentFileId = null;
         else if (fileId is not null) CurrentFileId = fileId;
+
+        switch (state)
+        {
+            case "unauthorized":
+                _errors.Report("Playback failed — Drive rejected the token for this file",
+                    $"fileId {fileId}. The audio proxy returned 401/403, so the token likely expired mid-session.");
+                break;
+            case "error":
+                _errors.Report("Playback failed",
+                    $"fileId {fileId}. The browser could not decode or fetch the audio.");
+                break;
+            case "blocked":
+                _errors.Report("Playback blocked by the browser",
+                    "Autoplay was refused. Click play again — browsers require a direct user gesture.");
+                break;
+        }
 
         Changed?.Invoke();
     }

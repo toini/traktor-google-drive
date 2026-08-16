@@ -1,0 +1,43 @@
+@namespace TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Services
+@implements IDisposable
+@inject AppErrors Errors
+
+@if (Errors.Any)
+{
+    <div class="error-banner" role="alert">
+        <div class="error-banner-head">
+            <span class="error-banner-title">
+                @Errors.Errors.Count @(Errors.Errors.Count == 1 ? "error" : "errors")
+            </span>
+            <button class="error-banner-toggle" @onclick="() => expanded = !expanded">
+                @(expanded ? "Hide" : "Show details")
+            </button>
+            <button class="error-banner-close" @onclick="Errors.Clear" aria-label="Dismiss errors">✕</button>
+        </div>
+
+        <ul class="error-list">
+            @foreach (var error in expanded ? Errors.Errors : Errors.Errors.Take(1))
+            {
+                <li>
+                    <span class="error-time">@error.Time</span>
+                    <span class="error-summary">@error.Summary</span>
+                    @if (expanded && !string.IsNullOrEmpty(error.Detail))
+                    {
+                        <pre class="error-detail">@error.Detail</pre>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    bool expanded;
+
+    protected override void OnInitialized() => Errors.Changed += OnChanged;
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Errors.Changed -= OnChanged;
+}

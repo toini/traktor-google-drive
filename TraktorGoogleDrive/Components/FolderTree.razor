@@ -4,6 +4,7 @@
 @using TraktorNmlParser.Models
 @inject CollectionService CollectionService
 @inject AuthService Auth
+@inject AppErrors Errors
 
 <nav class="folder-tree">
     @if (loadError is not null)
@@ -57,14 +58,17 @@
             rootPlaylists = await CollectionService.GetRootPlaylistsAsync();
             loaded = true;
         }
-        catch (DriveAuthException)
+        catch (DriveAuthException ex)
         {
+            Errors.Report("Google rejected the access token", ex);
             await Auth.HandleExpiredAsync();
         }
         catch (Exception ex)
         {
-            loadError = "Could not load the collection.";
-            Console.Error.WriteLine($"[FolderTree] {ex}");
+            // Show the real reason. This used to be an unhandled XmlException
+            // that blanked the page, because a 404 body was fed to the parser.
+            loadError = ex.Message;
+            Errors.Report($"Could not load {CollectionService.CollectionFileName}", ex);
             loaded = true;
         }
     }
