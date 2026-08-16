@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5299",
+      "environmentVariables": {
+        // Required: static web assets from the referenced Blazor client are
+        // only wired up (UseStaticWebAssets) in Development. Without it the
+        // server 404s on / and every wwwroot file, because in a non-published
+        // build the client's assets live in its own bin/, not ours.
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    },
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:7050;http://localhost:5299",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

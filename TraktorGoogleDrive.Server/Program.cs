@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
@@ -7,7 +8,19 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
 
+// Cloud Run sits in front as a TLS-terminating proxy, so without this the app
+// sees scheme=http and the load balancer's IP for every request.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor;
+    // The proxy is Google's, not something we enumerate.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 app.UseBlazorFrameworkFiles();
 
@@ -49,17 +62,25 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
 /// The proxy relays with the *caller's* token, so it cannot reach anything the
 /// caller could not already reach. What it must not become is an open relay for
 /// third-party pages, hence the same-origin check.
+///
+/// Compares HOST ONLY, deliberately. Cloud Run terminates TLS and forwards
+/// plain HTTP, so Request.Scheme is "http" while the browser sends
+/// "https://…" in Referer — comparing scheme rejected every real playback with
+/// a 403. Host is what actually distinguishes "our page" from "someone else's".
 static bool IsSameOrigin(HttpRequest request)
 {
-    var expected = $"{request.Scheme}://{request.Host}";
+    var expectedHost = request.Host.Host;
+
+    static bool HostMatches(string? value, string expected) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && string.Equals(uri.Host, expected, StringComparison.OrdinalIgnoreCase);
 
     if (request.Headers.TryGetValue(HeaderNames.Origin, out var origin) && !string.IsNullOrEmpty(origin))
-        return string.Equals(origin, expected, StringComparison.OrdinalIgnoreCase);
+        return HostMatches(origin.ToString(), expectedHost);
 
-    // Media elements often send Referer but no Origin for same-origin GETs.
-    if (request.Headers.TryGetValue(HeaderNames.Referer, out var referer)
-        && Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
-        return string.Equals($"{refererUri.Scheme}://{refererUri.Authority}", expected, StringComparison.OrdinalIgnoreCase);
+    // Media elements send Referer but no Origin for same-origin GETs.
+    if (request.Headers.TryGetValue(HeaderNames.Referer, out var referer) && !string.IsNullOrEmpty(referer))
+        return HostMatches(referer.ToString(), expectedHost);
 
     // Neither header: a direct navigation or curl. Allowed — it is the caller's
     // own token — but it is not a cross-site embed either.
@@ -122,8 +143,13 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
 
 // index.html names the non-fingerprinted scripts, so it must never be served
 // from cache without revalidating either.
+//
+// FileProvider must be set explicitly: passing StaticFileOptions without one
+// loses the composite provider that exposes the referenced client project's
+// static web assets, and the fallback 404s in `dotnet run`.
 app.MapFallbackToFile("index.html", new StaticFileOptions
 {
+    FileProvider = app.Environment.WebRootFileProvider,
     OnPrepareResponse = ctx =>
         ctx.Context.Response.Headers[HeaderNames.CacheControl] = "no-cache",
 });
