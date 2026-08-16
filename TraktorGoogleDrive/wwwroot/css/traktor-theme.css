@@ -98,3 +98,137 @@ h1, h2, h3, h4, h5, h6 {
     background-color: rgba(255, 102, 0, 0.3);
     color: #ffffff;
 }
+
+/* Shared page states --------------------------------------------------- */
+
+.app-booting,
+.state-message {
+    padding: 1.5rem 0;
+    color: #8b949e;
+}
+
+.state-message.error {
+    color: #ff7b72;
+}
+
+.state-message.subtle {
+    font-size: 12px;
+    padding-top: 0.5rem;
+}
+
+.empty-state {
+    padding: 4rem 0;
+    text-align: center;
+    color: #8b949e;
+}
+
+.empty-state .empty-icon {
+    display: block;
+    font-size: 2.5rem;
+    color: #ff6600;
+    opacity: 0.6;
+    margin-bottom: 0.5rem;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Login ---------------------------------------------------------------- */
+
+.login-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: radial-gradient(circle at 50% 0%, #24201d 0%, #141414 55%, #101010 100%);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-top: 3px solid #ff6600;
+    border-radius: 10px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+.login-brand {
+    margin-bottom: 1.5rem;
+}
+
+.login-logo {
+    display: block;
+    color: #ff6600;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 5px;
+}
+
+.login-sub {
+    display: block;
+    margin-top: 2px;
+    color: #8b949e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.login-lead {
+    color: #c9d1d9;
+    font-size: 14px;
+    margin-bottom: 1.5rem;
+}
+
+.login-notice {
+    margin-bottom: 1rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 6px;
+    font-size: 13px;
+    background: rgba(255, 102, 0, 0.1);
+    border: 1px solid rgba(255, 102, 0, 0.35);
+    color: #ffb877;
+}
+
+.login-notice.error {
+    background: rgba(248, 81, 73, 0.1);
+    border-color: rgba(248, 81, 73, 0.4);
+    color: #ff9d95;
+}
+
+.btn-google {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a1a;
+    background: linear-gradient(135deg, #ff8833 0%, #ff6600 100%);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+
+.btn-google:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.btn-google:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+
+.login-scope {
+    margin: 1rem 0 0;
+    color: #6e7681;
+    font-size: 11px;
+}
