@@ -1,11 +1,20 @@
+using Microsoft.JSInterop;
+
 using TraktorNmlParser.Models;
 
 namespace TraktorGoogleDrive.Services;
 
 public class CollectionService
 {
-    // The Traktor collection.nml in Drive.
-    private const string CollectionFileId = "1yqP8GXUb9qLV8gXRLpvKpyy7DDY7CqAC";
+    public const string CollectionFileName = "collection.nml";
+
+    /// <summary>
+    /// The id this app shipped with. Kept only as a first guess — it 404'd once
+    /// the file changed, so a miss falls through to search rather than failing.
+    /// </summary>
+    private const string LegacyCollectionFileId = "1yqP8GXUb9qLV8gXRLpvKpyy7DDY7CqAC";
+
+    private const string StorageKey = "collection_file_id";
 
     // Traktor's own root node. It is a container, not a folder the user made,
     // so it should never appear in the sidebar as if it were one.
@@ -13,15 +22,25 @@ public class CollectionService
 
     private readonly DriveService _drive;
     private readonly AuthService _auth;
+    private readonly AppErrors _errors;
+    private readonly IJSRuntime _js;
 
     private Collection? _collection;
     private Task<Collection>? _inFlight;
 
-    public CollectionService(DriveService drive, AuthService auth)
+    public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js)
     {
         _drive = drive;
         _auth = auth;
+        _errors = errors;
+        _js = js;
     }
+
+    /// <summary>The Drive file id actually used for the last successful load.</summary>
+    public string? ResolvedFileId { get; private set; }
+
+    /// <summary>Set when several collection.nml files exist and one was chosen.</summary>
+    public IReadOnlyList<DriveService.NamedFile> Candidates { get; private set; } = [];
 
     /// <summary>
     /// The collection is a single large download shared by every page, so
@@ -38,9 +57,18 @@ public class CollectionService
         try
         {
             var token = await _auth.GetTokenAsync()
-                ?? throw new DriveAuthException("No access token");
+                ?? throw new DriveAuthException("No access token — sign in again.");
 
-            var content = await _drive.DownloadTextAsync(CollectionFileId, token);
+            var content = await FetchCollectionTextAsync(token);
+
+            // The old code fed Drive's JSON error body straight into the XML
+            // parser, so a 404 surfaced as an unhandled XmlException and a blank
+            // page. Check the shape before parsing.
+            if (!LooksLikeNml(content))
+                throw new DriveRequestException(
+                    $"{CollectionFileName} (id {ResolvedFileId}) is not Traktor XML. "
+                  + $"First bytes: {Truncate(content, 200)}");
+
             var parser = new TraktorNmlParser.NmlParser();
             _collection = parser.Load(content);
             return _collection;
@@ -49,6 +77,81 @@ public class CollectionService
         {
             _inFlight = null;
         }
+    }
+
+    private async Task<string> FetchCollectionTextAsync(string token)
+    {
+        // 1. Whatever worked last time.
+        var stored = await GetStoredIdAsync();
+        if (!string.IsNullOrEmpty(stored) && await TryFetchAsync(stored, token) is { } fromStored)
+            return fromStored;
+
+        // 2. The id this app shipped with.
+        if (await TryFetchAsync(LegacyCollectionFileId, token) is { } fromLegacy)
+            return fromLegacy;
+
+        // 3. Search Drive for it.
+        Candidates = await _drive.FindFilesNamedAsync(CollectionFileName, token);
+
+        if (Candidates.Count == 0)
+            throw new DriveRequestException(
+                $"No file named {CollectionFileName} found in this Drive account. "
+              + "Check you signed in with the account that holds the Traktor collection.");
+
+        if (Candidates.Count > 1)
+            _errors.Report(
+                $"Found {Candidates.Count} files named {CollectionFileName}; using the most recently modified.",
+                string.Join("\n", Candidates.Select(c => $"{c.Id}  modified {c.ModifiedTime:u}")));
+
+        var chosen = Candidates[0]; // ordered modifiedTime desc
+        var content = await _drive.DownloadTextAsync(chosen.Id, token);
+        ResolvedFileId = chosen.Id;
+        await SetStoredIdAsync(chosen.Id);
+        return content;
+    }
+
+    private async Task<string?> TryFetchAsync(string fileId, string token)
+    {
+        try
+        {
+            var content = await _drive.DownloadTextAsync(fileId, token);
+            ResolvedFileId = fileId;
+            return content;
+        }
+        catch (DriveAuthException)
+        {
+            throw; // an expired token is not something searching can fix
+        }
+        catch (DriveRequestException)
+        {
+            return null; // 404 / gone — fall through to discovery
+        }
+    }
+
+    private static bool LooksLikeNml(string content) =>
+        content.TrimStart().StartsWith('<');
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
+
+    private async Task<string?> GetStoredIdAsync()
+    {
+        try { return await _js.InvokeAsync<string?>("localStorage.getItem", StorageKey); }
+        catch { return null; }
+    }
+
+    private async Task SetStoredIdAsync(string id)
+    {
+        try { await _js.InvokeVoidAsync("localStorage.setItem", StorageKey, id); }
+        catch { /* storage unavailable — not worth failing the load over */ }
+    }
+
+    /// <summary>Forget the remembered file id, so the next load re-discovers.</summary>
+    public async Task ForgetFileIdAsync()
+    {
+        try { await _js.InvokeVoidAsync("localStorage.removeItem", StorageKey); }
+        catch { /* ignored */ }
+        Invalidate();
     }
 
     /// <summary>

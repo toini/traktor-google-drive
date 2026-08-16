@@ -14,6 +14,11 @@ public class DriveAuthException : Exception
     public DriveAuthException(string message) : base(message) { }
 }
 
+public class DriveRequestException : Exception
+{
+    public DriveRequestException(string message) : base(message) { }
+}
+
 public class DriveService
 {
     // Drive rejects very long `q` strings, and a set can hold hundreds of
@@ -34,12 +39,38 @@ public class DriveService
         return request;
     }
 
+    /// <summary>
+    /// Google puts the useful part of a failure in the response body ("File not
+    /// found", "insufficientPermissions", …), so surface it rather than just a
+    /// bare status code.
+    /// </summary>
+    private static async Task ThrowIfFailedAsync(HttpResponseMessage response, string what)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var body = "";
+        try
+        {
+            body = await response.Content.ReadAsStringAsync();
+            if (body.Length > 400) body = body[..400] + "…";
+        }
+        catch
+        {
+            // Body unavailable — the status alone still has to be reported.
+        }
+
+        var message = $"{what}: HTTP {(int)response.StatusCode} {response.ReasonPhrase}"
+                    + (string.IsNullOrWhiteSpace(body) ? "" : $" — {body}");
+
+        throw response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+            ? new DriveAuthException(message)
+            : new DriveRequestException(message);
+    }
+
     private async Task<JsonElement> SendAsync(string url, string token)
     {
         var response = await _http.SendAsync(Get(url, token));
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            throw new DriveAuthException($"Drive returned {(int)response.StatusCode}");
-        response.EnsureSuccessStatusCode();
+        await ThrowIfFailedAsync(response, "Drive query failed");
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
@@ -47,9 +78,7 @@ public class DriveService
     {
         var response = await _http.SendAsync(
             Get($"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media", token));
-        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            throw new DriveAuthException($"Drive returned {(int)response.StatusCode}");
-        response.EnsureSuccessStatusCode();
+        await ThrowIfFailedAsync(response, $"Downloading Drive file {fileId} failed");
         return await response.Content.ReadAsStringAsync();
     }
 
@@ -81,6 +110,31 @@ public class DriveService
         }
 
         return found;
+    }
+
+    public sealed record NamedFile(string Id, string Name, DateTimeOffset? ModifiedTime);
+
+    /// <summary>
+    /// Finds files by exact name, newest first. Used to locate collection.nml
+    /// rather than trusting a hardcoded id, which silently 404s the day the
+    /// file is moved, re-uploaded or replaced.
+    /// </summary>
+    public async Task<List<NamedFile>> FindFilesNamedAsync(string name, string token)
+    {
+        var query = $"name = '{name.Replace("'", "\\'")}' and trashed = false";
+        var url = "https://www.googleapis.com/drive/v3/files"
+                + $"?q={Uri.EscapeDataString(query)}"
+                + "&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=50";
+
+        var json = await SendAsync(url, token);
+        if (!json.TryGetProperty("files", out var files)) return [];
+
+        return files.EnumerateArray().Select(f => new NamedFile(
+            f.GetProperty("id").GetString()!,
+            f.GetProperty("name").GetString()!,
+            f.TryGetProperty("modifiedTime", out var m) && m.GetString() is { } s
+                ? DateTimeOffset.Parse(s)
+                : null)).ToList();
     }
 
     private async Task<string?> FolderNameAsync(string folderId, string token)
