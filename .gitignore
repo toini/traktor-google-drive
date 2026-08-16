@@ -498,3 +498,9 @@ tests/e2e/screenshots/
 
 # Editor language-server cache
 *.lscache
+
+# Local working copies of personal data (collection.nml etc) — never commit
+.local/
+
+# Local working copies of personal data — never commit
+tmp/

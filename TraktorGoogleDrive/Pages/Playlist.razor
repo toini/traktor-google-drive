@@ -50,6 +50,7 @@ else
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Label)" @onclick="() => SortBy(SortColumn.Label)">Label<span class="sort-indicator">@Arrow(SortColumn.Label)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment)" @onclick="() => SortBy(SortColumn.Comment)">Comment<span class="sort-indicator">@Arrow(SortColumn.Comment)</span></th>
                     <th scope="col" class="col-time sortable" aria-sort="@AriaSort(SortColumn.Length)" @onclick="() => SortBy(SortColumn.Length)">Length<span class="sort-indicator">@Arrow(SortColumn.Length)</span></th>
+                    <th scope="col" class="col-added sortable" aria-sort="@AriaSort(SortColumn.Added)" @onclick="() => SortBy(SortColumn.Added)">Added<span class="sort-indicator">@Arrow(SortColumn.Added)</span></th>
                 </tr>
             </thead>
             <tbody>
@@ -73,6 +74,7 @@ else
                         <td>@(file.Track?.Label ?? "")</td>
                         <td class="cell-comment">@(file.Track?.Comment ?? "")</td>
                         <td class="col-time">@TrackTime.Format(file.Track?.PlaytimeFloat)</td>
+                        <td class="col-added">@TrackDate.Format(file.Track?.ImportDate)</td>
                     </tr>
                 }
             </tbody>
@@ -96,7 +98,7 @@ else
     string? loadError;
     int missingCount;
 
-    enum SortColumn { Title, Artist, Folder, Label, Comment, Length }
+    enum SortColumn { Title, Artist, Folder, Label, Comment, Length, Added }
 
     // Default: ascending by Title. Null column means Traktor's own playlist
     // order — the mix order the user built, so it must stay reachable.
@@ -141,6 +143,15 @@ else
             return sortAscending
                 ? byHasLength.ThenBy(f => f.Track?.PlaytimeFloat ?? 0)
                 : byHasLength.ThenByDescending(f => f.Track?.PlaytimeFloat ?? 0);
+        }
+
+        if (sortColumn == SortColumn.Added)
+        {
+            // Parsed, never lexical: "2023/10/10" sorts before "2023/3/12" as text.
+            var byHasDate = files.OrderBy(f => TrackDate.Parse(f.Track?.ImportDate) is null);
+            return sortAscending
+                ? byHasDate.ThenBy(f => TrackDate.Parse(f.Track?.ImportDate))
+                : byHasDate.ThenByDescending(f => TrackDate.Parse(f.Track?.ImportDate));
         }
 
         var column = sortColumn.Value;

@@ -265,3 +265,49 @@ test.describe('choosing among many collection.nml files', () => {
     expect(texts[texts.length - 1]).toContain('backup');
   });
 });
+
+test.describe('added-at column', () => {
+  const PSY = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
+
+  const addedColumn = (page) =>
+    page.locator('#playlist-table tbody td.col-added').allTextContents();
+
+  test('renders the import date as ISO, and a dash when absent', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSY}`);
+    await expect(page.getByRole('columnheader', { name: /Added/ })).toBeVisible();
+    await expect(page.locator('td.col-added').filter({ hasText: '2023-03-12' })).toHaveCount(1);
+    // The Archive Cut track has no IMPORT_DATE.
+    await expect(page.locator('td.col-added').filter({ hasText: '—' })).toHaveCount(1);
+  });
+
+  test('sorts chronologically, not lexically', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSY}`);
+    await page.getByRole('columnheader', { name: /Added/ }).click();
+
+    const dates = (await addedColumn(page)).filter((d) => d !== '—');
+    // A string sort would put 2023-10-10 and 2023-11-06 before 2023-03-12,
+    // because Traktor stores them unpadded as 2023/10/10 vs 2023/3/12.
+    expect(dates).toEqual(['2023-03-12', '2023-10-10', '2023-11-06']);
+    expect(dates).toEqual([...dates].sort());
+  });
+
+  test('reverses, and keeps undated tracks last in both directions', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSY}`);
+    const header = page.getByRole('columnheader', { name: /Added/ });
+
+    await header.click();
+    let all = await addedColumn(page);
+    expect(all[all.length - 1]).toBe('—');
+
+    await header.click();
+    all = await addedColumn(page);
+    expect(all.slice(0, 3)).toEqual(['2023-11-06', '2023-10-10', '2023-03-12']);
+    expect(all[all.length - 1]).toBe('—');
+  });
+});

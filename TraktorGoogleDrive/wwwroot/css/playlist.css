@@ -44,7 +44,7 @@
 #playlist-table {
     table-layout: fixed;
     width: 100%;
-    min-width: 860px;
+    min-width: 960px;
     background-color: #1a1a1a;
     color: #e6e6e6;
     margin-bottom: 0;
@@ -229,4 +229,11 @@
 
 .column-resizer:hover {
     background: #ff6600;
+}
+
+.col-added {
+    width: 108px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #8b949e;
 }
