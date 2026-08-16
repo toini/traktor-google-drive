@@ -1,0 +1,130 @@
+import { test, expect } from '@playwright/test';
+import { mockDrive, seedToken } from './drive-mock';
+
+const PSYTECH_UUID = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
+
+test.describe('collection sidebar', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+  });
+
+  test('renders the playlist folders from the NML', async ({ page }) => {
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+    await expect(page.getByText('Archive')).toBeVisible();
+  });
+
+  test('does not surface the $ROOT pseudo-folder', async ({ page }) => {
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+    // Collection.FromXml returns $ROOT as a Folder alongside its children.
+    await expect(page.getByText('$ROOT')).toHaveCount(0);
+  });
+
+  test('links through to a playlist', async ({ page }) => {
+    await page.goto('/music');
+    // Wait for the tree to actually render before probing visibility —
+    // isVisible() does not wait, so checking too early collapses the folder.
+    await expect(page.getByText('My Sets')).toBeVisible();
+
+    const link = page.getByRole('link', { name: 'Psytech 2024' });
+    // Folders render expanded when there are only a few; only click the
+    // summary if this one happens to be collapsed.
+    if (!(await link.isVisible())) await page.getByText('My Sets').click();
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(PSYTECH_UUID));
+  });
+});
+
+test.describe('playlist', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+  });
+
+  test('lists every track in the playlist', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5); // header + 4 tracks
+    await expect(page.getByText('Alpha Drift', { exact: true })).toBeVisible();
+    await expect(page.getByText('Beta Pulse')).toBeVisible();
+    await expect(page.getByText('Gamma Echo')).toBeVisible();
+  });
+
+  test('formats playtime as mm:ss rather than raw seconds', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    // PLAYTIME_FLOAT 245.5 -> 4:05, not "245.5 s"
+    await expect(page.getByText('4:05')).toBeVisible();
+    await expect(page.getByText(/245\.5 s/)).toHaveCount(0);
+  });
+
+  test('resolves each track to a distinct Drive file', async ({ page }) => {
+    // Two tracks share the filename alpha.wav in different folders; matching
+    // by bare filename makes both resolve to the same Drive id.
+    const calls = await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5);
+
+    const ids = await page.locator('[data-drive-file-id]').evaluateAll((els) =>
+      els.map((e) => e.getAttribute('data-drive-file-id')),
+    );
+    // Guard against a vacuous pass if the attribute ever disappears.
+    expect(ids.length).toBe(4);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(calls.filter((c) => c.kind === 'query').length).toBeGreaterThan(0);
+
+    // The two alpha.wav tracks must resolve to different Drive files, chosen by
+    // their parent folder rather than by filename alone.
+    expect(ids).toContain('drive-alpha-sets');
+    expect(ids).toContain('drive-alpha-archive');
+  });
+});
+
+test.describe('playback', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+  });
+
+  test('plays only one track at a time', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    const buttons = page.getByRole('button', { name: /play/i });
+    await buttons.nth(0).click();
+    await expect(page.locator('.currently-playing')).toHaveCount(1);
+
+    await buttons.nth(1).click();
+    // The first track must have been stopped, not left running.
+    await expect(page.locator('.currently-playing')).toHaveCount(1);
+
+    const playing = await page.evaluate(
+      () => document.querySelectorAll('audio').length &&
+        [...document.querySelectorAll('audio')].filter((a) => !a.paused).length,
+    );
+    expect(playing).toBeLessThanOrEqual(1);
+  });
+
+  test('stops audio when navigating away from the playlist', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await page.getByRole('button', { name: /play/i }).first().click();
+    await page.goto('/music');
+    const stillPlaying = await page.evaluate(
+      () => [...document.querySelectorAll('audio')].filter((a) => !a.paused).length,
+    );
+    expect(stillPlaying).toBe(0);
+  });
+});
+
+test.describe('auth', () => {
+  test('redirects to login when no token is present', async ({ page }) => {
+    await mockDrive(page);
+    await page.goto('/music');
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test('surfaces an expired token instead of failing silently', async ({ page }) => {
+    await mockDrive(page, { collectionStatus: 401 });
+    await seedToken(page);
+    await page.goto('/music');
+    await expect(page.getByText(/sign in|expired|session/i).first()).toBeVisible();
+  });
+});

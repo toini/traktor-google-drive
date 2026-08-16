@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  Fixture collection for e2e tests. Shapes here are load-bearing — see
+  traktor-nml-parser's Track.FromXml / Playlist.FromXml:
+
+    Track.Path   = DIR + FILE, then "Macintosh HD/" removed, ALL ":" removed,
+                   leading "/" trimmed.
+    PRIMARYKEY   = same normalization; must match Track.Path exactly or the
+                   playlist entry is silently dropped.
+    $ROOT        = required, and Collection.FromXml does .Single() on it.
+    Paths containing "silent" are filtered out by the parser — don't use that word.
+
+  So DIR="/:Music/:Sets/:" FILE="alpha.wav" -> "Music/Sets/alpha.wav".
+-->
+<NML VERSION="19">
+  <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
+  <MUSICFOLDERS></MUSICFOLDERS>
+  <COLLECTION ENTRIES="5">
+
+    <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift" ARTIST="Test Artist One">
+      <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
+      <ALBUM TITLE="Fixture Album"></ALBUM>
+      <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="first track"
+            PLAYTIME="245" PLAYTIME_FLOAT="245.5" RATING="255" KEY="8A" IMPORT_DATE="2024/3/17"></INFO>
+      <TEMPO BPM="145.000000" BPM_QUALITY="100.000000"></TEMPO>
+    </ENTRY>
+
+    <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Beta Pulse" ARTIST="Test Artist Two">
+      <LOCATION DIR="/:Music/:Sets/:" FILE="beta.wav" VOLUME="Macintosh HD"></LOCATION>
+      <ALBUM TITLE="Fixture Album"></ALBUM>
+      <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="second track"
+            PLAYTIME="312" PLAYTIME_FLOAT="312.0" RATING="204" KEY="9A"></INFO>
+      <TEMPO BPM="148.000000" BPM_QUALITY="100.000000"></TEMPO>
+    </ENTRY>
+
+    <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Gamma Echo" ARTIST="Test Artist Three">
+      <LOCATION DIR="/:Music/:Sets/:" FILE="gamma.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="180" PLAYTIME_FLOAT="180.25"></INFO>
+      <TEMPO BPM="142.000000"></TEMPO>
+    </ENTRY>
+
+    <!--
+      B8 probe: same FILE name as the Sets/ entry above, different DIR.
+      Drive matching is by bare filename, so this is the collision case.
+    -->
+    <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift (Archive Cut)" ARTIST="Test Artist One">
+      <LOCATION DIR="/:Music/:Archive/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="250" PLAYTIME_FLOAT="250.0"></INFO>
+      <TEMPO BPM="145.000000"></TEMPO>
+    </ENTRY>
+
+    <!-- Present in the collection but NOT referenced by any playlist. -->
+    <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Delta Unlisted" ARTIST="Test Artist Four">
+      <LOCATION DIR="/:Music/:Archive/:" FILE="delta.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411000" PLAYTIME="90" PLAYTIME_FLOAT="90.0"></INFO>
+    </ENTRY>
+
+  </COLLECTION>
+
+  <PLAYLISTS>
+    <NODE TYPE="FOLDER" NAME="$ROOT">
+      <SUBNODES COUNT="3">
+
+        <!-- Playlist directly under $ROOT — renders under the "$ROOT" pseudo-folder (B10). -->
+        <NODE TYPE="PLAYLIST" NAME="Root Level Playlist">
+          <PLAYLIST ENTRIES="1" TYPE="LIST" UUID="00000000000000000000000000000001">
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:gamma.wav"></PRIMARYKEY></ENTRY>
+          </PLAYLIST>
+        </NODE>
+
+        <NODE TYPE="FOLDER" NAME="My Sets">
+          <SUBNODES COUNT="2">
+            <NODE TYPE="PLAYLIST" NAME="Psytech 2024">
+              <PLAYLIST ENTRIES="4" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:alpha.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:beta.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:gamma.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Archive/:alpha.wav"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+            <NODE TYPE="PLAYLIST" NAME="Empty Set">
+              <PLAYLIST ENTRIES="0" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5b">
+              </PLAYLIST>
+            </NODE>
+          </SUBNODES>
+        </NODE>
+
+        <NODE TYPE="FOLDER" NAME="Archive">
+          <SUBNODES COUNT="1">
+            <NODE TYPE="PLAYLIST" NAME="Old Sets">
+              <PLAYLIST ENTRIES="1" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5c">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Archive/:delta.wav"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+          </SUBNODES>
+        </NODE>
+
+      </SUBNODES>
+    </NODE>
+  </PLAYLISTS>
+</NML>
