@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mockDrive, seedToken } from './drive-mock';
+import { mockDrive, seedToken, DISCOVERED_COLLECTION_ID } from './drive-mock';
 
 const PSYTECH_UUID = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
 
@@ -126,5 +126,57 @@ test.describe('auth', () => {
     await seedToken(page);
     await page.goto('/music');
     await expect(page.getByText(/sign in|expired|session/i).first()).toBeVisible();
+  });
+});
+
+test.describe('collection file resolution', () => {
+  test('recovers when the hardcoded collection id 404s', async ({ page }) => {
+    // The real failure: the id the app shipped with no longer exists, the old
+    // code fed the 404 JSON body to the XML parser, and the page went blank.
+    const calls = await mockDrive(page, { legacyCollectionMissing: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    await expect(page.getByText('My Sets')).toBeVisible();
+    expect(calls.some((c) => c.url.includes(DISCOVERED_COLLECTION_ID))).toBe(true);
+  });
+
+  test('reports a readable error when no collection.nml exists', async ({ page }) => {
+    await mockDrive(page, { legacyCollectionMissing: true, noCollectionFound: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    await expect(page.getByText(/No file named collection\.nml/i)).toBeVisible();
+  });
+
+  test('shows the error banner with expandable detail on failure', async ({ page }) => {
+    await mockDrive(page, { legacyCollectionMissing: true, noCollectionFound: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    const banner = page.locator('.error-banner');
+    await expect(banner).toBeVisible();
+    await banner.getByRole('button', { name: /show details/i }).click();
+    // The detail must carry the real exception text, not a generic message.
+    await expect(page.locator('.error-detail')).toContainText(/DriveRequestException|collection\.nml/i);
+  });
+
+  test('does not trigger the framework unhandled-error bar for handled failures', async ({ page }) => {
+    // Blazor WASM shows #blazor-error-ui on any .NET write to Console.Error, so
+    // logging a caught error to stderr made handled failures look like crashes.
+    await mockDrive(page, { legacyCollectionMissing: true, noCollectionFound: true });
+    await seedToken(page);
+    await page.goto('/music');
+    await expect(page.locator('.error-banner')).toBeVisible();
+    await expect(page.locator('#blazor-error-ui')).toBeHidden();
+  });
+
+  test('never renders a raw XML parse failure to the user', async ({ page }) => {
+    await mockDrive(page, { nml: '{"error":{"code":404,"message":"File not found"}}' });
+    await seedToken(page);
+    await page.goto('/music');
+
+    await expect(page.getByText(/not Traktor XML/i)).toBeVisible();
+    await expect(page.getByText(/XmlException|Xml_InvalidRootData/)).toHaveCount(0);
   });
 });

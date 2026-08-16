@@ -60,9 +60,19 @@ export function makeWav(seconds = 2, sampleRate = 8000): Buffer {
 
 export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder'; url: string };
 
+/** What Drive hands back when the app searches for collection.nml by name. */
+export const DISCOVERED_COLLECTION_ID = 'drive-collection-discovered';
+
 export type MockOptions = {
   /** Fail the collection fetch with this status instead of serving it. */
   collectionStatus?: number;
+  /**
+   * Make the hardcoded/legacy collection id 404, as it does in the real Drive
+   * account. Forces the app down its discovery path.
+   */
+  legacyCollectionMissing?: boolean;
+  /** Return no results when searching for collection.nml by name. */
+  noCollectionFound?: boolean;
   /** Fail every media fetch with this status (401 exercises token expiry). */
   mediaStatus?: number;
   /** Override the NML body. */
@@ -125,6 +135,25 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       if (u.pathname === '/drive/v3/files') {
         calls.push({ kind: 'query', url });
         const q = u.searchParams.get('q') ?? '';
+
+        // Discovery: the app searching for collection.nml by name.
+        if (q.includes("'collection.nml'")) {
+          const files = opts.noCollectionFound
+            ? []
+            : [
+                {
+                  id: DISCOVERED_COLLECTION_ID,
+                  name: 'collection.nml',
+                  modifiedTime: '2026-08-16T10:00:00.000Z',
+                },
+              ];
+          return route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ files }),
+          });
+        }
+
         const files = DRIVE_FILES.filter((f) => q.includes(`'${f.name}'`));
         return route.fulfill({
           status: 200,
@@ -145,9 +174,21 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       }
 
       // Drive: download a single file by id.
-      if (id === COLLECTION_FILE_ID) {
+      if (id === COLLECTION_FILE_ID || id === DISCOVERED_COLLECTION_ID) {
         calls.push({ kind: 'collection', url });
         if (opts.collectionStatus) return route.fulfill({ status: opts.collectionStatus, body: '' });
+
+        if (id === COLLECTION_FILE_ID && opts.legacyCollectionMissing) {
+          // Google's real 404 body — the old code fed exactly this to the XML
+          // parser, which is what blanked the page.
+          return route.fulfill({
+            status: 404,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              error: { code: 404, message: 'File not found: ' + id, status: 'NOT_FOUND' },
+            }),
+          });
+        }
         return route.fulfill({ status: 200, contentType: 'text/xml', body: nml });
       }
       return serveMedia(route, url);

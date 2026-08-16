@@ -52,3 +52,13 @@ test('capture playlist with a track playing', async ({ page }) => {
   await page.locator('tr.currently-playing').waitFor();
   await page.screenshot({ path: `${OUT}/05-playing.png`, fullPage: true });
 });
+
+test('capture the error surface', async ({ page }) => {
+  await mockDrive(page, { legacyCollectionMissing: true, noCollectionFound: true });
+  await seedToken(page);
+  await page.goto('/music');
+  await page.locator('.error-banner').waitFor();
+  await page.getByRole('button', { name: /show details/i }).click();
+  await page.locator('.error-detail').waitFor();
+  await page.screenshot({ path: `${OUT}/06-error.png`, fullPage: true });
+});
