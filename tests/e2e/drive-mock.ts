@@ -14,7 +14,27 @@ export const FAKE_TOKEN = 'fixture-access-token';
 export const DRIVE_FOLDERS: Record<string, string> = {
   'folder-sets': 'Sets',
   'folder-archive': 'Archive',
+  // Mirrors a real Traktor install: one collection.nml per version, plus backups.
+  'folder-tk-3': 'Traktor 3.11.1',
+  'folder-tk-40': 'Traktor 4.0.0',
+  'folder-tk-441': 'Traktor 4.4.1',
+  'folder-tk-441-backup': 'Backup',
 };
+
+/**
+ * Several collection.nml files across Traktor versions. Deliberately gives the
+ * BACKUP the newest modifiedTime, because that is the case that defeats a
+ * naive "most recently modified" pick.
+ */
+export const COLLECTION_CANDIDATES = [
+  { id: 'nml-backup', parent: 'folder-tk-441-backup', modifiedTime: '2026-08-15T10:00:00.000Z' },
+  { id: 'nml-v3', parent: 'folder-tk-3', modifiedTime: '2024-01-01T10:00:00.000Z' },
+  { id: 'nml-v441', parent: 'folder-tk-441', modifiedTime: '2026-07-27T10:00:00.000Z' },
+  { id: 'nml-v40', parent: 'folder-tk-40', modifiedTime: '2025-06-01T10:00:00.000Z' },
+];
+
+/** The one the app must choose: highest Traktor version, not a backup. */
+export const EXPECTED_COLLECTION_ID = 'nml-v441';
 
 /**
  * Drive file ids the mock hands out, keyed by the bare filename the app
@@ -73,6 +93,8 @@ export type MockOptions = {
   legacyCollectionMissing?: boolean;
   /** Return no results when searching for collection.nml by name. */
   noCollectionFound?: boolean;
+  /** Return the realistic multi-version set instead of a single discovered file. */
+  manyCollections?: boolean;
   /** Fail every media fetch with this status (401 exercises token expiry). */
   mediaStatus?: number;
   /** Override the NML body. */
@@ -140,13 +162,20 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
         if (q.includes("'collection.nml'")) {
           const files = opts.noCollectionFound
             ? []
-            : [
-                {
-                  id: DISCOVERED_COLLECTION_ID,
+            : opts.manyCollections
+              ? COLLECTION_CANDIDATES.map((c) => ({
+                  id: c.id,
                   name: 'collection.nml',
-                  modifiedTime: '2026-08-16T10:00:00.000Z',
-                },
-              ];
+                  modifiedTime: c.modifiedTime,
+                  parents: [c.parent],
+                }))
+              : [
+                  {
+                    id: DISCOVERED_COLLECTION_ID,
+                    name: 'collection.nml',
+                    modifiedTime: '2026-08-16T10:00:00.000Z',
+                  },
+                ];
           return route.fulfill({
             status: 200,
             contentType: 'application/json',
@@ -174,7 +203,8 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       }
 
       // Drive: download a single file by id.
-      if (id === COLLECTION_FILE_ID || id === DISCOVERED_COLLECTION_ID) {
+      if (id === COLLECTION_FILE_ID || id === DISCOVERED_COLLECTION_ID
+          || COLLECTION_CANDIDATES.some((c) => c.id === id)) {
         calls.push({ kind: 'collection', url });
         if (opts.collectionStatus) return route.fulfill({ status: opts.collectionStatus, body: '' });
 

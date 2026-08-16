@@ -98,12 +98,17 @@ public class CollectionService
                 $"No file named {CollectionFileName} found in this Drive account. "
               + "Check you signed in with the account that holds the Traktor collection.");
 
-        if (Candidates.Count > 1)
-            _errors.Report(
-                $"Found {Candidates.Count} files named {CollectionFileName}; using the most recently modified.",
-                string.Join("\n", Candidates.Select(c => $"{c.Id}  modified {c.ModifiedTime:u}")));
+        // Already ordered: live installs before backups, highest Traktor version
+        // first, then most recently modified.
+        var chosen = Candidates[0];
 
-        var chosen = Candidates[0]; // ordered modifiedTime desc
+        if (Candidates.Count > 1)
+            _errors.Info(
+                $"Found {Candidates.Count} collection.nml files — using {chosen.FolderName ?? "(unknown folder)"}"
+              + (chosen.TraktorVersion is null ? "" : $" (Traktor {chosen.TraktorVersion})")
+              + ". Pick a different one below if that is wrong.",
+                string.Join("\n", Candidates.Select((c, i) => $"{(i == 0 ? "->" : "  ")} {c.Describe()}")));
+
         var content = await _drive.DownloadTextAsync(chosen.Id, token);
         ResolvedFileId = chosen.Id;
         await SetStoredIdAsync(chosen.Id);
@@ -152,6 +157,31 @@ public class CollectionService
         try { await _js.InvokeVoidAsync("localStorage.removeItem", StorageKey); }
         catch { /* ignored */ }
         Invalidate();
+    }
+
+    /// <summary>
+    /// Pin a specific collection.nml. The heuristic (newest Traktor version
+    /// folder, backups last) is a guess; an install with eleven copies of the
+    /// file needs a manual override to be reliable.
+    /// </summary>
+    public async Task UseFileIdAsync(string fileId)
+    {
+        await SetStoredIdAsync(fileId);
+        ResolvedFileId = fileId;
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Lists every collection.nml so the user can choose. Safe to call after a
+    /// successful load, which may not have needed to search.
+    /// </summary>
+    public async Task<IReadOnlyList<DriveService.NamedFile>> ListCandidatesAsync()
+    {
+        if (Candidates.Count > 0) return Candidates;
+        var token = await _auth.GetTokenAsync();
+        if (string.IsNullOrEmpty(token)) return [];
+        Candidates = await _drive.FindFilesNamedAsync(CollectionFileName, token);
+        return Candidates;
     }
 
     /// <summary>

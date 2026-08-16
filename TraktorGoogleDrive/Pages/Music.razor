@@ -1,5 +1,8 @@
 @page "/music"
 @layout MainLayout
+@inject TraktorGoogleDrive.Services.CollectionService CollectionService
+@inject NavigationManager Navigation
+@using TraktorGoogleDrive.Services
 
 <PageTitle>Collection · Traktor</PageTitle>
 
@@ -7,4 +10,48 @@
     <span class="empty-icon" aria-hidden="true">♫</span>
     <h1>Your collection</h1>
     <p>Pick a playlist from the sidebar to see its tracks.</p>
+
+    @if (candidates.Count > 1)
+    {
+        <div class="collection-picker">
+            <label for="collection-select">Collection file</label>
+            <select id="collection-select" value="@CollectionService.ResolvedFileId" @onchange="OnPick">
+                @foreach (var c in candidates)
+                {
+                    <option value="@c.Id">@c.Describe()</option>
+                }
+            </select>
+            <p class="hint">
+                @candidates.Count files named collection.nml exist in this Drive.
+                The newest Traktor version folder is preferred, backups last.
+            </p>
+        </div>
+    }
 </div>
+
+@code {
+    IReadOnlyList<DriveService.NamedFile> candidates = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            candidates = await CollectionService.ListCandidatesAsync();
+        }
+        catch
+        {
+            // The sidebar already reports load failures; the picker is optional.
+        }
+    }
+
+    async Task OnPick(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        if (string.IsNullOrEmpty(id) || id == CollectionService.ResolvedFileId) return;
+
+        await CollectionService.UseFileIdAsync(id);
+        // Full reload: the sidebar tree and any open playlist are built from the
+        // old collection and must be rebuilt from scratch.
+        Navigation.NavigateTo("/music", forceLoad: true);
+    }
+}

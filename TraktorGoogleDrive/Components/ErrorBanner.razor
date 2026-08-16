@@ -5,26 +5,28 @@
 
 @if (Errors.Any)
 {
-    <div class="error-banner" role="alert">
+    <div class="error-banner @(Errors.AnyError ? "level-error" : "level-info")"
+         role="@(Errors.AnyError ? "alert" : "status")">
         <div class="error-banner-head">
-            <span class="error-banner-title">
-                @Errors.Errors.Count @(Errors.Errors.Count == 1 ? "error" : "errors")
-            </span>
-            <button class="error-banner-toggle" @onclick="() => expanded = !expanded">
-                @(expanded ? "Hide" : "Show details")
-            </button>
-            <button class="error-banner-close" @onclick="Errors.Clear" aria-label="Dismiss errors">✕</button>
+            <span class="error-banner-title">@Title</span>
+            @if (HasDetail)
+            {
+                <button class="error-banner-toggle" @onclick="() => expanded = !expanded">
+                    @(expanded ? "Hide" : "Show details")
+                </button>
+            }
+            <button class="error-banner-close" @onclick="Errors.Clear" aria-label="Dismiss">✕</button>
         </div>
 
         <ul class="error-list">
-            @foreach (var error in expanded ? Errors.Errors : Errors.Errors.Take(1))
+            @foreach (var entry in expanded ? Errors.Errors : Errors.Errors.Take(1))
             {
-                <li>
-                    <span class="error-time">@error.Time</span>
-                    <span class="error-summary">@error.Summary</span>
-                    @if (expanded && !string.IsNullOrEmpty(error.Detail))
+                <li class="@(entry.Severity == Severity.Error ? "is-error" : "is-info")">
+                    <span class="error-time">@entry.Time</span>
+                    <span class="error-summary">@entry.Summary</span>
+                    @if (expanded && !string.IsNullOrEmpty(entry.Detail))
                     {
-                        <pre class="error-detail">@error.Detail</pre>
+                        <pre class="error-detail">@entry.Detail</pre>
                     }
                 </li>
             }
@@ -34,6 +36,19 @@
 
 @code {
     bool expanded;
+
+    bool HasDetail => Errors.Errors.Any(e => !string.IsNullOrEmpty(e.Detail)) || Errors.Errors.Count > 1;
+
+    string Title
+    {
+        get
+        {
+            var n = Errors.Errors.Count;
+            if (!Errors.AnyError) return n == 1 ? "Notice" : $"{n} notices";
+            var errors = Errors.Errors.Count(e => e.Severity == Severity.Error);
+            return errors == 1 ? "1 error" : $"{errors} errors";
+        }
+    }
 
     protected override void OnInitialized() => Errors.Changed += OnChanged;
 

@@ -313,3 +313,68 @@ h1, h2, h3, h4, h5, h6 {
     white-space: pre-wrap;
     word-break: break-word;
 }
+
+/* Informational variant of the banner --------------------------------- */
+
+.error-banner.level-info {
+    background: #1c2230;
+    border-color: #2f4a6b;
+    border-left-color: #58a6ff;
+    color: #cfe4ff;
+}
+
+.error-banner.level-info .error-banner-title { color: #79c0ff; }
+
+.error-banner.level-info .error-banner-head { border-bottom-color: rgba(88, 166, 255, 0.25); }
+
+.error-banner.level-info .error-banner-toggle,
+.error-banner.level-info .error-banner-close {
+    border-color: rgba(88, 166, 255, 0.4);
+    color: #a5d0ff;
+}
+
+.error-banner.level-info .error-detail {
+    background: #10161f;
+    border-color: rgba(88, 166, 255, 0.25);
+    color: #a9c9ea;
+}
+
+.error-banner.level-info .error-time { color: #7d95b0; }
+
+/* Collection picker ---------------------------------------------------- */
+
+.collection-picker {
+    margin: 2rem auto 0;
+    max-width: 640px;
+    text-align: left;
+    padding: 1rem;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+}
+
+.collection-picker label {
+    display: block;
+    margin-bottom: 0.35rem;
+    color: #ff9d4d;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.collection-picker select {
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    background: #0d1117;
+    color: #e6e6e6;
+    border: 1px solid #30363d;
+    border-radius: 5px;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.collection-picker .hint {
+    margin: 0.5rem 0 0;
+    color: #8b949e;
+    font-size: 12px;
+}

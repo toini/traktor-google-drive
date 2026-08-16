@@ -112,29 +112,92 @@ public class DriveService
         return found;
     }
 
-    public sealed record NamedFile(string Id, string Name, DateTimeOffset? ModifiedTime);
+    public sealed record NamedFile(string Id, string Name, DateTimeOffset? ModifiedTime)
+    {
+        /// <summary>Name of the containing Drive folder, once resolved.</summary>
+        public string? FolderName { get; init; }
+
+        /// <summary>Version parsed from a "Traktor 4.4.1" style folder name.</summary>
+        public Version? TraktorVersion { get; init; }
+
+        /// <summary>Sitting in a Backup/Crashlogs style folder.</summary>
+        public bool IsBackup { get; init; }
+
+        public string Describe() =>
+            $"{FolderName ?? "(unknown folder)"}/{Name}"
+            + (TraktorVersion is null ? "" : $"  [Traktor {TraktorVersion}]")
+            + (IsBackup ? "  [backup]" : "")
+            + $"  modified {ModifiedTime:yyyy-MM-dd}";
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex TraktorFolderPattern =
+        new(@"traktor\D*(\d+)(?:\.(\d+))?(?:\.(\d+))?", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private static Version? ParseTraktorVersion(string? folderName)
+    {
+        if (folderName is null) return null;
+        var m = TraktorFolderPattern.Match(folderName);
+        if (!m.Success) return null;
+        return new Version(
+            int.Parse(m.Groups[1].Value),
+            m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : 0,
+            m.Groups[3].Success ? int.Parse(m.Groups[3].Value) : 0);
+    }
+
+    private static bool LooksLikeBackup(string? folderName) =>
+        folderName is not null
+        && (folderName.Contains("backup", StringComparison.OrdinalIgnoreCase)
+         || folderName.Contains("crashlog", StringComparison.OrdinalIgnoreCase)
+         || folderName.Contains("recovery", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Finds files by exact name, newest first. Used to locate collection.nml
-    /// rather than trusting a hardcoded id, which silently 404s the day the
-    /// file is moved, re-uploaded or replaced.
+    /// Finds every file with this name and annotates each with its containing
+    /// folder, ordered best-first.
     /// </summary>
+    /// <remarks>
+    /// Ordering by modifiedTime alone is wrong for Traktor: a Backup copy is
+    /// often touched more recently than the live collection, and an install
+    /// leaves one collection.nml per version (Traktor 3.x, 4.0, 4.4.1 …). The
+    /// live one is the file under the highest-versioned "Traktor N.N.N" folder,
+    /// so rank by that first and fall back to modified time.
+    /// </remarks>
     public async Task<List<NamedFile>> FindFilesNamedAsync(string name, string token)
     {
         var query = $"name = '{name.Replace("'", "\\'")}' and trashed = false";
         var url = "https://www.googleapis.com/drive/v3/files"
                 + $"?q={Uri.EscapeDataString(query)}"
-                + "&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc&pageSize=50";
+                + "&fields=files(id,name,modifiedTime,parents)&orderBy=modifiedTime desc&pageSize=100";
 
         var json = await SendAsync(url, token);
         if (!json.TryGetProperty("files", out var files)) return [];
 
-        return files.EnumerateArray().Select(f => new NamedFile(
-            f.GetProperty("id").GetString()!,
-            f.GetProperty("name").GetString()!,
-            f.TryGetProperty("modifiedTime", out var m) && m.GetString() is { } s
+        var raw = files.EnumerateArray().Select(f => (
+            Id: f.GetProperty("id").GetString()!,
+            Name: f.GetProperty("name").GetString()!,
+            Modified: f.TryGetProperty("modifiedTime", out var m) && m.GetString() is { } s
                 ? DateTimeOffset.Parse(s)
+                : (DateTimeOffset?)null,
+            Parent: f.TryGetProperty("parents", out var p)
+                ? p.EnumerateArray().Select(x => x.GetString()!).FirstOrDefault()
                 : null)).ToList();
+
+        var annotated = new List<NamedFile>(raw.Count);
+        foreach (var r in raw)
+        {
+            var folder = r.Parent is null ? null : await FolderNameAsync(r.Parent, token);
+            annotated.Add(new NamedFile(r.Id, r.Name, r.Modified)
+            {
+                FolderName = folder,
+                TraktorVersion = ParseTraktorVersion(folder),
+                IsBackup = LooksLikeBackup(folder),
+            });
+        }
+
+        return annotated
+            .OrderBy(f => f.IsBackup)
+            .ThenByDescending(f => f.TraktorVersion ?? new Version(0, 0, 0))
+            .ThenByDescending(f => f.ModifiedTime ?? DateTimeOffset.MinValue)
+            .ToList();
     }
 
     private async Task<string?> FolderNameAsync(string folderId, string token)

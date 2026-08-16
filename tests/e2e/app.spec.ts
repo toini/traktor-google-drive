@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { mockDrive, seedToken, DISCOVERED_COLLECTION_ID } from './drive-mock';
+import { mockDrive, seedToken, DISCOVERED_COLLECTION_ID, EXPECTED_COLLECTION_ID } from './drive-mock';
 
 const PSYTECH_UUID = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
 
@@ -221,5 +221,47 @@ test.describe('stale cached auth.js', () => {
 
     // The raw sessionStorage token is still honoured, so the collection loads.
     await expect(page.getByText('My Sets')).toBeVisible();
+  });
+});
+
+test.describe('choosing among many collection.nml files', () => {
+  test('prefers the newest Traktor version folder over a newer backup', async ({ page }) => {
+    // The backup has the most recent modifiedTime, so ordering by date alone
+    // picks the wrong file. The live collection is the one under the
+    // highest-versioned "Traktor N.N.N" folder.
+    const calls = await mockDrive(page, { legacyCollectionMissing: true, manyCollections: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    await expect(page.getByText('My Sets')).toBeVisible();
+    const downloaded = calls.filter((c) => c.kind === 'collection').map((c) => c.url);
+    expect(downloaded.some((u) => u.includes(EXPECTED_COLLECTION_ID))).toBe(true);
+    expect(downloaded.some((u) => u.includes('nml-backup'))).toBe(false);
+  });
+
+  test('says which file it used, as a notice rather than an error', async ({ page }) => {
+    await mockDrive(page, { legacyCollectionMissing: true, manyCollections: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    const banner = page.locator('.error-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveClass(/level-info/);
+    await expect(banner).not.toHaveClass(/level-error/);
+    await expect(banner).toContainText('Traktor 4.4.1');
+  });
+
+  test('offers a picker listing every candidate', async ({ page }) => {
+    await mockDrive(page, { legacyCollectionMissing: true, manyCollections: true });
+    await seedToken(page);
+    await page.goto('/music');
+
+    const select = page.locator('#collection-select');
+    await expect(select).toBeVisible();
+    await expect(select.locator('option')).toHaveCount(4);
+    // Backups rank last.
+    const texts = await select.locator('option').allTextContents();
+    expect(texts[0]).toContain('Traktor 4.4.1');
+    expect(texts[texts.length - 1]).toContain('backup');
   });
 });
