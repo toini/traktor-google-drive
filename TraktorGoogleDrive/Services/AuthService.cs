@@ -76,12 +76,20 @@ public class AuthService
     /// Clears the dead token and sends the user back to sign in. Called when
     /// Drive rejects a token that had not yet reached its stored expiry.
     /// </summary>
+    /// <remarks>
+    /// Only claims the session "expired" if there was actually a token. A
+    /// first-time visitor reaches here too — FolderTree renders before App's
+    /// redirect lands — and telling them their session expired is a lie.
+    /// </remarks>
     public async Task HandleExpiredAsync(string? returnTo = null)
     {
+        var hadToken = !string.IsNullOrWhiteSpace(await RawTokenAsync());
         await SignOutAsync();
-        var target = string.IsNullOrEmpty(returnTo)
-            ? "/login?expired=1"
-            : $"/login?expired=1&returnTo={Uri.EscapeDataString(returnTo)}";
-        _nav.NavigateTo(target, forceLoad: false);
+
+        var query = hadToken ? "?expired=1" : "";
+        if (!string.IsNullOrEmpty(returnTo))
+            query += (query.Length == 0 ? "?" : "&") + $"returnTo={Uri.EscapeDataString(returnTo)}";
+
+        _nav.NavigateTo("/login" + query, forceLoad: false);
     }
 }

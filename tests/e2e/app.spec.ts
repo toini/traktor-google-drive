@@ -125,6 +125,13 @@ test.describe('auth', () => {
     await expect(page.getByText('Checking authentication')).toHaveCount(0);
   });
 
+  test('does not claim the session expired for a first-time visitor', async ({ page }) => {
+    await mockDrive(page);
+    await page.goto('/music');
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByText(/session expired/i)).toHaveCount(0);
+  });
+
   test('surfaces an expired token instead of failing silently', async ({ page }) => {
     await mockDrive(page, { collectionStatus: 401 });
     await seedToken(page);
