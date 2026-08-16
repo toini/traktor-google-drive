@@ -1,58 +1,114 @@
-using Microsoft.AspNetCore.Mvc;
-
 using System.Net.Http.Headers;
+
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
-// Serve Blazor WebAssembly files
 app.UseBlazorFrameworkFiles();
 app.UseStaticFiles();
 
-app.UseHttpsRedirection();
+// No UseHttpsRedirection: Cloud Run (and any CDN in front) terminates TLS and
+// forwards plain HTTP to the container, so redirecting here only risks a loop.
 
-// Proxy endpoint
-app.MapGet("/api/proxy/drive/{fileId}", async (HttpRequest incomingRequest, HttpResponse outgoingResponse, string fileId, [FromQuery] string token, IHttpClientFactory httpClientFactory) =>
+/// Headers worth passing through from Drive so the browser can seek. Without
+/// Content-Length and Accept-Ranges the media element cannot range-request, and
+/// long sets become unseekable.
+static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing)
 {
-    var client = httpClientFactory.CreateClient();
-    var request = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{fileId}?alt=media");
-    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    outgoing.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
 
-    // Forward Range header if present
-    if (incomingRequest.Headers.TryGetValue("Range", out var rangeHeader))
-    {
-        Console.WriteLine($"[Proxy] Range header: {rangeHeader}");
-        request.Headers.Add("Range", rangeHeader.ToString());
-    }
+    if (upstream.Content.Headers.ContentLength is { } length)
+        outgoing.ContentLength = length;
 
-    var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-    if (!response.IsSuccessStatusCode)
+    if (upstream.Content.Headers.ContentRange is { } contentRange)
+        outgoing.Headers[HeaderNames.ContentRange] = contentRange.ToString();
+
+    outgoing.Headers[HeaderNames.AcceptRanges] =
+        upstream.Headers.AcceptRanges.Count > 0 ? string.Join(",", upstream.Headers.AcceptRanges) : "bytes";
+
+    // The URL carries a bearer token; never let a shared cache keep the body.
+    outgoing.Headers[HeaderNames.CacheControl] = "private, no-store";
+}
+
+/// The proxy relays with the *caller's* token, so it cannot reach anything the
+/// caller could not already reach. What it must not become is an open relay for
+/// third-party pages, hence the same-origin check.
+static bool IsSameOrigin(HttpRequest request)
+{
+    var expected = $"{request.Scheme}://{request.Host}";
+
+    if (request.Headers.TryGetValue(HeaderNames.Origin, out var origin) && !string.IsNullOrEmpty(origin))
+        return string.Equals(origin, expected, StringComparison.OrdinalIgnoreCase);
+
+    // Media elements often send Referer but no Origin for same-origin GETs.
+    if (request.Headers.TryGetValue(HeaderNames.Referer, out var referer)
+        && Uri.TryCreate(referer, UriKind.Absolute, out var refererUri))
+        return string.Equals($"{refererUri.Scheme}://{refererUri.Authority}", expected, StringComparison.OrdinalIgnoreCase);
+
+    // Neither header: a direct navigation or curl. Allowed — it is the caller's
+    // own token — but it is not a cross-site embed either.
+    return true;
+}
+
+app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
+    HttpRequest incomingRequest,
+    HttpResponse outgoingResponse,
+    string fileId,
+    [FromQuery] string? token,
+    IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("DriveProxy");
+
+    if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
     {
-        outgoingResponse.StatusCode = (int)response.StatusCode;
+        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
         return;
     }
 
-    var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
-    outgoingResponse.ContentType = contentType;
-
-    // Forward Content-Range header if present
-    if (response.Content.Headers.Contains("Content-Range"))
+    if (!IsSameOrigin(incomingRequest))
     {
-        var contentRange = response.Content.Headers.GetValues("Content-Range").FirstOrDefault();
-        if (contentRange != null)
-            outgoingResponse.Headers["Content-Range"] = contentRange;
-        outgoingResponse.StatusCode = 206; // Partial Content
+        logger.LogWarning("Rejected cross-origin proxy request from {Origin}",
+            incomingRequest.Headers[HeaderNames.Origin].ToString());
+        outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
+        return;
     }
 
-    using var stream = await response.Content.ReadAsStreamAsync();
-    await stream.CopyToAsync(outgoingResponse.Body);
+    var client = httpClientFactory.CreateClient();
+    var method = HttpMethods.IsHead(incomingRequest.Method) ? HttpMethod.Head : HttpMethod.Get;
+    var request = new HttpRequestMessage(method,
+        $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?alt=media");
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    if (incomingRequest.Headers.TryGetValue(HeaderNames.Range, out var rangeHeader))
+        request.Headers.TryAddWithoutValidation(HeaderNames.Range, rangeHeader.ToString());
+
+    using var upstream = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+    if (!upstream.IsSuccessStatusCode)
+    {
+        // Forward the real status so the client can tell 401 (expired token)
+        // from 404 (missing file) instead of guessing.
+        logger.LogInformation("Drive returned {Status} for {FileId}", (int)upstream.StatusCode, fileId);
+        outgoingResponse.StatusCode = (int)upstream.StatusCode;
+        return;
+    }
+
+    outgoingResponse.StatusCode = (int)upstream.StatusCode;
+    CopyMediaHeaders(upstream, outgoingResponse);
+
+    if (method == HttpMethod.Head) return;
+
+    await using var stream = await upstream.Content.ReadAsStreamAsync(cancellationToken);
+    await stream.CopyToAsync(outgoingResponse.Body, cancellationToken);
 });
 
-// Fallback to index.html for client routes
 app.MapFallbackToFile("index.html");
 
 app.Run();
