@@ -16,12 +16,17 @@ if [[ "$MODE" == "--dev" ]]; then
     -p:DebugType=portable
 else
   echo "📦 Release publish"
-  # AOT is deliberately OFF: for this app it inflates the download (the console
-  # reported 8.8 MB) without a meaningful runtime win. Trimming is what matters.
+  # AOT is deliberately OFF: for this app it inflates the download without a
+  # meaningful runtime win.
+  #
+  # Do NOT add PublishTrimmed here. On the *server* project it forces a
+  # RID-specific self-contained publish, which on macOS emits a Mach-O apphost
+  # and .dylib files that cannot run in the linux container. The Blazor client
+  # is trimmed by default in Release regardless (2.3 MB brotli), which is the
+  # payload that actually matters.
   dotnet publish TraktorGoogleDrive.Server/TraktorGoogleDrive.Server.csproj \
     -c Release -o out \
-    -p:RunAOTCompilation=false \
-    -p:PublishTrimmed=true
+    -p:RunAOTCompilation=false
 fi
 
 echo "✅ Published to ./out"
