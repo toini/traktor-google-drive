@@ -119,6 +119,10 @@ test.describe('auth', () => {
     await mockDrive(page);
     await page.goto('/music');
     await expect(page).toHaveURL(/\/login/);
+    // Asserting the URL alone is not enough: the app once changed URL but left
+    // the Router unrendered, sitting on "Checking authentication..." forever.
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByText('Checking authentication')).toHaveCount(0);
   });
 
   test('surfaces an expired token instead of failing silently', async ({ page }) => {
@@ -178,5 +182,37 @@ test.describe('collection file resolution', () => {
 
     await expect(page.getByText(/not Traktor XML/i)).toBeVisible();
     await expect(page.getByText(/XmlException|Xml_InvalidRootData/)).toHaveCount(0);
+  });
+});
+
+test.describe('stale cached auth.js', () => {
+  // Reproduces the live regression: a browser holding the previous auth.js
+  // (which only defined googleLogin) against newer WASM. The app used to throw
+  // an unhandled JSException in App.OnInitializedAsync and sit forever on
+  // "Checking authentication...".
+  const OLD_AUTH_JS = `window.googleLogin = () => {};`;
+
+  test('still reaches the login page instead of hanging', async ({ page }) => {
+    await mockDrive(page);
+    await page.route('**/auth.js', (r) =>
+      r.fulfill({ status: 200, contentType: 'application/javascript', body: OLD_AUTH_JS }));
+
+    await page.goto('/music');
+
+    await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByText('Checking authentication')).toHaveCount(0);
+  });
+
+  test('falls back to sessionStorage when authGetToken is missing', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.route('**/auth.js', (r) =>
+      r.fulfill({ status: 200, contentType: 'application/javascript', body: OLD_AUTH_JS }));
+
+    await page.goto('/music');
+
+    // The raw sessionStorage token is still honoured, so the collection loads.
+    await expect(page.getByText('My Sets')).toBeVisible();
   });
 });

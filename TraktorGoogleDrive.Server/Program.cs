@@ -10,7 +10,18 @@ builder.Services.AddHttpClient();
 var app = builder.Build();
 
 app.UseBlazorFrameworkFiles();
-app.UseStaticFiles();
+
+// Blazor fingerprints everything under /_framework, so those may be cached
+// hard. Our own root scripts (auth.js, table-resize.js, player.js) are NOT
+// fingerprinted, and with no Cache-Control at all browsers fall back to
+// heuristic caching — which served a stale auth.js against new WASM and left
+// the app stuck on "Checking authentication...". Force revalidation; the ETag
+// makes that a cheap 304.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+        ctx.Context.Response.Headers[HeaderNames.CacheControl] = "no-cache",
+});
 
 // No UseHttpsRedirection: Cloud Run (and any CDN in front) terminates TLS and
 // forwards plain HTTP to the container, so redirecting here only risks a loop.
@@ -109,6 +120,12 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
     await stream.CopyToAsync(outgoingResponse.Body, cancellationToken);
 });
 
-app.MapFallbackToFile("index.html");
+// index.html names the non-fingerprinted scripts, so it must never be served
+// from cache without revalidating either.
+app.MapFallbackToFile("index.html", new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+        ctx.Context.Response.Headers[HeaderNames.CacheControl] = "no-cache",
+});
 
 app.Run();

@@ -28,7 +28,23 @@ else
 
         // Null covers both "never signed in" and "token expired" — auth.js
         // clears an expired token rather than handing back a dead one.
-        var token = await Auth.GetTokenAsync();
+        // Whatever happens, tokenChecked must end up true: an exception here
+        // used to strand the app on "Checking authentication..." forever.
+        string? token = null;
+        try
+        {
+            token = await Auth.GetTokenAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[App] token check failed, treating as signed out: {ex.Message}");
+        }
+
+        // Set BEFORE navigating, and unconditionally. App is the root component,
+        // so a client-side navigation does not re-run this method — returning
+        // early left tokenChecked false and the Router never rendered, stranding
+        // the app on "Checking authentication..." forever.
+        tokenChecked = true;
 
         if (string.IsNullOrWhiteSpace(token) && !onLoginPage)
         {
@@ -36,9 +52,6 @@ else
             Navigation.NavigateTo(
                 string.IsNullOrEmpty(returnTo) ? "/login" : $"/login?returnTo={Uri.EscapeDataString("/" + returnTo)}",
                 forceLoad: false);
-            return;
         }
-
-        tokenChecked = true;
     }
 }
