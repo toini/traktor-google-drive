@@ -1,31 +1,29 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "📦 Publishing Blazor WebAssembly client..."
+# The server project now has a ProjectReference to the client, so publishing the
+# server pulls the Blazor output in on its own — no hand-copying into
+# TraktorGoogleDrive.Server/wwwroot (that directory is generated; don't commit it).
 
-if [[ "$1" == "--dev" ]]; then
-  echo "🚧 Dev mode: skipping AOT"
-  #dotnet publish TraktorGoogleDrive/TraktorGoogleDrive.csproj -c Release -o client-out -p:BlazorEnableDebugging=true
-  #dotnet publish TraktorGoogleDrive/TraktorGoogleDrive.csproj -c Release -o client-out
-  dotnet publish TraktorGoogleDrive/TraktorGoogleDrive.csproj -c Debug -o client-out \
+MODE="${1:-release}"
+
+if [[ "$MODE" == "--dev" ]]; then
+  echo "🚧 Dev publish (no AOT, debugging symbols)"
+  dotnet publish TraktorGoogleDrive.Server/TraktorGoogleDrive.Server.csproj \
+    -c Debug -o out \
     -p:RunAOTCompilation=false \
     -p:BlazorEnableDebugging=true \
     -p:DebugType=portable
 else
-  echo "📦 Publishing Blazor WebAssembly client with AOT..."
-  dotnet publish TraktorGoogleDrive/TraktorGoogleDrive.csproj -c Release -o client-out \
-    -p:RunAOTCompilation=true \
-    -p:BlazorEnableDebugging=true \
-    -p:EmitCompilerGeneratedFiles=true \
-    -p:DebugType=portable
+  echo "📦 Release publish"
+  # AOT is deliberately OFF: for this app it inflates the download (the console
+  # reported 8.8 MB) without a meaningful runtime win. Trimming is what matters.
+  dotnet publish TraktorGoogleDrive.Server/TraktorGoogleDrive.Server.csproj \
+    -c Release -o out \
+    -p:RunAOTCompilation=false \
+    -p:PublishTrimmed=true
 fi
 
-echo "📁 Copying built client into server wwwroot..."
-rm -rf TraktorGoogleDrive.Server/wwwroot
-mkdir -p TraktorGoogleDrive.Server/wwwroot
-cp -r client-out/wwwroot/* TraktorGoogleDrive.Server/wwwroot/
-
-echo "🚀 Publishing server..."
-dotnet publish TraktorGoogleDrive.Server/TraktorGoogleDrive.Server.csproj -c Release -o out
-
-echo "✅ Done. Published to ./out"
+echo "✅ Published to ./out"
+echo "   wasm payload:"
+du -ch out/wwwroot/_framework/*.wasm 2>/dev/null | tail -1 || true

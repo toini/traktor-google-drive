@@ -489,3 +489,12 @@ $RECYCLE.BIN/
 /out
 TraktorGoogleDrive.Server/wwwroot
 client-out/
+
+# e2e test artifacts
+tests/e2e/node_modules/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/screenshots/
+
+# Editor language-server cache
+*.lscache

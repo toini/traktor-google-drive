@@ -12,4 +12,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="9.0.5" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Without this the server serves nothing until publish.sh hand-copies
+         wwwroot, so `dotnet run` on the server project looked broken. -->
+    <ProjectReference Include="..\TraktorGoogleDrive\TraktorGoogleDrive.csproj" />
+  </ItemGroup>
+
 </Project>
