@@ -406,3 +406,33 @@ test.describe('collection freshness', () => {
     await expect(page.locator('.collection-status')).not.toContainText('Synced');
   });
 });
+
+test.describe('collection id is not sticky', () => {
+  test('ignores an id cached under the pre-upgrade key', async ({ page }) => {
+    // The old build cached automatically resolved ids under this key, which
+    // pinned the app to a Traktor 4.4.1 collection after an upgrade to 4.5.1 --
+    // the old file still resolves, so nothing noticed.
+    await mockDrive(page, { manyCollections: true });
+    await seedToken(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('collection_file_id', 'nml-v3'); // an old-version file
+    });
+
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+    await expect(page.locator('.error-banner')).toContainText('Traktor 4.4.1');
+  });
+
+  test('still honours a file the user picked explicitly', async ({ page }) => {
+    await mockDrive(page, { manyCollections: true });
+    await seedToken(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('collection_file_id_v2', 'nml-v3');
+    });
+
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+    // A deliberate pin wins, so no "found N files, using ..." notice appears.
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+});

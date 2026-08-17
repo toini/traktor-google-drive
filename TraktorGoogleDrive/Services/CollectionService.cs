@@ -14,7 +14,17 @@ public class CollectionService
     /// </summary>
     private const string LegacyCollectionFileId = "1yqP8GXUb9qLV8gXRLpvKpyy7DDY7CqAC";
 
-    private const string StorageKey = "collection_file_id";
+    /// <summary>
+    /// Only ever holds a file the USER picked. An automatically resolved id is
+    /// deliberately not remembered: a Traktor upgrade creates a new
+    /// "Traktor N.N.N/collection.nml" while the old one stays in Drive, so a
+    /// cached automatic choice silently pins the app to the pre-upgrade file
+    /// forever.
+    /// </summary>
+    /// v2 deliberately abandons any value written under the old key: that key
+    /// held automatically resolved ids too, and there is no way to tell those
+    /// from a real user choice after the fact.
+    private const string StorageKey = "collection_file_id_v2";
 
     // Traktor's own root node. It is a container, not a folder the user made,
     // so it should never appear in the sidebar as if it were one.
@@ -96,38 +106,42 @@ public class CollectionService
 
     private async Task<string> FetchCollectionTextAsync(string token)
     {
-        // 1. Whatever worked last time.
-        var stored = await GetStoredIdAsync();
-        if (!string.IsNullOrEmpty(stored) && await TryFetchAsync(stored, token) is { } fromStored)
-            return fromStored;
+        // 1. A file the user explicitly picked always wins.
+        var pinned = await GetStoredIdAsync();
+        if (!string.IsNullOrEmpty(pinned) && await TryFetchAsync(pinned, token) is { } fromPinned)
+            return fromPinned;
 
-        // 2. The id this app shipped with.
+        // 2. Otherwise resolve fresh, every time. Discovery is one name query,
+        //    and skipping it to reuse a cached id is how the app ended up stuck
+        //    on a Traktor 4.4.1 collection after the user upgraded to 4.5.1 --
+        //    the old file still resolves, so nothing ever noticed.
+        Candidates = await _drive.FindFilesNamedAsync(CollectionFileName, token);
+
+        if (Candidates.Count > 0)
+        {
+            // Already ordered: live installs before backups, highest Traktor
+            // version first, then most recently modified.
+            var chosen = Candidates[0];
+
+            if (Candidates.Count > 1)
+                _errors.Info(
+                    $"Found {Candidates.Count} collection.nml files — using {chosen.FolderName ?? "(unknown folder)"}"
+                  + (chosen.TraktorVersion is null ? "" : $" (Traktor {chosen.TraktorVersion})")
+                  + ". Pick a different one below if that is wrong.",
+                    string.Join("\n", Candidates.Select((c, i) => $"{(i == 0 ? "->" : "  ")} {c.Describe()}")));
+
+            var content = await _drive.DownloadTextAsync(chosen.Id, token);
+            ResolvedFileId = chosen.Id;
+            return content;
+        }
+
+        // 3. Nothing found by name — fall back to the id this app shipped with.
         if (await TryFetchAsync(LegacyCollectionFileId, token) is { } fromLegacy)
             return fromLegacy;
 
-        // 3. Search Drive for it.
-        Candidates = await _drive.FindFilesNamedAsync(CollectionFileName, token);
-
-        if (Candidates.Count == 0)
-            throw new DriveRequestException(
-                $"No file named {CollectionFileName} found in this Drive account. "
-              + "Check you signed in with the account that holds the Traktor collection.");
-
-        // Already ordered: live installs before backups, highest Traktor version
-        // first, then most recently modified.
-        var chosen = Candidates[0];
-
-        if (Candidates.Count > 1)
-            _errors.Info(
-                $"Found {Candidates.Count} collection.nml files — using {chosen.FolderName ?? "(unknown folder)"}"
-              + (chosen.TraktorVersion is null ? "" : $" (Traktor {chosen.TraktorVersion})")
-              + ". Pick a different one below if that is wrong.",
-                string.Join("\n", Candidates.Select((c, i) => $"{(i == 0 ? "->" : "  ")} {c.Describe()}")));
-
-        var content = await _drive.DownloadTextAsync(chosen.Id, token);
-        ResolvedFileId = chosen.Id;
-        await SetStoredIdAsync(chosen.Id);
-        return content;
+        throw new DriveRequestException(
+            $"No file named {CollectionFileName} found in this Drive account. "
+          + "Check you signed in with the account that holds the Traktor collection.");
     }
 
     private async Task<string?> TryFetchAsync(string fileId, string token)
