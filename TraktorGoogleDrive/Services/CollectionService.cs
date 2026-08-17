@@ -124,11 +124,20 @@ public class CollectionService
             var chosen = Candidates[0];
 
             if (Candidates.Count > 1)
+            {
+                // The runner-up goes in the summary, not just the details: when the
+                // pick is wrong, "why not that other one" is the whole question, and
+                // burying it behind a toggle meant asking the user to go dig.
+                var runnerUp = Candidates.Count > 1 ? Candidates[1] : null;
+                var unresolved = Candidates.Count(c => c.FolderName is null);
+
                 _errors.Info(
-                    $"Found {Candidates.Count} collection.nml files — using {chosen.FolderName ?? "(unknown folder)"}"
-                  + (chosen.TraktorVersion is null ? "" : $" (Traktor {chosen.TraktorVersion})")
+                    $"Found {Candidates.Count} collection.nml files — using {chosen.Describe()}"
+                  + (runnerUp is null ? "" : $" · next best: {runnerUp.Describe()}")
+                  + (unresolved > 0 ? $" · {unresolved} could not be placed in a folder" : "")
                   + ". Pick a different one below if that is wrong.",
                     string.Join("\n", Candidates.Select((c, i) => $"{(i == 0 ? "->" : "  ")} {c.Describe()}")));
+            }
 
             var content = await _drive.DownloadTextAsync(chosen.Id, token);
             ResolvedFileId = chosen.Id;

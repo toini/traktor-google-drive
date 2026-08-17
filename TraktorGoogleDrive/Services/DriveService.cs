@@ -148,7 +148,7 @@ public class DriveService
         public bool IsBackup { get; init; }
 
         public string Describe() =>
-            $"{FolderName ?? "(unknown folder)"}/{Name}"
+            $"{FolderName ?? "(folder lookup failed)"}/{Name}"
             + (TraktorVersion is null ? "" : $"  [Traktor {TraktorVersion}]")
             + (IsBackup ? "  [backup]" : "")
             + $"  modified {ModifiedTime:yyyy-MM-dd}";
