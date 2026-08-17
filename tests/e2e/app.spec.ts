@@ -323,7 +323,7 @@ test.describe('recording -> playlist match', () => {
 
     // Target the row by name: the playlist holds several recordings and the
     // default Title sort decides which one is first.
-    await page.locator('tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.expander').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.expander').click();
     await expect(page.locator('.set-detail')).toBeVisible();
 
     // ".rec" is the order actually played, so it must be the default pick over
@@ -338,7 +338,7 @@ test.describe('recording -> playlist match', () => {
     await mockDrive(page);
     await seedToken(page);
     await page.goto(`/playlist/${RECORDED}`);
-    const z11 = () => page.locator('tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.expander');
+    const z11 = () => page.locator('#playlist-table tbody tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.expander');
     await z11().click();
 
     const select = page.locator('#playlist-table select');
@@ -367,9 +367,9 @@ test('picks the playlist from the same year when a set code is reused', async ({
   await mockDrive(page);
   await seedToken(page);
   await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62');
-  await expect(page.getByText('C4 2026-08-16')).toBeVisible();
+  await expect(page.locator('#playlist-table').getByText('C4 2026-08-16')).toBeVisible();
 
-  const row = page.locator('tr', { hasText: 'C4 2026-08-16' }).first();
+  const row = page.locator('#playlist-table tbody tr', { hasText: 'C4 2026-08-16' }).first();
   await row.locator('.expander').click();
 
   const select = page.locator('#playlist-table select');

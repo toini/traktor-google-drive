@@ -11,7 +11,7 @@ test.describe('player bar', () => {
     await page.goto(`/playlist/${PSYTECH}`);
     await expect(page.locator('.player-bar')).toHaveCount(0);
 
-    await page.locator('tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
     await expect(page.locator('.player-bar')).toBeVisible();
     await expect(page.locator('.player-title')).toHaveText('Beta Pulse');
   });
@@ -20,7 +20,7 @@ test.describe('player bar', () => {
     await mockDrive(page);
     await seedToken(page);
     await page.goto(`/playlist/${PSYTECH}`);
-    await page.locator('tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
     await expect(page.locator('.player-bar')).toBeVisible();
 
     // Switching playlists stops playback, so the bar goes with it rather than
@@ -33,7 +33,7 @@ test.describe('player bar', () => {
     await mockDrive(page);
     await seedToken(page);
     await page.goto(`/playlist/${PSYTECH}`);
-    await page.locator('tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
     // 312s from the fixture's PLAYTIME_FLOAT, used until the media element
     // reports its own duration.
     await expect(page.locator('.player-time')).toContainText('5:12');
@@ -46,13 +46,13 @@ test.describe('waveform', () => {
     await seedToken(page);
     await page.goto(`/playlist/${RECORDED}`);
 
-    await page.locator('tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button').click();
     await expect(page.locator('.waveform-canvas')).toBeVisible();
 
     // Peaks come from many small range reads, not one huge download.
     await expect
       .poll(() => calls.filter((c) => c.url.includes('drive-c4-2026')).length, { timeout: 30_000 })
-      .toBeGreaterThan(50);
+      .toBeGreaterThan(5);
 
     await expect(page.locator('.waveform-status')).toHaveCount(0);
     const painted = await page.locator('.waveform-canvas').evaluate(
@@ -67,7 +67,7 @@ test.describe('waveform', () => {
     await page.goto(`/playlist/${RECORDED}`);
 
     // Z11-3 is an .mp3, which would have to be fully decoded to get peaks.
-    await page.locator('tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.play-button').click();
+    await page.locator('#playlist-table tbody tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.play-button').click();
     await expect(page.locator('.player-seek')).toBeVisible();
     await expect(page.locator('.waveform-canvas')).toHaveCount(0);
   });
@@ -78,7 +78,7 @@ test.describe('waveform', () => {
     await page.goto(`/playlist/${RECORDED}`);
 
     const play = () =>
-      page.locator('tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button');
+      page.locator('#playlist-table tbody tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button');
 
     // Sampling reads are exactly WINDOW_BYTES wide; playback reads are not, so
     // counting only those separates cache hits from ordinary streaming.
@@ -91,7 +91,7 @@ test.describe('waveform', () => {
     // Sampling must FINISH before reloading, or peaks were never cached — the
     // status element disappears only once computePeaks has stored them.
     await expect(page.locator('.waveform-status')).toHaveCount(0, { timeout: 60_000 });
-    expect(samplingReads()).toBeGreaterThan(50);
+    expect(samplingReads()).toBeGreaterThan(5);
 
     const afterFirst = samplingReads();
     await page.reload();

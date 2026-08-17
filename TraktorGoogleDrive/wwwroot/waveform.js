@@ -135,8 +135,14 @@ export async function computePeaks(url, fileId, dotNetRef) {
 
     const frame = (header.bits / 8) * header.channels;
     const usable = Math.max(0, header.dataSize - WINDOW_BYTES);
-    const offsets = Array.from({ length: BUCKETS }, (_, i) => {
-        const raw = header.dataOffset + Math.floor((usable * i) / BUCKETS);
+
+    // Never ask for more windows than the file has distinct bytes to give: a
+    // short file would otherwise get hundreds of overlapping reads of the same
+    // audio, which is pure waste and hammers the proxy for no extra detail.
+    const buckets = Math.max(1, Math.min(BUCKETS, Math.floor(header.dataSize / WINDOW_BYTES)));
+
+    const offsets = Array.from({ length: buckets }, (_, i) => {
+        const raw = header.dataOffset + Math.floor((usable * i) / buckets);
         return raw - (raw % frame); // stay on a frame boundary or samples shear
     });
 
