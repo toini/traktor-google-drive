@@ -22,9 +22,15 @@
         </button>
 
         <div class="player-body">
-            <div class="player-title">@(Player.CurrentTitle ?? "…")</div>
+            <div class="player-title">
+                @(Player.CurrentTitle ?? "…")
+                @if (Player.IsCasting)
+                {
+                    <span class="player-output">▶ @(Player.CastDeviceName ?? "TV")</span>
+                }
+            </div>
 
-            @if (Player.CurrentIsWav)
+            @if (Player.CurrentIsWav && !Player.IsCasting)
             {
                 <Waveform Url="@Player.CurrentUrl" FileId="@Player.CurrentFileId"
                           Position="@Fraction" OnSeek="SeekToFraction" />

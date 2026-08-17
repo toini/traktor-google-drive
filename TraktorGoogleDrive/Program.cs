@@ -16,7 +16,9 @@ builder.Services.AddScoped<DriveService>();
 builder.Services.AddScoped<CollectionService>();
 builder.Services.AddScoped<SetMatcher>();
 // Singleton so every component shares one audio element — two tracks playing
-// at once is then not representable.
+// at once is then not representable. The Cast session is shared for the same
+// reason, and outlives navigation.
+builder.Services.AddSingleton<CastService>();
 builder.Services.AddSingleton<PlayerService>();
 
 await builder.Build().RunAsync();

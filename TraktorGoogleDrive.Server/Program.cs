@@ -88,6 +88,11 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
     // the response chunked and exempt from Cloud Run's 32 MiB limit.
 }
 
+/// Where the Cast Default Media Receiver (app id CC1AD845) is served from. A Cast
+/// device fetches the media itself, from that page's origin rather than ours, so
+/// without this the same-origin check below 403s every cast.
+const string CastReceiverHost = "www.gstatic.com";
+
 /// The proxy relays with the *caller's* token, so it cannot reach anything the
 /// caller could not already reach. What it must not become is an open relay for
 /// third-party pages, hence the same-origin check.
@@ -96,23 +101,25 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
 /// plain HTTP, so Request.Scheme is "http" while the browser sends
 /// "https://…" in Referer — comparing scheme rejected every real playback with
 /// a 403. Host is what actually distinguishes "our page" from "someone else's".
-static bool IsSameOrigin(HttpRequest request)
+static bool IsAllowedCaller(HttpRequest request)
 {
     var expectedHost = request.Host.Host;
 
-    static bool HostMatches(string? value, string expected) =>
+    static bool HostAllowed(string? value, string expected) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri)
-        && string.Equals(uri.Host, expected, StringComparison.OrdinalIgnoreCase);
+        && (string.Equals(uri.Host, expected, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Host, CastReceiverHost, StringComparison.OrdinalIgnoreCase));
 
     if (request.Headers.TryGetValue(HeaderNames.Origin, out var origin) && !string.IsNullOrEmpty(origin))
-        return HostMatches(origin.ToString(), expectedHost);
+        return HostAllowed(origin.ToString(), expectedHost);
 
     // Media elements send Referer but no Origin for same-origin GETs.
     if (request.Headers.TryGetValue(HeaderNames.Referer, out var referer) && !string.IsNullOrEmpty(referer))
-        return HostMatches(referer.ToString(), expectedHost);
+        return HostAllowed(referer.ToString(), expectedHost);
 
-    // Neither header: a direct navigation or curl. Allowed — it is the caller's
-    // own token — but it is not a cross-site embed either.
+    // Neither header: a direct navigation, curl, or a Cast device — every captured
+    // Chromecast progressive fetch sends neither. Allowed: it is the caller's own
+    // token, and it is not a cross-site embed either.
     return true;
 }
 
@@ -127,17 +134,23 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
 {
     var logger = loggerFactory.CreateLogger("DriveProxy");
 
-    if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
+    // Checked before anything else, so a rejection never depends on the rest of
+    // the request being well formed.
+    if (!IsAllowedCaller(incomingRequest))
     {
-        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
+        // All three headers, because who a Cast device claims to be is only
+        // knowable from a real device's first attempt.
+        logger.LogWarning("Rejected proxy request. Origin={Origin} Referer={Referer} UserAgent={UserAgent}",
+            incomingRequest.Headers[HeaderNames.Origin].ToString(),
+            incomingRequest.Headers[HeaderNames.Referer].ToString(),
+            incomingRequest.Headers[HeaderNames.UserAgent].ToString());
+        outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
         return;
     }
 
-    if (!IsSameOrigin(incomingRequest))
+    if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
     {
-        logger.LogWarning("Rejected cross-origin proxy request from {Origin}",
-            incomingRequest.Headers[HeaderNames.Origin].ToString());
-        outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
+        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
         return;
     }
 

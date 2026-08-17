@@ -1,0 +1,124 @@
+/* Cast button (top row) ------------------------------------------------- */
+
+.cast-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-right: 1rem;
+    padding: 0;
+    border: 1px solid #444c56;
+    border-radius: 4px;
+    background: #30363d;
+    color: #e6e6e6;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cast-button svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    pointer-events: none;
+}
+
+.cast-button:hover {
+    background: #ff6600;
+    border-color: #ff6600;
+    color: #1a1a1a;
+}
+
+.cast-button.connected {
+    background: #ff6600;
+    border-color: #ff8833;
+    color: #1a1a1a;
+}
+
+/* Still clickable when unavailable — the tooltip is the only way to learn why. */
+.cast-button.unavailable {
+    opacity: 0.45;
+}
+
+/* Casting bar ----------------------------------------------------------- */
+
+.cast-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 1.5rem;
+    background: linear-gradient(90deg, #241505 0%, #2a2a2a 100%);
+    border-bottom: 1px solid #ff6600;
+    font-size: 12px;
+    color: #e6e6e6;
+}
+
+.cast-bar-device {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #ff6600;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    white-space: nowrap;
+}
+
+.cast-bar-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #ff6600;
+    box-shadow: 0 0 6px #ff6600;
+}
+
+.cast-bar-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cast-bar-title.subtle {
+    color: #9aa0a6;
+}
+
+.cast-bar-transport {
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 10px;
+    line-height: 1;
+    border: 1px solid #444c56;
+    border-radius: 50%;
+    background: #30363d;
+    color: #e6e6e6;
+    cursor: pointer;
+}
+
+.cast-bar-transport:hover {
+    background: #ff6600;
+    border-color: #ff6600;
+    color: #1a1a1a;
+}
+
+.cast-bar-seek {
+    width: 220px;
+    max-width: 35vw;
+    accent-color: #ff6600;
+    cursor: pointer;
+}
+
+.cast-bar-time {
+    font-variant-numeric: tabular-nums;
+    color: #9aa0a6;
+    white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+    .cast-bar-seek, .cast-bar-time { display: none; }
+}

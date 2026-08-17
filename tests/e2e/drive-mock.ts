@@ -149,10 +149,17 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
   };
 
   await page.route(
-    (url) => url.hostname === 'www.googleapis.com' || url.pathname.startsWith('/api/proxy/drive/'),
+    (url) =>
+      url.hostname === 'www.googleapis.com' ||
+      url.hostname === 'www.gstatic.com' ||
+      url.pathname.startsWith('/api/proxy/drive/'),
     (route) => {
       const url = route.request().url();
       const u = new URL(url);
+
+      // The Cast sender SDK. Blocked rather than stubbed so no test silently
+      // depends on the network; cast-mock.ts installs a working fake instead.
+      if (u.hostname === 'www.gstatic.com') return route.abort();
 
       // Same-origin audio proxy.
       if (u.pathname.startsWith('/api/proxy/drive/')) return serveMedia(route, url);

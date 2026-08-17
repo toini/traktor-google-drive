@@ -44,12 +44,9 @@
         if (File is null || string.IsNullOrEmpty(File.DriveFileId) || string.IsNullOrEmpty(Token))
             return;
 
-        await Player.ToggleAsync(
-            File.DriveFileId,
-            DriveAudio.UrlFor(File.DriveFileId, Token),
-            File.Track?.Title ?? Path.GetFileName(File.Track?.Path ?? ""),
-            DriveAudio.IsUncompressed(File),
-            File.Track?.PlaytimeFloat);
+        // The service derives url/title/format from the entry, and routes to the
+        // TV when a Cast session is up, so this button stays output-agnostic.
+        await Player.ToggleAsync(File, Token);
     }
 
     public void Dispose() => Player.Changed -= OnPlayerChanged;

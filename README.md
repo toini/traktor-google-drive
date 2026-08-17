@@ -55,6 +55,19 @@ It re-issues `GET https://www.googleapis.com/drive/v3/files/{fileId}?alt=media`
 with `Authorization: Bearer {token}` and forwards `Range` / `Content-Range`.
 It exists only because `<audio src>` cannot attach an `Authorization` header.
 
+## Casting to a TV
+
+The Cast button in the top row sends playback to a Chromecast-built-in device
+(Chrome or Edge only — the sender SDK is Chromium-only). Once connected, the
+per-track play buttons drive the TV instead of this browser, and the casting bar
+shows what is playing with transport and seek.
+
+The Cast device fetches the audio itself, so it gets the *absolute* proxy URL and
+the proxy must accept it — see
+[docs/adr-001-tv-playback.md](docs/adr-001-tv-playback.md) for why
+`www.gstatic.com` is allowed, why the access token is re-issued mid-set, and what
+has not been verified against a real television.
+
 ## Deploy
 
 Build image and push
