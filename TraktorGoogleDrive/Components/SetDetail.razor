@@ -79,16 +79,26 @@
     bool isOverride;
 
     string SelectId => $"set-pick-{Recording?.DriveFileId}";
+
+    /// Prefer the date in the filename ("C4 2026-08-16") over the import date,
+    /// which is when Traktor indexed it rather than when it was played.
+    int? RecordingYear()
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(FileName, @"(20\d{2})-\d{1,2}-\d{1,2}");
+        if (m.Success) return int.Parse(m.Groups[1].Value);
+        return TrackDate.Parse(Recording?.Track?.ImportDate)?.Year;
+    }
     string FileName => Path.GetFileName(Recording?.Track?.Path ?? "");
 
     protected override async Task OnInitializedAsync()
     {
         if (Recording is null) { loading = false; return; }
 
-        candidates = await SetMatcher.CandidatesAsync(FileName);
+        var year = RecordingYear();
+        candidates = await SetMatcher.CandidatesAsync(FileName, year);
         all = await SetMatcher.AllPlaylistsAsync();
         isOverride = await SetMatcher.GetOverrideAsync(Recording.DriveFileId) is not null;
-        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId);
+        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, year);
         loading = false;
     }
 
@@ -107,6 +117,6 @@
         if (Recording is null) return;
         await SetMatcher.SetOverrideAsync(Recording.DriveFileId, null);
         isOverride = false;
-        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId);
+        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, RecordingYear());
     }
 }

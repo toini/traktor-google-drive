@@ -37,8 +37,9 @@ const LENGTH_TEST_NML = `<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 </NML>`;
 
 const titleColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell-title').allTextContents();
-const artistColumn = (page: Page) => page.locator('#playlist-table tbody tr td:nth-child(3)').allTextContents();
-const labelColumn = (page: Page) => page.locator('#playlist-table tbody tr td:nth-child(5)').allTextContents();
+// Class selectors, not nth-child: inserting a column shifts every index.
+const artistColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell-artist').allTextContents();
+const labelColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell-label').allTextContents();
 
 const header = (page: Page, name: string) => page.getByRole('columnheader', { name, exact: false });
 

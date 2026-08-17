@@ -13,11 +13,15 @@ test('dragging the column resizer does not trigger a sort', async ({ page }) => 
   await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
   await expect(page.locator('#playlist-table th .column-resizer').first()).toBeAttached();
 
+  const widthBefore = await titleHeader.evaluate((el) => (el as HTMLElement).offsetWidth);
+
   // Dispatch the exact native-event sequence a real drag produces, entirely
   // inside the page, so we're testing the JS logic rather than fighting
   // Playwright's pointer-visibility heuristics on a 6px-wide strip.
   await page.evaluate(() => {
-    const header = document.querySelector('#playlist-table th:nth-child(2)') as HTMLElement;
+    // By text, not position: column indexes shift whenever a column is added.
+    const header = [...document.querySelectorAll('#playlist-table th')]
+      .find((th) => th.textContent?.trim().startsWith('Title')) as HTMLElement;
     const resizer = header.querySelector('.column-resizer') as HTMLElement;
     const rect = resizer.getBoundingClientRect();
     const opts = { bubbles: true, cancelable: true, clientX: rect.x + 2, clientY: rect.y + 2 };
@@ -32,7 +36,9 @@ test('dragging the column resizer does not trigger a sort', async ({ page }) => 
   await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
 
   const widthAfter = await titleHeader.evaluate((el) => (el as HTMLElement).offsetWidth);
-  expect(widthAfter).toBeGreaterThan(150);
+  // Relative, not absolute: the starting width depends on how many
+  // columns the table has, which changes as features are added.
+  expect(widthAfter).toBeGreaterThan(widthBefore + 20);
 });
 
 test('a real header click (no resizer involved) still sorts', async ({ page }) => {

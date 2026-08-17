@@ -82,9 +82,9 @@ else
                             }
                         </td>
                         <td class="cell-title">@(file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""))</td>
-                        <td>@(file.Track?.Artist ?? "")</td>
-                        <td>@FolderOf(file.Track?.Path)</td>
-                        <td>@(file.Track?.Label ?? "")</td>
+                        <td class="cell-artist">@(file.Track?.Artist ?? "")</td>
+                        <td class="cell-folder">@FolderOf(file.Track?.Path)</td>
+                        <td class="cell-label">@(file.Track?.Label ?? "")</td>
                         <td class="cell-comment">@(file.Track?.Comment ?? "")</td>
                         <td class="col-time">@TrackTime.Format(file.Track?.PlaytimeFloat)</td>
                         <td class="col-added">@TrackDate.Format(file.Track?.ImportDate)</td>

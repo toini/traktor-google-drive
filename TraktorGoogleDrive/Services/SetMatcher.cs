@@ -48,28 +48,42 @@ public class SetMatcher
     }
 
     /// <summary>Playlists plausibly belonging to the same set as this recording, best first.</summary>
-    public async Task<IReadOnlyList<Playlist>> CandidatesAsync(string recordingFileName)
+    /// <param name="recordingYear">
+    /// Year the set was played. A code like "C4" gets reused across years, so
+    /// "C4 2026-08-16.wav" matches both "C4 2025 Dark Tek Chillout" and its 2026
+    /// successor on prefix alone; the year is what separates them.
+    /// </param>
+    public async Task<IReadOnlyList<Playlist>> CandidatesAsync(string recordingFileName, int? recordingYear = null)
     {
         var families = await FamiliesAsync();
         var key = SetName.Key(recordingFileName);
         if (key.Length == 0) return [];
 
-        if (families.TryGetValue(key, out var exact)) return exact;
+        if (families.TryGetValue(key, out var exact)) return Rank(exact, recordingYear);
 
         // Fall back to a shared prefix, closest first — "H15" finding
         // "H15 2023 Darker Sounds".
-        return families
+        var prefixed = families
             .Where(kv => kv.Key.StartsWith(key, StringComparison.Ordinal)
                       || key.StartsWith(kv.Key, StringComparison.Ordinal))
             .OrderBy(kv => Math.Abs(kv.Key.Length - key.Length))
             .SelectMany(kv => kv.Value)
             .ToList();
+
+        return Rank(prefixed, recordingYear);
     }
 
+    private static List<Playlist> Rank(IEnumerable<Playlist> playlists, int? year) =>
+        playlists
+            .OrderBy(p => year is not null && p.Name.Contains(year.Value.ToString(), StringComparison.Ordinal) ? 0 : 1)
+            .ThenBy(p => SetName.IsRecorded(p.Name) ? 0 : 1)
+            .ThenBy(p => p.Name.Length)
+            .ToList();
+
     /// <summary>The playlist to show: the user's pick if they made one, else the best guess.</summary>
-    public async Task<Playlist?> ResolveAsync(string recordingFileName, string recordingFileId)
+    public async Task<Playlist?> ResolveAsync(string recordingFileName, string recordingFileId, int? recordingYear = null)
     {
-        var candidates = await CandidatesAsync(recordingFileName);
+        var candidates = await CandidatesAsync(recordingFileName, recordingYear);
         var chosen = await GetOverrideAsync(recordingFileId);
 
         if (chosen is not null)
