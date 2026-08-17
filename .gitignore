@@ -504,3 +504,6 @@ tests/e2e/screenshots/
 
 # Local working copies of personal data — never commit
 tmp/
+
+# Teammate agent worktrees — real git worktrees, never part of the tree
+.claude/worktrees/
