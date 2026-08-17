@@ -105,9 +105,30 @@ else
 
     @if (missingCount > 0)
     {
-        <p class="state-message subtle">
-            @missingCount of @files.Count @(missingCount == 1 ? "track has" : "tracks have") no matching file in Drive.
-        </p>
+        <div class="missing-list">
+            <button class="link-button small" @onclick="() => showMissing = !showMissing">
+                @missingCount of @files.Count tracks @(missingCount == 1 ? "has" : "have")
+                no matching file in Drive @(showMissing ? "▾" : "▸")
+            </button>
+
+            @if (showMissing)
+            {
+                <ul>
+                    @foreach (var file in files.Where(f => string.IsNullOrEmpty(f.DriveFileId)))
+                    {
+                        <li>
+                            <span class="missing-name">@(file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""))</span>
+                            <span class="missing-path">@file.Track?.Path</span>
+                        </li>
+                    }
+                </ul>
+                <p class="missing-hint">
+                    These are in the Traktor collection but not in Drive under that
+                    filename — usually a local-only recording, or a file renamed or
+                    moved since Traktor indexed it.
+                </p>
+            }
+        </div>
     }
 }
 
@@ -119,6 +140,7 @@ else
     string? token;
     string? loadError;
     int missingCount;
+    bool showMissing;
 
     enum SortColumn { Title, Artist, Folder, Label, Comment, Length, Added }
 

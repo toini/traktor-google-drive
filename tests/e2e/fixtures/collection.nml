@@ -15,7 +15,7 @@
 <NML VERSION="19">
   <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
   <MUSICFOLDERS></MUSICFOLDERS>
-  <COLLECTION ENTRIES="7">
+  <COLLECTION ENTRIES="8">
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
@@ -66,6 +66,16 @@
     <ENTRY MODIFIED_DATE="2026/8/16" TITLE="C4 2026-08-16" ARTIST="">
       <LOCATION DIR="/:Users/:toni/:Google Drive/:Musiikki/:Traktor/:Setit/:" FILE="C4 2026-08-16.wav" VOLUME="Macintosh HD"></LOCATION>
       <INFO BITRATE="1411000" PLAYTIME="5400" PLAYTIME_FLOAT="5400.0" IMPORT_DATE="2026/8/17"></INFO>
+    </ENTRY>
+
+    <!--
+      In the collection but absent from Drive: exercises the "no matching file"
+      path. Its folder is the local-only Recordings directory Traktor writes to,
+      which is the real-world reason this happens.
+    -->
+    <ENTRY MODIFIED_DATE="2022/2/19" TITLE="Epsilon Local Only" ARTIST="Test Artist Five">
+      <LOCATION DIR="/:Users/:toni/:Music/:Traktor/:Recordings/:" FILE="epsilon-local.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411000" PLAYTIME="600" PLAYTIME_FLOAT="600.0" IMPORT_DATE="2022/2/20"></INFO>
     </ENTRY>
 
     <!-- Present in the collection but NOT referenced by any playlist. -->
@@ -140,6 +150,13 @@
             <NODE TYPE="PLAYLIST" NAME="Old Sets">
               <PLAYLIST ENTRIES="1" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5c">
                 <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Archive/:delta.wav"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+            <!-- One track in Drive, one only on the local disk. -->
+            <NODE TYPE="PLAYLIST" NAME="Partly Missing">
+              <PLAYLIST ENTRIES="2" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f65">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:beta.wav"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Users/:toni/:Music/:Traktor/:Recordings/:epsilon-local.wav"></PRIMARYKEY></ENTRY>
               </PLAYLIST>
             </NODE>
           </SUBNODES>

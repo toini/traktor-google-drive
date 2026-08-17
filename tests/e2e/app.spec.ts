@@ -436,3 +436,22 @@ test.describe('collection id is not sticky', () => {
     await expect(page.locator('.error-banner')).toHaveCount(0);
   });
 });
+
+test.describe('unmatched tracks', () => {
+  test('names the tracks with no file in Drive', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    // Its own playlist: the shared Psytech fixture is relied on by most of the
+    // suite, and changing its track count moves a dozen expectations.
+    await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f65');
+
+    const toggle = page.locator('.missing-list button');
+    await expect(toggle).toContainText('1 of 2 tracks has no matching file in Drive');
+
+    // Counting them is not enough — you cannot act on a count.
+    await expect(page.locator('.missing-name')).toHaveCount(0);
+    await toggle.click();
+    await expect(page.locator('.missing-name')).toHaveText(['Epsilon Local Only']);
+    await expect(page.locator('.missing-path')).toContainText('Music/Traktor/Recordings/epsilon-local.wav');
+  });
+});
