@@ -2,12 +2,13 @@
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject TraktorGoogleDrive.Services.PlayerService Player
 @inject TraktorGoogleDrive.Services.AppErrors Errors
 
 <div class="waveform @(failed ? "failed" : "")">
-    <canvas @ref="canvas" class="waveform-canvas" @onclick="OnClick"></canvas>
+    <div @ref="container" class="waveform-canvas"></div>
 
-    @if (progress is { } p && peaks is null && !failed)
+    @if (progress is { } p && !mounted && !failed)
     {
         <div class="waveform-status">Sampling waveform… @((int)(p * 100))%</div>
     }
@@ -20,33 +21,26 @@
 @code {
     [Parameter] public string? Url { get; set; }
     [Parameter] public string? FileId { get; set; }
-    [Parameter] public double Position { get; set; }
-    [Parameter] public EventCallback<double> OnSeek { get; set; }
 
-    ElementReference canvas;
+    ElementReference container;
     IJSObjectReference? module;
+    IJSObjectReference? media;
     DotNetObjectReference<Waveform>? self;
-    double[]? peaks;
     double? progress;
+    bool mounted;
     bool failed;
     string? loadedFor;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (string.IsNullOrEmpty(Url) || string.IsNullOrEmpty(FileId)) return;
+        if (loadedFor == FileId) return;
 
-        if (loadedFor != FileId)
-        {
-            loadedFor = FileId;
-            peaks = null;
-            progress = 0;
-            failed = false;
-            await LoadAsync(FileId, Url);
-            return;
-        }
-
-        if (peaks is not null && module is not null)
-            await module.InvokeVoidAsync("draw", canvas, peaks, Position);
+        loadedFor = FileId;
+        mounted = false;
+        progress = 0;
+        failed = false;
+        await LoadAsync(FileId, Url);
     }
 
     async Task LoadAsync(string fileId, string url)
@@ -56,14 +50,21 @@
             module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./waveform.js");
             self ??= DotNetObjectReference.Create(this);
 
-            peaks = await module.InvokeAsync<double[]>("computePeaks", url, fileId, self);
+            var peaks = await module.InvokeAsync<double[]>("computePeaks", url, fileId, self);
             progress = null;
+
+            media = await Player.MediaElementAsync();
+            if (media is null) throw new InvalidOperationException("no media element to attach to");
+
+            // Traktor's PLAYTIME, because a sliced 206 response can leave the
+            // element's own duration unknown for a long while.
+            await module.InvokeVoidAsync("mount", container, media, peaks, Player.Duration);
+            mounted = true;
             StateHasChanged();
-            await module.InvokeVoidAsync("draw", canvas, peaks, Position);
         }
         catch (Exception ex)
         {
-            // A missing waveform must not break playback, so this is a notice.
+            // A missing waveform must never stop playback, so this is a notice.
             failed = true;
             progress = null;
             Errors.Info("Could not build a waveform for this recording", ex.Message);
@@ -78,19 +79,20 @@
         InvokeAsync(StateHasChanged);
     }
 
-    async Task OnClick(MouseEventArgs e)
-    {
-        if (module is null || peaks is null) return;
-        var fraction = await module.InvokeAsync<double>("fractionFromClick", canvas, e.ClientX);
-        await OnSeek.InvokeAsync(fraction);
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (module is not null)
         {
-            try { await module.DisposeAsync(); }
+            try
+            {
+                await module.InvokeVoidAsync("destroy");
+                await module.DisposeAsync();
+            }
             catch (JSDisconnectedException) { /* circuit gone during teardown */ }
+        }
+        if (media is not null)
+        {
+            try { await media.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
         self?.Dispose();
     }

@@ -32,8 +32,7 @@
 
             @if (Player.CurrentIsWav && !Player.IsCasting)
             {
-                <Waveform Url="@Player.CurrentUrl" FileId="@Player.CurrentFileId"
-                          Position="@Fraction" OnSeek="SeekToFraction" />
+                <Waveform Url="@Player.CurrentUrl" FileId="@Player.CurrentFileId" />
             }
             else
             {
@@ -45,7 +44,7 @@
         </div>
 
         <div class="player-time">
-            <span>@TrackTime.Format(Player.CurrentTime)</span>
+            <span>@TrackTime.Position(Player.CurrentTime)</span>
             <span class="player-time-sep">/</span>
             <span>@TrackTime.Format(Player.Duration)</span>
         </div>

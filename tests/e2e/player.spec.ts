@@ -1,6 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { mockDrive, seedToken } from './drive-mock';
 
+
+/**
+ * Sampling is finished once WaveSurfer has mounted, which strictly follows
+ * computePeaks. `.waveform-status` is not a usable signal: it is absent both
+ * before sampling starts and after it ends.
+ */
+const waveformMounted = (page) =>
+  page.locator('.waveform-canvas').evaluate(
+    (el) => el.querySelector('div')?.shadowRoot?.querySelector('canvas') != null,
+  );
+
 const PSYTECH = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';   // ordinary tracks (.wav fixtures)
 const RECORDED = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62'; // recordings: one .mp3, one .wav
 
@@ -54,11 +65,7 @@ test.describe('waveform', () => {
       .poll(() => calls.filter((c) => c.url.includes('drive-c4-2026')).length, { timeout: 30_000 })
       .toBeGreaterThan(5);
 
-    await expect(page.locator('.waveform-status')).toHaveCount(0);
-    const painted = await page.locator('.waveform-canvas').evaluate(
-      (c: HTMLCanvasElement) => c.width > 0 && c.height > 0,
-    );
-    expect(painted).toBe(true);
+    await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
   });
 
   test('falls back to a plain seek bar for a compressed recording', async ({ page }) => {
@@ -87,17 +94,14 @@ test.describe('waveform', () => {
         && Number(c.range!.split('-')[1]) - Number(c.range!.split('=')[1].split('-')[0]) === 2047).length;
 
     await play().click();
-    await expect(page.locator('.waveform-canvas')).toBeVisible();
-    // Sampling must FINISH before reloading, or peaks were never cached — the
-    // status element disappears only once computePeaks has stored them.
-    await expect(page.locator('.waveform-status')).toHaveCount(0, { timeout: 60_000 });
+    // Sampling must FINISH before reloading, or the peaks were never cached.
+    await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
     expect(samplingReads()).toBeGreaterThan(5);
 
     const afterFirst = samplingReads();
     await page.reload();
     await play().click();
-    await expect(page.locator('.waveform-canvas')).toBeVisible();
-    await page.waitForTimeout(2500);
+    await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
 
     // Cached: no further window reads at all.
     expect(samplingReads() - afterFirst).toBe(0);

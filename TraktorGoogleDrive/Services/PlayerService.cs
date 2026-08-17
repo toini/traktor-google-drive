@@ -124,6 +124,16 @@ public class PlayerService : IAsyncDisposable
         await module.InvokeVoidAsync("play", fileId, CurrentUrl);
     }
 
+    /// <summary>
+    /// The underlying media element, so WaveSurfer can attach to it rather than
+    /// loading a second copy of a 1-2 GB file.
+    /// </summary>
+    public async Task<IJSObjectReference?> MediaElementAsync()
+    {
+        var module = await ModuleAsync();
+        return await module.InvokeAsync<IJSObjectReference?>("element");
+    }
+
     /// <summary>Play or pause whatever is loaded, on whichever output owns it.</summary>
     public async Task ResumeAsync()
     {

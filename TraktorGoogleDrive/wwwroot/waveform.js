@@ -158,38 +158,38 @@ export async function computePeaks(url, fileId, dotNetRef) {
     return peaks;
 }
 
-export function draw(canvas, peaks, position) {
-    if (!canvas || !peaks?.length) return;
+/* ---------- rendering ---------- */
 
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    if (w === 0 || h === 0) return;
+// WaveSurfer does the drawing, cursor and click-to-seek. Given `media` plus
+// `peaks` and `duration` it renders from the data we sampled and never fetches
+// or decodes the file itself, which is the only reason it can be used on a
+// 1-2 GB set at all.
+let ws = null;
 
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+export async function mount(container, mediaElement, peaks, duration) {
+    const { default: WaveSurfer } = await import('./lib/wavesurfer/wavesurfer.esm.js');
 
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    const barWidth = w / peaks.length;
-    const mid = h / 2;
-    const playedUpTo = w * (position ?? 0);
-
-    // Normalise: DJ recordings are mastered loud, but a quiet one should still
-    // fill the box rather than render as a flat line.
-    const loudest = Math.max(...peaks, 0.01);
-
-    for (let i = 0; i < peaks.length; i++) {
-        const x = i * barWidth;
-        const amp = Math.max(1, (peaks[i] / loudest) * mid);
-        ctx.fillStyle = x + barWidth <= playedUpTo ? '#ff6600' : '#4a5058';
-        ctx.fillRect(x, mid - amp, Math.max(barWidth - 0.5, 0.5), amp * 2);
-    }
+    destroy();
+    ws = WaveSurfer.create({
+        container,
+        media: mediaElement,
+        peaks: [peaks],
+        duration,
+        height: 40,
+        waveColor: '#4a5058',
+        progressColor: '#ff6600',
+        cursorColor: '#ffaa44',
+        cursorWidth: 1,
+        barWidth: 2,
+        barGap: 1,
+        barRadius: 1,
+        normalize: true,
+    });
+    return true;
 }
 
-export function fractionFromClick(canvas, clientX) {
-    const rect = canvas.getBoundingClientRect();
-    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+export function destroy() {
+    if (!ws) return;
+    try { ws.destroy(); } catch { /* already torn down with its container */ }
+    ws = null;
 }

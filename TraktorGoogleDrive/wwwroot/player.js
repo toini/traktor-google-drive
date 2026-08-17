@@ -71,6 +71,11 @@ export function seek(seconds) {
     audio.currentTime = Math.max(0, seconds);
 }
 
+/** The one audio element, so WaveSurfer can attach to it instead of loading its own. */
+export function element() {
+    return audio;
+}
+
 export function position() {
     return audio ? { current: audio.currentTime, duration: audio.duration || 0 } : null;
 }
