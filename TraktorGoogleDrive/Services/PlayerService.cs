@@ -30,6 +30,12 @@ public class PlayerService : IAsyncDisposable
     }
 
     public string? CurrentFileId { get; private set; }
+    public string? CurrentTitle { get; private set; }
+    public string? CurrentUrl { get; private set; }
+    /// <summary>True when the source is uncompressed, i.e. a waveform can be sampled cheaply.</summary>
+    public bool CurrentIsWav { get; private set; }
+    public double CurrentTime { get; private set; }
+    public double Duration { get; private set; }
     public PlaybackState State { get; private set; } = PlaybackState.Idle;
 
     /// <summary>Raised on every state transition so components can re-render.</summary>
@@ -47,7 +53,7 @@ public class PlayerService : IAsyncDisposable
         return _module;
     }
 
-    public async Task ToggleAsync(string fileId, string url)
+    public async Task ToggleAsync(string fileId, string url, string? title = null, bool isWav = false, double? durationHint = null)
     {
         var module = await ModuleAsync();
 
@@ -57,10 +63,49 @@ public class PlayerService : IAsyncDisposable
             return;
         }
 
+        if (CurrentFileId != fileId)
+        {
+            CurrentTime = 0;
+            // Traktor's PLAYTIME until the media element reports its own; with
+            // sliced range responses that can take a while.
+            Duration = durationHint ?? 0;
+        }
+
         CurrentFileId = fileId;
+        CurrentTitle = title;
+        CurrentUrl = url;
+        CurrentIsWav = isWav;
         State = PlaybackState.Loading;
         Changed?.Invoke();
         await module.InvokeVoidAsync("play", fileId, url);
+    }
+
+    public async Task ResumeAsync()
+    {
+        if (_module is null || CurrentFileId is null || CurrentUrl is null) return;
+        await _module.InvokeVoidAsync("play", CurrentFileId, CurrentUrl);
+    }
+
+    public async Task PauseAsync()
+    {
+        if (_module is null) return;
+        await _module.InvokeVoidAsync("pause");
+    }
+
+    public async Task SeekAsync(double seconds)
+    {
+        if (_module is null) return;
+        await _module.InvokeVoidAsync("seek", seconds);
+    }
+
+    [JSInvokable]
+    public void OnProgress(double currentTime, double duration)
+    {
+        CurrentTime = currentTime;
+        // A sliced 206 response can leave duration Infinity until enough is
+        // buffered; the track's own PLAYTIME is a better source in that case.
+        Duration = double.IsFinite(duration) && duration > 0 ? duration : Duration;
+        Changed?.Invoke();
     }
 
     public async Task StopAsync()
@@ -76,13 +121,17 @@ public class PlayerService : IAsyncDisposable
         {
             "loading" or "ready" => State == PlaybackState.Playing ? PlaybackState.Playing : PlaybackState.Loading,
             "playing" => PlaybackState.Playing,
+            // Keep the track loaded and paused rather than clearing it: a set
+            // that just finished is exactly the one you want to scrub back into.
+            "ended" => PlaybackState.Paused,
             "paused" => PlaybackState.Paused,
             "unauthorized" => PlaybackState.Unauthorized,
             "error" or "blocked" => PlaybackState.Error,
             _ => PlaybackState.Idle,
         };
 
-        if (state is "ended" or "idle") CurrentFileId = null;
+        if (state == "ended") CurrentTime = 0;
+        else if (state == "idle") { CurrentFileId = null; CurrentTime = 0; }
         else if (fileId is not null) CurrentFileId = fileId;
 
         switch (state)

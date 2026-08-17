@@ -72,3 +72,16 @@ test('capture an expanded set', async ({ page }) => {
   await page.locator('.set-tracklist').waitFor();
   await page.screenshot({ path: `${OUT}/07-set-expanded.png`, fullPage: true });
 });
+
+test('capture the player bar with a waveform', async ({ page }) => {
+  await mockDrive(page);
+  await seedToken(page);
+  await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62');
+  await page.getByText('C4 2026-08-16').waitFor();
+  await page.locator('tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button').click();
+  await page.locator('.waveform-canvas').waitFor();
+  await page.locator('.expander').first().click();
+  // Wait for sampling to finish so the waveform is drawn, not mid-progress.
+  await page.locator('.waveform-status').waitFor({ state: 'detached', timeout: 60000 });
+  await page.screenshot({ path: `${OUT}/08-player-waveform.png`, fullPage: true });
+});

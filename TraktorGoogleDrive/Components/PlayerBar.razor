@@ -1,0 +1,74 @@
+@namespace TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Models
+@using TraktorGoogleDrive.Services
+@implements IDisposable
+@inject PlayerService Player
+
+@if (Player.CurrentFileId is not null)
+{
+    <div class="player-bar" role="region" aria-label="Now playing">
+        <button class="player-toggle @(Player.State == PlaybackState.Playing ? "playing" : "")"
+                title="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
+                aria-label="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
+                @onclick="Toggle">
+            @if (Player.State == PlaybackState.Loading)
+            {
+                <span class="spinner" aria-hidden="true"></span>
+            }
+            else
+            {
+                <span aria-hidden="true">@(Player.State == PlaybackState.Playing ? "❚❚" : "▶")</span>
+            }
+        </button>
+
+        <div class="player-body">
+            <div class="player-title">@(Player.CurrentTitle ?? "…")</div>
+
+            @if (Player.CurrentIsWav)
+            {
+                <Waveform Url="@Player.CurrentUrl" FileId="@Player.CurrentFileId"
+                          Position="@Fraction" OnSeek="SeekToFraction" />
+            }
+            else
+            {
+                <input class="player-seek" type="range" min="0" max="1000" step="1"
+                       value="@((int)(Fraction * 1000))"
+                       aria-label="Seek"
+                       @onchange="OnSeekInput" />
+            }
+        </div>
+
+        <div class="player-time">
+            <span>@TrackTime.Format(Player.CurrentTime)</span>
+            <span class="player-time-sep">/</span>
+            <span>@TrackTime.Format(Player.Duration)</span>
+        </div>
+    </div>
+}
+
+@code {
+    double Fraction => Player.Duration > 0 ? Math.Clamp(Player.CurrentTime / Player.Duration, 0, 1) : 0;
+
+    protected override void OnInitialized() => Player.Changed += OnChanged;
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    async Task Toggle()
+    {
+        if (Player.State == PlaybackState.Playing) await Player.PauseAsync();
+        else await Player.ResumeAsync();
+    }
+
+    async Task OnSeekInput(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var thousandths))
+            await SeekToFraction(thousandths / 1000.0);
+    }
+
+    async Task SeekToFraction(double fraction)
+    {
+        if (Player.Duration > 0) await Player.SeekAsync(fraction * Player.Duration);
+    }
+
+    public void Dispose() => Player.Changed -= OnChanged;
+}

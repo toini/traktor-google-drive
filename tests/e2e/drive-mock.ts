@@ -80,7 +80,7 @@ export function makeWav(seconds = 2, sampleRate = 8000): Buffer {
   return Buffer.concat([header, data]);
 }
 
-export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder'; url: string };
+export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder'; url: string; range?: string };
 
 /** What Drive hands back when the app searches for collection.nml by name. */
 export const DISCOVERED_COLLECTION_ID = 'drive-collection-discovered';
@@ -115,7 +115,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
   const wav = makeWav();
 
   const serveMedia = (route: Route, url: string) => {
-    calls.push({ kind: 'media', url });
+    calls.push({ kind: 'media', url, range: route.request().headers()['range'] });
     if (opts.mediaStatus) return route.fulfill({ status: opts.mediaStatus, body: '' });
 
     const range = route.request().headers()['range'];

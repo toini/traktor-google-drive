@@ -44,7 +44,12 @@
         if (File is null || string.IsNullOrEmpty(File.DriveFileId) || string.IsNullOrEmpty(Token))
             return;
 
-        await Player.ToggleAsync(File.DriveFileId, DriveAudio.UrlFor(File.DriveFileId, Token));
+        await Player.ToggleAsync(
+            File.DriveFileId,
+            DriveAudio.UrlFor(File.DriveFileId, Token),
+            File.Track?.Title ?? Path.GetFileName(File.Track?.Path ?? ""),
+            DriveAudio.IsUncompressed(File),
+            File.Track?.PlaytimeFloat);
     }
 
     public void Dispose() => Player.Changed -= OnPlayerChanged;
