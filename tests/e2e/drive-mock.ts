@@ -80,7 +80,7 @@ export function makeWav(seconds = 2, sampleRate = 8000): Buffer {
   return Buffer.concat([header, data]);
 }
 
-export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder'; url: string; range?: string };
+export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder' | 'meta'; url: string; range?: string };
 
 /** What Drive hands back when the app searches for collection.nml by name. */
 export const DISCOVERED_COLLECTION_ID = 'drive-collection-discovered';
@@ -101,6 +101,8 @@ export type MockOptions = {
   mediaStatus?: number;
   /** Override the NML body. */
   nml?: string;
+  /** RFC3339 modifiedTime reported for the collection file. */
+  collectionModifiedTime?: string;
 };
 
 /**
@@ -194,6 +196,20 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       }
 
       const id = u.pathname.replace('/drive/v3/files/', '');
+
+      // Drive: file metadata (id/name/modifiedTime) — the collection's sync time.
+      if (u.searchParams.get('fields')?.includes('modifiedTime')) {
+        calls.push({ kind: 'meta', url });
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id,
+            name: 'collection.nml',
+            modifiedTime: opts.collectionModifiedTime ?? '2026-08-17T09:32:00.000Z',
+          }),
+        });
+      }
 
       // Drive: folder metadata lookup (used to disambiguate same-named files).
       if (u.searchParams.get('fields') === 'name') {

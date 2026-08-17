@@ -376,3 +376,33 @@ test('picks the playlist from the same year when a set code is reused', async ({
   await expect(select).toHaveValue('0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f64'); // the 2026 one
   await expect(page.locator('.set-tracklist li')).toHaveCount(2);
 });
+
+test.describe('collection freshness', () => {
+  test('shows when the collection was last synced', async ({ page }) => {
+    await mockDrive(page, { collectionModifiedTime: '2026-08-17T09:32:00.000Z' });
+    await seedToken(page);
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+
+    // Rendered in local time, so assert the date and the shape rather than a
+    // fixed clock time the CI timezone would break.
+    await expect(page.locator('.collection-status')).toContainText(/Synced 2026-08-1[67] \d{2}:\d{2}/);
+  });
+
+  test('shows the most recently imported track', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto('/music');
+    await expect(page.locator('.collection-status-added')).toContainText('2026-08-17');
+    // C4 has the newest IMPORT_DATE in the fixture.
+    await expect(page.locator('.collection-status-added')).toContainText('C4 2026-08-16');
+  });
+
+  test('omits the sync line when Drive gives no timestamp', async ({ page }) => {
+    await mockDrive(page, { collectionModifiedTime: '' });
+    await seedToken(page);
+    await page.goto('/music');
+    await expect(page.getByText('My Sets')).toBeVisible();
+    await expect(page.locator('.collection-status')).not.toContainText('Synced');
+  });
+});

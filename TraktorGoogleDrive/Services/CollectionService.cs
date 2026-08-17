@@ -39,6 +39,12 @@ public class CollectionService
     /// <summary>The Drive file id actually used for the last successful load.</summary>
     public string? ResolvedFileId { get; private set; }
 
+    /// <summary>When Drive last received a new collection.nml, i.e. Traktor's last sync.</summary>
+    public DateTimeOffset? LastSyncedAt { get; private set; }
+
+    /// <summary>Most recently imported track in the whole collection.</summary>
+    public Track? LastAdded { get; private set; }
+
     /// <summary>Set when several collection.nml files exist and one was chosen.</summary>
     public IReadOnlyList<DriveService.NamedFile> Candidates { get; private set; } = [];
 
@@ -71,6 +77,15 @@ public class CollectionService
 
             var parser = new TraktorNmlParser.NmlParser();
             _collection = parser.Load(content);
+
+            LastAdded = _collection.Tracks
+                .Where(t => Models.TrackDate.Parse(t.ImportDate) is not null)
+                .OrderByDescending(t => Models.TrackDate.Parse(t.ImportDate))
+                .FirstOrDefault();
+
+            if (ResolvedFileId is { } id)
+                LastSyncedAt = (await _drive.GetMetadataAsync(id, token))?.ModifiedTime;
+
             return _collection;
         }
         finally

@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Components.Routing
 @using TraktorGoogleDrive.Services
 @using TraktorNmlParser.Models
+@using TraktorGoogleDrive.Models
 @inject CollectionService CollectionService
 @inject AuthService Auth
 @inject AppErrors Errors
@@ -41,6 +42,23 @@
         {
             <p class="folder-tree-message">No playlists found.</p>
         }
+
+        <div class="collection-status">
+            @if (CollectionService.LastSyncedAt is { } synced)
+            {
+                <div title="When Drive last received a new collection.nml">
+                    Synced @synced.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                </div>
+            }
+            @if (CollectionService.LastAdded is { } added)
+            {
+                <div class="collection-status-added"
+                     title="@(added.Title ?? System.IO.Path.GetFileName(added.Path))">
+                    Newest: @TrackDate.Format(added.ImportDate) ·
+                    @(added.Title ?? System.IO.Path.GetFileName(added.Path))
+                </div>
+            }
+        </div>
     }
 </nav>
 

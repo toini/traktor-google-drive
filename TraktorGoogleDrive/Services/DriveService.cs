@@ -112,6 +112,30 @@ public class DriveService
         return found;
     }
 
+    public sealed record FileMeta(string Id, string Name, DateTimeOffset? ModifiedTime);
+
+    /// <summary>
+    /// When Drive last received a new version of this file — i.e. when Traktor
+    /// last synced it. One small call; the download itself carries no usable
+    /// modification time.
+    /// </summary>
+    public async Task<FileMeta?> GetMetadataAsync(string fileId, string token)
+    {
+        try
+        {
+            var json = await SendAsync(
+                $"https://www.googleapis.com/drive/v3/files/{fileId}?fields=id,name,modifiedTime", token);
+            return new FileMeta(
+                json.TryGetProperty("id", out var i) ? i.GetString() ?? fileId : fileId,
+                json.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+                json.TryGetProperty("modifiedTime", out var m) && m.GetString() is { } s
+                    ? DateTimeOffset.Parse(s)
+                    : null);
+        }
+        catch (DriveAuthException) { throw; }
+        catch { return null; } // a missing timestamp must not fail the load
+    }
+
     public sealed record NamedFile(string Id, string Name, DateTimeOffset? ModifiedTime)
     {
         /// <summary>Name of the containing Drive folder, once resolved.</summary>
