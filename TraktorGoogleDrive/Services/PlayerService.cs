@@ -1,5 +1,7 @@
 using Microsoft.JSInterop;
 
+using TraktorGoogleDrive.Models;
+
 namespace TraktorGoogleDrive.Services;
 
 public enum PlaybackState
@@ -15,22 +17,41 @@ public enum PlaybackState
 /// <summary>
 /// Owns the app's single audio element. Components ask this to play; they never
 /// hold an audio element themselves, so simultaneous playback cannot happen.
+/// While a Cast session is connected it routes to the TV instead, so a play
+/// button never has to know which output it is driving.
 /// </summary>
 public class PlayerService : IAsyncDisposable
 {
     private readonly IJSRuntime _js;
     private readonly AppErrors _errors;
+    private readonly CastService _cast;
     private IJSObjectReference? _module;
     private DotNetObjectReference<PlayerService>? _self;
 
-    public PlayerService(IJSRuntime js, AppErrors errors)
+    private string? _localFileId;
+    private PlaybackState _localState = PlaybackState.Idle;
+
+    public PlayerService(IJSRuntime js, AppErrors errors, CastService cast)
     {
         _js = js;
         _errors = errors;
+        _cast = cast;
+        _cast.Changed += OnCastChanged;
     }
 
-    public string? CurrentFileId { get; private set; }
-    public PlaybackState State { get; private set; } = PlaybackState.Idle;
+    // Subscribers watch this one event, so the TV's transitions have to reach them
+    // the same way the local element's do. Connecting also silences this browser,
+    // or the set plays in two places at once.
+    private void OnCastChanged()
+    {
+        if (_cast.IsConnected && _localState is PlaybackState.Playing or PlaybackState.Loading)
+            _ = StopAsync();
+
+        Changed?.Invoke();
+    }
+
+    public string? CurrentFileId => _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
+    public PlaybackState State => _cast.IsConnected ? _cast.State : _localState;
 
     /// <summary>Raised on every state transition so components can re-render.</summary>
     public event Action? Changed;
@@ -47,22 +68,33 @@ public class PlayerService : IAsyncDisposable
         return _module;
     }
 
-    public async Task ToggleAsync(string fileId, string url)
+    public async Task ToggleAsync(FileEntry file, string token)
     {
-        var module = await ModuleAsync();
+        if (_cast.IsConnected)
+        {
+            await _cast.ToggleAsync(file, token);
+            return;
+        }
 
-        if (CurrentFileId == fileId && State is PlaybackState.Playing or PlaybackState.Loading)
+        var module = await ModuleAsync();
+        var fileId = file.DriveFileId;
+
+        if (_localFileId == fileId && _localState is PlaybackState.Playing or PlaybackState.Loading)
         {
             await module.InvokeVoidAsync("pause");
             return;
         }
 
-        CurrentFileId = fileId;
-        State = PlaybackState.Loading;
+        _localFileId = fileId;
+        _localState = PlaybackState.Loading;
         Changed?.Invoke();
-        await module.InvokeVoidAsync("play", fileId, url);
+        await module.InvokeVoidAsync("play", fileId, DriveAudio.UrlFor(fileId, token));
     }
 
+    /// <summary>
+    /// Stops the local element only. A Cast session deliberately survives
+    /// navigation — browsing to another playlist must not silence the TV.
+    /// </summary>
     public async Task StopAsync()
     {
         if (_module is null) return;
@@ -72,9 +104,9 @@ public class PlayerService : IAsyncDisposable
     [JSInvokable]
     public void OnPlaybackStateChanged(string state, string? fileId)
     {
-        State = state switch
+        _localState = state switch
         {
-            "loading" or "ready" => State == PlaybackState.Playing ? PlaybackState.Playing : PlaybackState.Loading,
+            "loading" or "ready" => _localState == PlaybackState.Playing ? PlaybackState.Playing : PlaybackState.Loading,
             "playing" => PlaybackState.Playing,
             "paused" => PlaybackState.Paused,
             "unauthorized" => PlaybackState.Unauthorized,
@@ -82,8 +114,8 @@ public class PlayerService : IAsyncDisposable
             _ => PlaybackState.Idle,
         };
 
-        if (state is "ended" or "idle") CurrentFileId = null;
-        else if (fileId is not null) CurrentFileId = fileId;
+        if (state is "ended" or "idle") _localFileId = null;
+        else if (fileId is not null) _localFileId = fileId;
 
         switch (state)
         {
@@ -106,6 +138,8 @@ public class PlayerService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _cast.Changed -= OnCastChanged;
+
         if (_module is not null)
         {
             try

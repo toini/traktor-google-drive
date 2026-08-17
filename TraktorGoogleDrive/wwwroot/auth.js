@@ -35,9 +35,11 @@ window.authSignOut = () => {
     sessionStorage.removeItem(EXPIRY_KEY);
 };
 
+window.authTokenExpiresAt = () => Number(sessionStorage.getItem(EXPIRY_KEY) ?? 0) || null;
+
 // Resolves with the token, or null if the user dismissed the picker. Replaces
 // the old fire-and-forget + poll-sessionStorage-100-times approach.
-window.googleLogin = () =>
+const requestToken = (options) =>
     new Promise((resolve) => {
         if (!window.google?.accounts?.oauth2) {
             console.error('Google Identity Services not loaded');
@@ -63,5 +65,11 @@ window.googleLogin = () =>
             },
         });
 
-        client.requestAccessToken();
+        client.requestAccessToken(options);
     });
+
+window.googleLogin = () => requestToken();
+
+// A Cast device holds the token inside its media URL, so a set longer than the
+// ~1h token lifetime needs a replacement minted without a consent popup.
+window.authRefreshToken = () => requestToken({ prompt: '' });

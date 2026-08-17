@@ -1,0 +1,69 @@
+@namespace TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Models
+@using TraktorGoogleDrive.Services
+@implements IDisposable
+@inject CastService Cast
+
+@if (Cast.IsConnected)
+{
+    <div class="cast-bar" role="status" data-cast-bar>
+        <span class="cast-bar-device">
+            <span class="cast-bar-dot" aria-hidden="true"></span>
+            @(Cast.DeviceName ?? "Cast device")
+        </span>
+
+        @if (Cast.CurrentTitle is { Length: > 0 } title)
+        {
+            <span class="cast-bar-title">@title</span>
+
+            <button class="cast-bar-transport" title="@(IsPlaying ? "Pause" : "Play")"
+                    aria-label="@(IsPlaying ? "Pause" : "Play")" @onclick="PlayOrPause">
+                @(IsPlaying ? "❚❚" : "▶")
+            </button>
+
+            <input class="cast-bar-seek" type="range" aria-label="Seek"
+                   min="0" max="@Max" step="1" value="@Position" @onchange="Seek" />
+
+            <span class="cast-bar-time">@TrackTime.Format(Cast.CurrentTime) / @TrackTime.Format(Cast.Duration)</span>
+
+            <button class="cast-bar-transport" title="Stop" aria-label="Stop" @onclick="Stop">■</button>
+        }
+        else
+        {
+            <span class="cast-bar-title subtle">Press play on any track to send it here.</span>
+        }
+    </div>
+}
+
+@code {
+    bool IsPlaying => Cast.State == PlaybackState.Playing;
+
+    // A zero max collapses the slider to a dead 0-0 range before the device has
+    // reported a duration.
+    string Max => (Cast.Duration > 0 ? Cast.Duration : 1).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+    string Position => Cast.CurrentTime.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override void OnInitialized()
+    {
+        Cast.Changed += OnCastChanged;
+        Cast.Progress += OnCastChanged;
+    }
+
+    void OnCastChanged() => InvokeAsync(StateHasChanged);
+
+    Task PlayOrPause() => Cast.PlayOrPauseAsync();
+
+    Task Stop() => Cast.StopAsync();
+
+    Task Seek(ChangeEventArgs e) =>
+        double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            ? Cast.SeekAsync(seconds)
+            : Task.CompletedTask;
+
+    public void Dispose()
+    {
+        Cast.Changed -= OnCastChanged;
+        Cast.Progress -= OnCastChanged;
+    }
+}
