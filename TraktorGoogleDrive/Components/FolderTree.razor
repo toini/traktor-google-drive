@@ -18,11 +18,8 @@
     }
     else
     {
-        @foreach (var playlist in rootPlaylists)
-        {
-            <NavLink class="nav-link root-playlist" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
-        }
-
+        @* Folders first, loose playlists after. Interleaved, a folder's
+           children read as if they belonged to the playlist above it. *@
         @foreach (var folder in folders)
         {
             <div class="nav-item">
@@ -36,6 +33,16 @@
                     </div>
                 </details>
             </div>
+        }
+
+        @if (folders.Count > 0 && rootPlaylists.Count > 0)
+        {
+            <div class="folder-tree-divider">Playlists</div>
+        }
+
+        @foreach (var playlist in rootPlaylists)
+        {
+            <NavLink class="nav-link root-playlist" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
         }
 
         @if (folders.Count == 0 && rootPlaylists.Count == 0)
