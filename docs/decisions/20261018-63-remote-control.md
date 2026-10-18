@@ -29,8 +29,30 @@ stops the music), is implemented on the same branch, in the same PR as this ADR.
 - **No volume control** for now (Open question 6).
 - **No "listen on both":** a device is either the player or a controller (Open
   question 7).
-- **The allowlist is on** (`REMOTE_ALLOWED_USERS`, §3), since the consent-screen
-  mode is unknown (Open question 4).
+- **The allowlist is on** (`RemoteAuth:AllowedUsers`, §3), since the consent-screen
+  mode is unknown (Open question 4). Outside Development an empty list refuses
+  everyone, so a deploy that forgets it fails closed.
+
+## Spike findings (increment 0, 2026-10-18)
+
+Measured against a throwaway Cloud Run service, `traktor-rc-spike` in
+`traktor-toni-2025` / europe-north1: a bare SignalR echo hub, 1 vCPU / 512 MiB,
+`--max-instances=1 --session-affinity`, WebSockets only with `skipNegotiation`. Two
+Node SignalR clients played "player" and "controller" from a laptop in Finland.
+The service and its image were deleted afterwards. The live `traktor-google-drive`
+service was not touched.
+
+| Question | Result |
+|---|---|
+| Does Cloud Run cut the socket at the timeout, and does it come back? | **Yes, and yes.** With `--timeout=60`, both sockets were cut at 61 s and again at 122 s. `withAutomaticReconnect` reconnected each within ~0.1–0.2 s, to the **same instance** both times |
+| Does a socket stay up with `--timeout=3600`? | **Yes.** Both held for the full 7-minute run with no reconnect |
+| Latency | Relay player → hub → controller: **p50 8–10 ms, p95 14–19 ms**, max 127 ms (209 samples over 7 min: max 45 ms). Controller ↔ hub ping: p50 8 ms. Far under the ~0.3–1 s a seek takes to sound (§2) |
+| Cold start after ~21 min idle | First `GET /` took **1.5 s**. The sockets then connected in 146 ms and 48 ms |
+| One instance for both devices? | Yes, every connection reported the same instance id while `max-instances=1` |
+| `tokeninfo` / `about.get` with a `drive.readonly` token | **Not verified.** A headless session has no user token, and minting a `drive.readonly` token by impersonating the project's service account was refused. The code (§3a) checks `aud`/`azp`, `scope` and `expires_in`, then uses `about.get` → `permissionId`. **Verify on the first deploy:** request a ticket from the real app; a 401 from `/api/remote/ticket` means one of those fields is not what the code expects |
+| Autoplay after a reload (§5.3) | **Not reproducible under automation.** Bundled headless Chromium and headed Google Chrome (fresh profile) allowed `play()` with no gesture in every case: fresh load, 6 s after a click, after a reload. Only with `--autoplay-policy=user-gesture-required` *and* a script-initiated reload was it refused (`NotAllowedError`). Playwright's own input counts as a gesture, so this says little about Toni's real Chrome, whose Media Engagement Index for the site decides. The app therefore treats `Blocked` as a state it reports, and the e2e suite simulates the refusal |
+| Silent token refresh in a hidden tab (§5.4) | Answered by the token-refresh work (PR 6): GIS `prompt: ''` renews silently **only inside a click, or when the site is allowed popups**. A hidden player whose token runs out therefore stops with `NeedsSignIn`, and the tablet says so |
+| Android system media controls for a Cast session (F1) | **Not checked**: it needs the physical tablet on the same network as the TV. Worth a try before increment 4, since it costs no code |
 
 ## Context
 
@@ -384,16 +406,19 @@ attacker's own room, but it is one line and the standard check.
 #### The connection: a ticket, not the Google token, in the URL
 
 Browsers cannot set headers on a WebSocket, so SignalR puts its token in the query
-string (`?access_token=`), and **Cloud Run's request logs record full URLs.** The
-audio proxy already writes tokens into those logs (`?token=` on every slice). That
-is an existing gap and out of scope here, but the hub should not add another.
-Instead:
+string (`?access_token=`), and **Cloud Run's request logs record full URLs.** (The
+audio proxy used to put its token there too, as `?token=`; since PR 6 it travels in
+the `drive_token` cookie instead.) So the Google token never goes into that URL:
 
-1. `POST /api/remote/ticket` with `Authorization: Bearer <access token>` and
-   `{deviceId}`. The server validates (3a) and returns a **ticket**:
-   `HMAC(secret, userKey | deviceId | exp)` with a 60 s `exp`, base64url.
-2. The WebSocket connects with `?ticket=…`. The hub checks the HMAC and the expiry,
-   and joins group `userKey`. A ticket in the logs is dead a minute later.
+1. `POST /api/remote/ticket` with `Authorization: Bearer <access token>`. The
+   server validates it (3a) and returns a **ticket**: `userKey | exp`, signed with
+   `HMAC(secret, …)`, a 60 s `exp`, base64url. *(As built, increment 1: the device id
+   is not in the ticket. It is not an authorisation boundary, since every tab of
+   the user is in the same room anyway.)*
+2. The WebSocket connects with the ticket as SignalR's `access_token` query
+   parameter. A middleware in front of the hub checks the HMAC, the expiry and the
+   `Origin` *before* the upgrade, and the hub joins the connection to group
+   `userKey`. A ticket in the logs is dead a minute later.
 3. It is **stateless**, so a ticket issued on one instance is valid on another. The
    HMAC secret comes from **Secret Manager** as an env var, and is never committed.
 
@@ -402,7 +427,8 @@ name or logged. **The hub also checks `Origin`** against the host, the way
 `IsAllowedCaller` does but strictly: no "neither header" pass, and no Cast receiver
 host.
 
-**Optional, defence in depth:** `REMOTE_ALLOWED_USERS`, a list of `userKey`s. With it
+**Optional, defence in depth:** `RemoteAuth:AllowedUsers` (env
+`RemoteAuth__AllowedUsers`), a list of emails or Drive `permissionId`s. With it
 set, only Toni's account can open a room at all. Whether it is needed depends on
 whether the OAuth consent screen is in "Testing" mode, limited to listed test users
 (Open question 4).
@@ -595,9 +621,9 @@ settings menu) until increment 3 has been used for real.
 | # | Increment | What Toni can do after it |
 |---|---|---|
 | 0 | **Spike, half a day, no product code.** Verify with real tokens and devices: what `tokeninfo` returns for a `drive.readonly` token, `about.get` → `permissionId`, a WebSocket on Cloud Run with `--timeout=3600 --max-instances=1`, whether remote `play()` after a reload is blocked on laptop Chrome, silent `authRefreshToken()` in a hidden tab, and Android's system media controls for the TV (F1) | Know which assumptions hold |
-| 1 | **See and nudge.** Hub, ticket auth, rooms, roster, `PlayerSnapshot`, `Play/Pause/Seek/Next/Previous/RequestSnapshot`, remote mode in `PlayerBar` (seek bar, no waveform yet), the "Playing on …" strip, idle-disconnect, `gcloud` flags | Open the tablet, see what the laptop plays, pause, seek, skip |
+| 1 | **See and nudge.** Queue moved into `PlayerService` (§5.1), hub, ticket auth, rooms, roster, `PlayerSnapshot`, `Play/Pause/Seek/Next/Previous/RequestSnapshot`, remote mode in `PlayerBar` (seek bar, no waveform yet), the "Playing on …" strip, idle-disconnect, `gcloud` flags | Open the tablet, see what the laptop plays, pause, seek, skip |
 | 2 | **Waveform on the tablet.** `RequestPeaks`, the waveform's "no local media" mode, cue markers from the tablet's NML | Seek by cue on the tablet |
-| 3 | **Pick another track.** Queue moved into `PlayerService` (§5.1), `PlayRow`, `SetContinuous`, `Start/StopPreview`, the "Now playing" queue view | Browse on the tablet, play any row of any playlist on the laptop, run a gig preview from the sofa |
+| 3 | **Pick another track.** `PlayRow`, `SetContinuous`, `Start/StopPreview`, the "Now playing" queue view | Browse on the tablet, play any row of any playlist on the laptop, run a gig preview from the sofa |
 | 4 | **Transfer and conflicts.** Device picker, `TransferTo` make-before-break, last-press-wins, Web Lock for tabs, device rename, `StopCasting` | Move playback between devices like Spotify |
 | 5 | **Polish.** Token-expiry banners and the local re-arm (§5.4), the autoplay banner (§5.3), merging the Cast list into the picker | Leave it running for a whole set |
 
@@ -667,7 +693,8 @@ settings menu) until increment 3 has been used for real.
 
 **Deliberately not done here**
 
-- Implementation of any kind.
+- Increments 2–5. This PR is increment 1 plus §5.1's queue move, which Toni's
+  decision 3 pulled forward from increment 3.
 - Fixing the audio proxy's tokens in Cloud Run request logs (noted in §3; it is an
   existing issue and deserves its own change).
 - Volume (Open question 6), merging Cast into the picker (increment 5), and
@@ -689,7 +716,7 @@ settings menu) until increment 3 has been used for real.
    stops playback, and only playing something else does (§5.1).
 4. **Is the OAuth consent screen in "Testing" mode** (limited to listed test users)?
    If not, anyone with a Google account can sign in to the app, and the
-   `REMOTE_ALLOWED_USERS` allowlist is worth turning on.
+   `RemoteAuth:AllowedUsers` allowlist is worth turning on.
 5. **Is the tablet Android or iPad?** Android may already give TV transport controls
    for free through its system Cast controls (F1). An iPad gets nothing from Cast,
    and its Safari's autoplay and background rules are stricter.
