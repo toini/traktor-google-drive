@@ -22,6 +22,38 @@ test.describe('collection sidebar', () => {
     await expect(page.getByText('$ROOT')).toHaveCount(0);
   });
 
+  test('lists folders and loose playlists as one list, folders first', async ({ page }) => {
+    await page.goto('/music');
+    const tree = page.locator('.folder-tree');
+    await expect(tree.getByText('My Sets')).toBeVisible();
+
+    // No "Playlists" divider between the folders and the loose playlists.
+    await expect(tree.getByText('Playlists', { exact: true })).toHaveCount(0);
+
+    // Top-level rows in DOM order: every folder before every loose playlist.
+    // Checked structurally so new fixture playlists don't break it.
+    const kinds = await tree
+      .locator(':scope > details > summary, :scope > a')
+      .evaluateAll(els => els.map(el => (el.tagName === 'SUMMARY' ? 'folder' : 'playlist')));
+    expect(kinds).toContain('folder');
+    expect(kinds).toContain('playlist');
+    expect(kinds.lastIndexOf('folder')).toBeLessThan(kinds.indexOf('playlist'));
+    await expect(tree.locator(':scope > a', { hasText: 'Root Level Playlist' })).toHaveCount(1);
+  });
+
+  test('ellipsises a long playlist name instead of overflowing the sidebar', async ({ page }) => {
+    await page.goto('/music');
+    const label = page.locator('.folder-tree a', { hasText: 'Root Level Playlist' }).locator('.tree-label');
+    // One evaluate: renaming the label means the hasText locator no longer matches.
+    const fits = await label.evaluate(el => {
+      el.textContent = 'history_2020y01m27d_23h14m05s_' + 'x'.repeat(80);
+      const nav = el.closest('.folder-tree')!.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return box.right <= nav.right && box.height < 30 && getComputedStyle(el).textOverflow === 'ellipsis';
+    });
+    expect(fits).toBe(true);
+  });
+
   test('links through to a playlist', async ({ page }) => {
     await page.goto('/music');
     // Wait for the tree to actually render before probing visibility —

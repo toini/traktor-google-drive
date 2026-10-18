@@ -122,6 +122,9 @@ main {
 
     .sidebar {
         width: 250px;
+        /* A wide playlist table otherwise squeezes the sidebar to ~120px and
+           wraps every name onto two lines. */
+        flex-shrink: 0;
         height: 100vh;
         position: sticky;
         top: 0;

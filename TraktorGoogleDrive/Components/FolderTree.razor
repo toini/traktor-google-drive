@@ -18,31 +18,39 @@
     }
     else
     {
-        @* Folders first, loose playlists after. Interleaved, a folder's
-           children read as if they belonged to the playlist above it. *@
+        @* One list: folders first, loose playlists after, no divider. Interleaved,
+           a folder's children read as if they belonged to the playlist above it.
+           Rows deliberately avoid Bootstrap's .nav-link: the folder summary used
+           to carry it and picked up the playlist-link rules instead of its own. *@
         @foreach (var folder in folders)
         {
-            <div class="nav-item">
-                <details open="@(folders.Count <= 3)">
-                    <summary class="nav-link">@folder.Name</summary>
-                    <div class="folder-children">
-                        @foreach (var playlist in folder.Playlists)
-                        {
-                            <NavLink class="nav-link" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
-                        }
-                    </div>
-                </details>
-            </div>
-        }
-
-        @if (folders.Count > 0 && rootPlaylists.Count > 0)
-        {
-            <div class="folder-tree-divider">Playlists</div>
+            <details class="tree-folder" open="@(folders.Count <= 3)">
+                <summary class="tree-row" title="@folder.Name">
+                    <span class="tree-icon folder-icon" aria-hidden="true">
+                        <svg class="folder-closed" viewBox="0 0 16 16"><path d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>
+                        <svg class="folder-open" viewBox="0 0 16 16"><path d="M1.5 3.5a1 1 0 0 1 1-1h3.6l1.5 1.5h5a1 1 0 0 1 1 1V6H4.3a1 1 0 0 0-.95.68L1.5 12.2z" /><path d="M3.6 7h11.2a.6.6 0 0 1 .57.79l-1.6 4.8a1 1 0 0 1-.95.68H2.2a.4.4 0 0 1-.38-.53z" /></svg>
+                    </span>
+                    <span class="tree-label">@folder.Name</span>
+                    <span class="tree-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="folder-children">
+                    @foreach (var playlist in folder.Playlists)
+                    {
+                        <NavLink class="tree-row" href="@($"/playlist/{playlist.Uuid}")" title="@playlist.Name">
+                            <span class="tree-icon" aria-hidden="true">♫</span>
+                            <span class="tree-label">@playlist.Name</span>
+                        </NavLink>
+                    }
+                </div>
+            </details>
         }
 
         @foreach (var playlist in rootPlaylists)
         {
-            <NavLink class="nav-link root-playlist" href="@($"/playlist/{playlist.Uuid}")">@playlist.Name</NavLink>
+            <NavLink class="tree-row" href="@($"/playlist/{playlist.Uuid}")" title="@playlist.Name">
+                <span class="tree-icon" aria-hidden="true">♫</span>
+                <span class="tree-label">@playlist.Name</span>
+            </NavLink>
         }
 
         @if (folders.Count == 0 && rootPlaylists.Count == 0)

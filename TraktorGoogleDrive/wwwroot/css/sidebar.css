@@ -15,103 +15,139 @@
     color: #ff7b72;
 }
 
-.folder-tree .nav-item {
-    margin-bottom: 0.25rem;
+/* Tree rows ------------------------------------------------------------
+   Folders and playlists share one row shape: same left edge, icon column,
+   font size and height, so the sidebar reads as a single list. A folder's
+   children sit one icon step further in. */
+
+.folder-tree {
+    --tree-pad: 13px;   /* plus the 3px accent border = 16px left edge */
+    --tree-icon: 16px;
+    --tree-gap: 8px;
+    --tree-step: calc(var(--tree-icon) + var(--tree-gap));
 }
 
-/* Folder header ------------------------------------------------------- */
-
-.folder-tree summary {
-    cursor: pointer;
-    padding: 8px 16px;
-    background: linear-gradient(90deg, #21262d 0%, #30363d 100%);
-    color: #ff6600;
-    font-weight: 600;
-    font-size: 13px;
-    letter-spacing: 0.02em;
-    border-left: 3px solid transparent;
-    transition: background 0.15s ease, border-color 0.15s ease;
-    list-style: none;
+.folder-tree .tree-row {
     display: flex;
     align-items: center;
-}
-
-.folder-tree summary::-webkit-details-marker {
-    display: none;
-}
-
-.folder-tree summary::before {
-    content: "▶";
-    margin-right: 8px;
-    font-size: 9px;
-    transition: transform 0.15s ease;
-}
-
-.folder-tree details[open] > summary::before {
-    transform: rotate(90deg);
-}
-
-.folder-tree summary:hover {
-    background: linear-gradient(90deg, #30363d 0%, #484f58 100%);
-    border-left-color: #ff6600;
-}
-
-/* Playlist links ------------------------------------------------------ */
-
-.folder-tree .nav-link {
-    color: #c9d1d9;
-    padding: 6px 16px 6px 40px;
-    font-size: 13px;
-    text-decoration: none;
+    gap: var(--tree-gap);
+    min-height: 28px;
+    padding: 4px 12px 4px var(--tree-pad);
     border-left: 3px solid transparent;
+    color: #c9d1d9;
+    font-size: 13px;
+    line-height: 20px;
+    text-decoration: none;
+    cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-    display: block;
-    background: transparent;
 }
 
-/* Only leaf playlists get the note — a folder summary is also .nav-link,
-   and previously inherited it, which hid its disclosure triangle. */
-.folder-tree a.nav-link::before {
-    content: "♫";
-    margin-right: 8px;
+.folder-tree .tree-icon {
+    flex: 0 0 var(--tree-icon);
+    display: inline-flex;
+    justify-content: center;
     font-size: 11px;
     opacity: 0.55;
 }
 
-.folder-tree a.root-playlist {
-    padding-left: 27px;
+/* Long names (Traktor's history_2020y01m27d_… playlists) stay on one line. */
+.folder-tree .tree-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.folder-tree a.nav-link:hover {
+.folder-tree .tree-row:hover {
     color: #ffffff;
     background: #21262d;
     border-left-color: #ffaa44;
 }
 
-.folder-tree a.nav-link.active {
+.folder-tree a.tree-row.active {
     color: #ffffff;
     background: linear-gradient(90deg, rgba(255, 102, 0, 0.9) 0%, rgba(255, 136, 51, 0.75) 100%);
     border-left-color: #ffffff;
     font-weight: 600;
 }
 
-.folder-tree a.nav-link.active::before {
+.folder-tree a.tree-row.active .tree-icon {
     opacity: 1;
 }
 
-.folder-children {
-    padding: 2px 0;
+/* Folders ------------------------------------------------------------- */
+
+.folder-tree summary.tree-row {
+    list-style: none;
+    color: #e6edf3;
+    font-weight: 600;
 }
 
-.folder-tree-divider {
-    margin: 0.75rem 16px 0.25rem;
-    padding-top: 0.6rem;
-    border-top: 1px solid #21262d;
-    color: #6e7681;
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+.folder-tree summary.tree-row::-webkit-details-marker {
+    display: none;
+}
+
+.folder-tree .folder-icon {
+    color: #e0a050;
+    opacity: 0.8;
+}
+
+.folder-tree .folder-icon svg {
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+}
+
+.folder-tree .folder-open,
+.folder-tree details[open] > summary .folder-closed {
+    display: none;
+}
+
+.folder-tree details[open] > summary .folder-open {
+    display: block;
+}
+
+/* Small chevron at the end of the row: points right when closed, down when
+   open. Kept out of the icon column so folder and playlist icons line up. */
+.folder-tree .tree-chevron {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    margin-right: 2px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    opacity: 0.35;
+    transform: rotate(-45deg);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.folder-tree details[open] > summary .tree-chevron {
+    transform: rotate(45deg);
+}
+
+.folder-tree summary.tree-row:hover .tree-chevron {
+    opacity: 0.7;
+}
+
+/* Children: one icon step in, with a faint guide line under the folder icon
+   so it is obvious where the folder ends. */
+.folder-tree .folder-children {
+    position: relative;
+}
+
+.folder-tree .folder-children::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    bottom: 4px;
+    left: calc(3px + var(--tree-pad) + var(--tree-icon) / 2);
+    border-left: 1px solid #30363d;
+    pointer-events: none;
+}
+
+.folder-tree .folder-children .tree-row {
+    padding-left: calc(var(--tree-pad) + var(--tree-step));
 }
 
 /* Collection freshness -------------------------------------------------- */
