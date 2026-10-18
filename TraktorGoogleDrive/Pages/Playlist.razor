@@ -88,7 +88,7 @@ else
                     @if (file.Kind == EntryKind.Separator)
                     {
                         @* Keeps its place and its # but is never played: no play
-                           button, and PlayerService.SetQueue drops it (no Drive id). *@
+                           button, and PlayerService.OfferQueue drops it (no Drive id). *@
                         <tr class="separator-row" data-entry-kind="separator" title="@file.EntryKey">
                             <td class="col-expand"></td>
                             <td class="col-play"></td>
@@ -305,8 +305,15 @@ else
         await SaveSortStateAsync();
     }
 
-    /// <summary>"Next track" is the next row on screen, so the player gets every re-sort.</summary>
-    void PushQueue() => Player.SetQueue(SortedFiles());
+    /// <summary>
+    /// "Next track" is the next row on screen, so the player is offered every
+    /// re-sort. It only takes them while this playlist is its queue, or when one of
+    /// these rows is played (ADR 20261018-63 §5.1).
+    /// </summary>
+    void PushQueue()
+    {
+        if (Uuid is not null) Player.OfferQueue(Uuid, SortedFiles());
+    }
 
     async Task StartPreview()
     {
@@ -578,14 +585,10 @@ else
     {
         if (string.IsNullOrEmpty(Uuid)) return;
 
-        // Switching playlists should not leave the previous track playing. Only
-        // a real switch: on a fresh page the only thing loaded is the track
-        // PlaybackMemory restored after a reload, and that must survive.
-        if (shownUuid is not null && shownUuid != Uuid) await Player.StopAsync();
-        // Only a different playlist clears the queue (and so ends a gig preview). A
-        // parameter pass for the playlist already shown reloads its rows and pushes
-        // them again, and must not end a preview that is running over them.
-        if (shownUuid != Uuid) Player.ClearQueue();
+        // Browsing never stops the music (ADR 20261018-63 §5.1): switching
+        // playlists only withdraws the old page's rows. Whatever is playing keeps
+        // its own queue until a row of this playlist is played.
+        if (shownUuid is not null && shownUuid != Uuid) Player.WithdrawOffer(shownUuid);
         shownUuid = Uuid;
 
         files = null;
@@ -683,9 +686,7 @@ else
     public void Dispose()
     {
         Player.Changed -= OnPlayerChanged;
-        Player.ClearQueue();
-        // Fire-and-forget: Dispose cannot await, and the player owns its own
-        // teardown if the circuit is already gone.
-        _ = Player.StopAsync();
+        // Leaving the page leaves the music playing, with its queue.
+        if (shownUuid is not null) Player.WithdrawOffer(shownUuid);
     }
 }

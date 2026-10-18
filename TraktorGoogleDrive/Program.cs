@@ -19,7 +19,11 @@ builder.Services.AddScoped<SetMatcher>();
 // at once is then not representable. The Cast session is shared for the same
 // reason, and outlives navigation.
 builder.Services.AddSingleton<CastService>();
+// The remote-control room (ADR 20261018-63): one connection per tab, shared by
+// the player bar and the bridge that publishes this tab's playback.
+builder.Services.AddSingleton<RemoteService>();
 builder.Services.AddSingleton<PlayerService>();
+builder.Services.AddSingleton<RemoteBridge>();
 // Scoped only because it reads the token and Drive, which are; WASM has one scope.
 builder.Services.AddScoped<PlaybackMemory>();
 

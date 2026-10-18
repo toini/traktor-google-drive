@@ -1,0 +1,39 @@
+/* Remote control (ADR 20261018-63) ---------------------------------------- */
+
+.remote-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    margin-right: 0.6rem;
+    padding: 0 10px;
+    border: 1px solid #444c56;
+    border-radius: 4px;
+    background: #30363d;
+    color: #8b949e;
+    font-size: 12px;
+    cursor: pointer;
+}
+.remote-toggle:hover { border-color: #1db954; color: #e6e6e6; }
+.remote-toggle.on { color: #e6e6e6; }
+.remote-toggle.on.connected { border-color: #1db954; color: #1db954; }
+
+@media (max-width: 640px) {
+    .remote-toggle-label { display: none; }
+}
+
+/* A remote's bar wraps the strip onto its own line above the controls. */
+.player-bar.remote { flex-wrap: wrap; border-top-color: #1db954; row-gap: 0.4rem; }
+
+.player-remote-strip {
+    flex: 1 0 100%;
+    color: #1db954;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.player-remote-strip strong { font-weight: 700; }
+.player-remote-strip.warning { color: #ffb877; }
+.player-remote-cast { color: #c9d1d9; }

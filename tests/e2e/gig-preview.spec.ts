@@ -573,3 +573,54 @@ test.describe('gig preview from where you are', () => {
     await expect(chip(page)).toContainText('1/4');
   });
 });
+
+/**
+ * The queue lives in the player, not the page (ADR 20261018-63 §5.1): browsing
+ * never stops a preview, and only playing a row of another playlist ends it.
+ */
+test.describe('gig preview while browsing', () => {
+  const PSYTECH = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
+
+  /** In-app navigation, as a sidebar click does; page.goto would reload the app. */
+  const navigate = (page: Page, path: string) =>
+    page.evaluate((p) => (window as unknown as { Blazor: { navigateTo(u: string): void } }).Blazor.navigateTo(p), path);
+
+  async function slowMotion(page: Page) {
+    await page.addInitScript(() => {
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+        this.playbackRate = 0.1;
+        return play.call(this);
+      };
+    });
+  }
+
+  test('keeps previewing on another playlist, and Next still walks its own', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await page.locator('[data-preview-set]').click();
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+
+    await navigate(page, `/playlist/${PSYTECH}`);
+    await expect(page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' })).toBeVisible();
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+    await expect(title(page)).toContainText('Gig One');
+
+    await page.getByRole('button', { name: 'Next track' }).click();
+    await expect(title(page)).toContainText('Gig Two');
+    await expect(page.locator('[data-preview-chip]')).toContainText('2/4');
+  });
+
+  test('playing a row of another playlist ends the preview and says why', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await page.locator('[data-preview-set]').click();
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+
+    await navigate(page, `/playlist/${PSYTECH}`);
+    await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
+    await expect(title(page)).toContainText('Beta Pulse');
+    await expect(page.locator('[data-preview-chip]')).toHaveCount(0);
+    await expect(page.locator('[data-preview-stopped]')).toContainText('Preview stopped: another playlist started');
+  });
+});

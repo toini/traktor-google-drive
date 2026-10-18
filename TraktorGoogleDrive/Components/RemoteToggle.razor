@@ -1,0 +1,44 @@
+@namespace TraktorGoogleDrive.Components
+@using TraktorGoogleDrive.Services
+@implements IDisposable
+@inject RemoteService Remote
+@inject RemoteBridge Bridge
+
+@* Remote control is opt-in per browser while it is new (ADR 20261018-63 §6).
+   This button also starts the bridge, so it is in the layout on every page. *@
+<button class="remote-toggle @(Remote.Enabled ? "on" : "off") @(Remote.IsConnected ? "connected" : "")"
+        data-remote-toggle
+        data-remote-connected="@(Remote.IsConnected ? "true" : "false")"
+        aria-pressed="@(Remote.Enabled ? "true" : "false")"
+        title="@Label"
+        @onclick="Toggle">
+    <span aria-hidden="true">📱</span>
+    <span class="remote-toggle-label">Remote @(Remote.Enabled ? "on" : "off")</span>
+</button>
+
+@code {
+    string Label => !Remote.Enabled
+        ? "Remote control is off. Switch it on to control this browser from another device signed in to the same Google account, or to control another device from here."
+        : Remote.IsConnected
+            ? $"Remote control is on as \"{Remote.Me?.Name}\": {OtherDevices} other device(s) connected"
+            : $"Remote control is on as \"{Remote.Me?.Name}\": not connected right now";
+
+    int OtherDevices => Math.Max(0, (Remote.Room?.Devices.Count ?? 1) - 1);
+
+    protected override void OnInitialized() => Remote.Changed += OnChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Bridge.StartAsync();
+    }
+
+    void OnChanged() => InvokeAsync(StateHasChanged);
+
+    async Task Toggle()
+    {
+        await Remote.SetEnabledAsync(!Remote.Enabled);
+        await Bridge.EvaluateNowAsync();
+    }
+
+    public void Dispose() => Remote.Changed -= OnChanged;
+}

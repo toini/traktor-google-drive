@@ -7,7 +7,26 @@
 
 @if (Player.CurrentFileId is not null || Player.PreviewActive)
 {
-    <div class="player-bar @(Player.PreviewActive ? "previewing" : "")" role="region" aria-label="Now playing">
+    <div class="player-bar @(Player.PreviewActive ? "previewing" : "") @(Player.IsRemote ? "remote" : "")"
+         data-remote="@(Player.IsRemote ? "true" : "false")"
+         role="region" aria-label="Now playing">
+        @if (Player.IsRemote)
+        {
+            @* The Spotify-style strip: this bar is a remote for another device
+               (ADR 20261018-63 §4.1). *@
+            <div class="player-remote-strip @(RemoteProblem is null ? "" : "warning")" data-remote-strip role="status">
+                <span aria-hidden="true">▶</span>
+                Playing on <strong data-remote-device>@Player.RemoteDeviceName</strong>
+                @if (Player.RemoteCastDeviceName is { } tv)
+                {
+                    <span class="player-remote-cast"> → @tv</span>
+                }
+                @if (RemoteProblem is { } problem)
+                {
+                    <span class="player-remote-problem" data-remote-problem> · @problem</span>
+                }
+            </div>
+        }
         <div class="player-transport">
             <button class="player-step" title="Previous track" aria-label="Previous track"
                     disabled="@(!Player.HasQueue)" @onclick="Player.PreviousAsync">⏮</button>
@@ -86,12 +105,15 @@
         </div>
 
         <div class="player-modes">
+            @* Continuous and gig preview are set on the player; changing them
+               from a remote comes in a later increment (ADR 20261018-63 §6). *@
             <label class="player-continuous" title="When a track ends, play the next row in the table">
                 <input type="checkbox" checked="@Player.ContinuousPlay" data-continuous-play
+                       disabled="@Player.IsRemote"
                        @onchange="OnContinuousChanged" />
                 Continuous
             </label>
-            @if (Player.PreviewActive)
+            @if (Player.PreviewActive && !Player.IsRemote)
             {
                 <button class="player-preview-stop" data-stop-preview @onclick="Player.StopPreview">✕ Stop preview</button>
             }
@@ -100,6 +122,11 @@
 }
 
 @code {
+    string? RemoteProblem =>
+        Player.RemoteNeedsSignIn ? "it needs you to sign in again there"
+        : Player.RemoteBlocked ? "it needs a click there before it can play"
+        : null;
+
     double Fraction => Player.Duration > 0 ? Math.Clamp(Player.CurrentTime / Player.Duration, 0, 1) : 0;
 
     protected override void OnInitialized() => Player.Changed += OnChanged;
