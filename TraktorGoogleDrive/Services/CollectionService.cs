@@ -39,7 +39,7 @@ public class CollectionService
 
     private Collection? _collection;
     private Task<Collection>? _inFlight;
-    private Dictionary<string, int> _colorByPath = [];
+    private Dictionary<string, TrackExtras> _extrasByPath = [];
 
     public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js)
     {
@@ -93,7 +93,7 @@ public class CollectionService
             // parsing a multi-MB file twice.
             var doc = XDocument.Parse(content, LoadOptions.None);
             _collection = Collection.FromXml(doc);
-            _colorByPath = ReadTrackColors(doc);
+            _extrasByPath = ReadTrackExtras(doc);
 
             LastAdded = _collection.Tracks
                 .Where(t => Models.TrackDate.Parse(t.ImportDate) is not null)
@@ -182,30 +182,49 @@ public class CollectionService
     /// Traktor's track color, ENTRY/INFO COLOR: 1 red, 2 orange, 3 yellow,
     /// 4 green, 5 blue, 6 violet, 7 magenta. Null when the track has none.
     /// </summary>
-    public int? ColorOf(Track? track) =>
-        track is not null && _colorByPath.TryGetValue(track.Path, out var color) ? color : null;
+    public int? ColorOf(Track? track) => ExtrasOf(track)?.Color;
 
-    // TraktorNmlParser does not read COLOR. Keyed by the path normalised exactly
-    // as Track.FromXml does it, since that is the Track.Path playlists hold.
-    private static Dictionary<string, int> ReadTrackColors(XDocument doc)
+    /// <summary>
+    /// Traktor's star rating, ENTRY/INFO RANKING: 0-255, 51 per star. Not INFO
+    /// RATING, which is the free-text "Comment 2". Null when the track has none.
+    /// </summary>
+    public int? RankingOf(Track? track) => ExtrasOf(track)?.Ranking;
+
+    /// <summary>The release (album) title, ENTRY/ALBUM TITLE. Null when the track has none.</summary>
+    public string? AlbumOf(Track? track) => ExtrasOf(track)?.Album;
+
+    private TrackExtras? ExtrasOf(Track? track) =>
+        track is not null && _extrasByPath.TryGetValue(track.Path, out var extras) ? extras : null;
+
+    private sealed record TrackExtras(int? Color, int? Ranking, string? Album);
+
+    // TraktorNmlParser (0.0.11) reads none of COLOR, RANKING or ALBUM. Keyed by
+    // the path normalised exactly as Track.FromXml does it, since that is the
+    // Track.Path playlists hold.
+    private static Dictionary<string, TrackExtras> ReadTrackExtras(XDocument doc)
     {
-        var colors = new Dictionary<string, int>();
+        var extras = new Dictionary<string, TrackExtras>();
         var entries = doc.Root?.Element("COLLECTION")?.Elements("ENTRY") ?? [];
 
         foreach (var entry in entries)
         {
-            if (!int.TryParse((string?)entry.Element("INFO")?.Attribute("COLOR"), out var color)
-                || color is < 1 or > 7)
-                continue;
+            var info = entry.Element("INFO");
+
+            int? color = int.TryParse((string?)info?.Attribute("COLOR"), out var c) && c is >= 1 and <= 7 ? c : null;
+            int? ranking = int.TryParse((string?)info?.Attribute("RANKING"), out var r) && r is >= 0 and <= 255 ? r : null;
+            var album = (string?)entry.Element("ALBUM")?.Attribute("TITLE");
+            if (string.IsNullOrWhiteSpace(album)) album = null;
+
+            if (color is null && ranking is null && album is null) continue;
 
             var location = entry.Element("LOCATION");
             var path = $"{location?.Attribute("DIR")?.Value}{location?.Attribute("FILE")?.Value}"
                 .Replace("Macintosh HD/", "").Replace(":", "").TrimStart('/');
 
-            if (path.Length > 0) colors[path] = color;
+            if (path.Length > 0) extras[path] = new TrackExtras(color, ranking, album);
         }
 
-        return colors;
+        return extras;
     }
 
     private static bool LooksLikeNml(string content) =>
@@ -295,6 +314,6 @@ public class CollectionService
     {
         _collection = null;
         _inFlight = null;
-        _colorByPath = [];
+        _extrasByPath = [];
     }
 }

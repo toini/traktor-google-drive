@@ -483,3 +483,22 @@
 .column-picker-reset:hover {
     color: #ff6600;
 }
+
+/* Rating (INFO RANKING), as Traktor shows it: filled stars in its orange,
+   the rest dim. */
+/* Wide enough for five stars and the header's sort arrow. */
+.col-rating {
+    width: 108px;
+}
+
+.rating-stars {
+    letter-spacing: 1px;
+}
+
+.rating-filled {
+    color: #ff6600;
+}
+
+.rating-empty {
+    color: #3a4048;
+}
