@@ -4,9 +4,13 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
+using TraktorGoogleDrive.Server.Remote;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHttpClient();
+// Remote control from a second device (ADR 20261018-63).
+builder.Services.AddRemoteControl();
 
 // Cloud Run sits in front as a TLS-terminating proxy, so without this the app
 // sees scheme=http and the load balancer's IP for every request.
@@ -194,6 +198,8 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
     await using var stream = await upstream.Content.ReadAsStreamAsync(cancellationToken);
     await stream.CopyToAsync(outgoingResponse.Body, cancellationToken);
 });
+
+app.MapRemoteControl();
 
 // index.html names the non-fingerprinted scripts, so it must never be served
 // from cache without revalidating either.

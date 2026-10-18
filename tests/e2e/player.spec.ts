@@ -34,15 +34,33 @@ test.describe('player bar', () => {
     await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
     await expect(page.locator('.player-bar')).toBeVisible();
 
-    // Switching playlists stops playback, so the bar goes with it rather than
-    // claiming something is playing when nothing is. In-app navigation, not
-    // page.goto: a full reload deliberately brings the last track back
-    // (remember.spec.ts).
+    // Browsing never stops the music (ADR 20261018-63 §5.1): the bar and the
+    // track stay. In-app navigation, not page.goto, which is a full reload.
     await page.locator('a.traktor-logo').click();
     await expect(page).toHaveURL(/\/music/);
-    await expect(page.locator('.player-bar')).toHaveCount(0);
-    // Stopped, so there is nothing for a reload to bring back either.
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('playback:v1'))).toBeNull();
+    await expect(page.locator('.player-bar')).toBeVisible();
+    await expect(page.locator('.player-title')).toHaveText('Beta Pulse');
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('playback:v1'))).not.toBeNull();
+  });
+
+  test('keeps its queue while browsing away and back', async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSYTECH}`);
+    const rows = page.locator('#playlist-table tbody tr');
+    await rows.first().locator('.play-button').click();
+    await expect(page.locator('.player-bar')).toBeVisible();
+    const firstTitle = await page.locator('.player-title').textContent();
+
+    // Over to another playlist: the music and its queue stay.
+    await page.locator('a.traktor-logo').click();
+    await expect(page.locator('.player-title')).toHaveText(firstTitle!);
+    await page.goBack();
+    await expect(rows.first()).toBeVisible();
+
+    // Next still steps through the playlist that is playing.
+    await page.getByRole('button', { name: 'Next track' }).click();
+    await expect(page.locator('.player-title')).not.toHaveText(firstTitle!);
   });
 
   test('shows elapsed and total time', async ({ page }) => {

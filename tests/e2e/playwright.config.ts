@@ -7,6 +7,8 @@ const PORT = 5049;
 
 export default defineConfig({
   testDir: '.',
+  // Remote control runs against the ASP.NET host: playwright.remote.config.ts.
+  testIgnore: /remote.*\.spec\.ts/,
   // Blazor WASM boot is ~3-8s cold; the default 5s expect timeout is too tight.
   timeout: 90_000,
   expect: { timeout: 20_000 },

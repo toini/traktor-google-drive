@@ -20,9 +20,16 @@ public enum PlaybackState
 /// While a Cast session is connected it routes to the TV instead, so neither a
 /// play button nor the player bar has to know which output it is driving.
 ///
-/// It also owns "what plays next": the playlist page hands it the rows in the
-/// order the table shows them, and continuous play and gig preview both advance
-/// through that queue (ADR 20261018-47 §3–4).
+/// It also owns "what plays next". A playlist page *offers* its rows in table
+/// order; the player adopts them as its queue when one of them is played, and
+/// keeps that queue when the page goes away, so browsing never stops the music
+/// (ADR 20261018-63 §5.1). Continuous play and gig preview advance through it
+/// (ADR 20261018-47 §3–4).
+///
+/// And when another of this account's devices is playing and this tab has
+/// nothing of its own loaded, it routes to that device instead
+/// (<see cref="IsRemote"/>, ADR 20261018-63): the player bar then shows and
+/// controls the other device with the same buttons.
 /// </summary>
 public class PlayerService : IAsyncDisposable
 {
@@ -34,6 +41,7 @@ public class PlayerService : IAsyncDisposable
     private readonly IJSRuntime _js;
     private readonly AppErrors _errors;
     private readonly CastService _cast;
+    private readonly RemoteService _remote;
     private IJSObjectReference? _module;
     private DotNetObjectReference<PlayerService>? _self;
 
@@ -43,6 +51,9 @@ public class PlayerService : IAsyncDisposable
     private double _localDuration;
 
     private List<FileEntry> _queue = [];
+    private string? _queuePlaylist;
+    private List<FileEntry> _offer = [];
+    private string? _offerPlaylist;
     private int _lastIndex = -1;
     private bool _advancing;
     private int _consecutiveFailures;
@@ -55,15 +66,28 @@ public class PlayerService : IAsyncDisposable
     private FileEntry? _requested;
     private int _playGeneration;
 
-    public PlayerService(IJSRuntime js, AppErrors errors, CastService cast)
+    // What is loaded here, as opposed to on another device (the public
+    // properties below route between the two).
+    private string? _title;
+    private FileEntry? _file;
+    private bool _isWav;
+    private bool _continuous;
+    private bool _preview;
+    private PreviewRange? _range;
+
+    public PlayerService(IJSRuntime js, AppErrors errors, CastService cast, RemoteService remote)
     {
         _js = js;
         _errors = errors;
         _cast = cast;
+        _remote = remote;
         _cast.Changed += OnCastChanged;
         _cast.Progress += OnCastProgress;
         _cast.Finished += OnCastFinished;
+        _remote.Changed += OnRemoteChanged;
     }
+
+    private void OnRemoteChanged() => Changed?.Invoke();
 
     // Subscribers watch this one event, so the TV's transitions have to reach them
     // the same way the local element's do. Connecting also silences this browser,
@@ -80,8 +104,8 @@ public class PlayerService : IAsyncDisposable
     {
         // The receiver has no "stop at" for a single LOAD, so the preview end on
         // the TV is checked here, on its ~1 s position ticks.
-        if (PreviewActive && _cast.IsConnected && _cast.State == PlaybackState.Playing
-            && CurrentRange?.End is { } end && _cast.CurrentTime >= end)
+        if (_preview && _cast.IsConnected && _cast.State == PlaybackState.Playing
+            && _range?.End is { } end && _cast.CurrentTime >= end)
             _ = AdvanceAsync();
 
         Changed?.Invoke();
@@ -89,23 +113,56 @@ public class PlayerService : IAsyncDisposable
 
     private void OnCastFinished()
     {
-        if (PreviewActive || ContinuousPlay) _ = AdvanceAsync();
+        if (_preview || _continuous) _ = AdvanceAsync();
     }
 
-    public string? CurrentFileId => _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
-    public PlaybackState State => _cast.IsConnected ? _cast.State : _localState;
-    public double CurrentTime => _cast.IsConnected ? _cast.CurrentTime : _localTime;
-    public double Duration => _cast.IsConnected ? _cast.Duration : _localDuration;
+    /// <summary>
+    /// Another of this account's devices is playing and this tab has nothing of
+    /// its own loaded, so the bar shows and controls that device.
+    /// </summary>
+    public bool IsRemote => _remote.RemoteSnapshot is not null && _localFileId is null && !_cast.IsConnected;
+
+    private PlayerSnapshot? Remote => IsRemote ? _remote.RemoteSnapshot : null;
+
+    /// <summary>"Mac · Chrome", the device the bar is controlling.</summary>
+    public string? RemoteDeviceName => Remote?.DeviceName;
+
+    /// <summary>The remote player is casting; the TV's name.</summary>
+    public string? RemoteCastDeviceName => Remote?.CastDeviceName;
+
+    /// <summary>The remote player refused to start without a click (autoplay policy).</summary>
+    public bool RemoteBlocked => Remote?.State == "Blocked";
+
+    /// <summary>The remote player's Google session expired.</summary>
+    public bool RemoteNeedsSignIn => Remote?.NeedsSignIn == true;
+
+    /// <summary>The browser refused play() without a user gesture; cleared by the next play.</summary>
+    public bool AutoplayBlocked { get; private set; }
+
+    public string? CurrentFileId =>
+        Remote is { } r ? r.Track?.FileId : _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
+
+    public PlaybackState State =>
+        Remote is { } r
+            ? r.State == "Blocked" ? PlaybackState.Paused
+            : Enum.TryParse<PlaybackState>(r.State, out var parsed) ? parsed : PlaybackState.Idle
+        : _cast.IsConnected ? _cast.State : _localState;
+
+    public double CurrentTime =>
+        Remote is not null ? _remote.RemotePosition : _cast.IsConnected ? _cast.CurrentTime : _localTime;
+
+    public double Duration =>
+        Remote is { } r ? r.Track?.Duration ?? 0 : _cast.IsConnected ? _cast.Duration : _localDuration;
 
     /// <summary>Which output is driving, so the player bar can label itself.</summary>
-    public bool IsCasting => _cast.IsConnected;
+    public bool IsCasting => Remote is null && _cast.IsConnected;
     public string? CastDeviceName => _cast.DeviceName;
 
     /// <summary>
     /// Describes the loaded media, not the output: the same recording is playing
     /// whether it comes out of this browser or the television.
     /// </summary>
-    public string? CurrentTitle { get; private set; }
+    public string? CurrentTitle => Remote is { } r ? r.Track?.Title : _title;
 
     /// <summary>
     /// The proxy URL for the loaded file. It carries no token: auth.js keeps the
@@ -116,34 +173,40 @@ public class PlayerService : IAsyncDisposable
     /// <summary>
     /// Playback stopped because the Google token ran out and could not be renewed
     /// without the user. The player bar offers a one-click sign-in that resumes at
-    /// the same position (or starts the track it was about to start).
+    /// the same position (or starts the track it was about to start). Local only:
+    /// a remote player's sign-in is <see cref="RemoteNeedsSignIn"/>, and only that
+    /// device can do it.
     /// </summary>
-    public bool NeedsSignIn => !_cast.IsConnected && _localState == PlaybackState.Unauthorized;
+    public bool NeedsSignIn => !IsRemote && !_cast.IsConnected && _localState == PlaybackState.Unauthorized;
 
     // The track an advance could not start for want of a token, so a sign-in
     // starts it with its preview range. Null when a 401 stalled the loaded track:
     // player.js holds that position itself.
     private FileEntry? _startAfterSignIn;
 
-    /// <summary>The playlist row that is loaded, for its cues and format.</summary>
-    public FileEntry? CurrentFile { get; private set; }
+    /// <summary>The playlist row that is loaded, for its cues and format. Null for a remote player.</summary>
+    public FileEntry? CurrentFile => Remote is not null ? null : _file;
 
     /// <summary>True when the source is uncompressed, i.e. a waveform can be sampled with range reads.</summary>
-    public bool CurrentIsWav { get; private set; }
+    public bool CurrentIsWav => Remote is { } r ? r.Track?.IsWav == true : _isWav;
 
     /// <summary>Advance to the next row when a track ends. Remembered per browser.</summary>
-    public bool ContinuousPlay { get; private set; }
+    public bool ContinuousPlay => Remote is { } r ? r.Continuous : _continuous;
 
     /// <summary>Gig preview: each track plays from its load cue to its last loop, then the next.</summary>
-    public bool PreviewActive { get; private set; }
+    public bool PreviewActive => Remote is { } r ? r.PreviewActive : _preview;
 
     /// <summary>The range the current track plays in gig preview; null outside it.</summary>
-    public PreviewRange? CurrentRange { get; private set; }
+    public PreviewRange? CurrentRange =>
+        Remote is { } r ? r.Preview is { } p ? new PreviewRange(p.Start, p.End, p.Note) : null : _range;
 
     /// <summary>1-based position of the current track in the queue, 0 when not in it.</summary>
-    public int QueuePosition => CurrentFile is null ? 0 : IndexOf(CurrentFile) + 1;
-    public int QueueCount => _queue.Count;
-    public bool HasQueue => _queue.Count > 0;
+    public int QueuePosition => Remote is { } r ? r.QueuePosition : _file is null ? 0 : IndexOf(_file) + 1;
+    public int QueueCount => Remote is { } r ? r.QueueCount : _queue.Count;
+    public bool HasQueue => QueueCount > 0;
+
+    /// <summary>The playlist whose rows the queue holds, if any.</summary>
+    public string? QueuePlaylistUuid => _queuePlaylist;
 
     /// <summary>Raised on every state transition so components can re-render.</summary>
     public event Action? Changed;
@@ -163,78 +226,115 @@ public class PlayerService : IAsyncDisposable
     /* ---------- queue and modes ---------- */
 
     /// <summary>
-    /// The playable rows, in the order the table shows them. Called again on every
-    /// re-sort, so "next" always means the next row on screen. Rows with no Drive
-    /// file are never queued, so advancing skips them.
+    /// A playlist page's playable rows, in the order its table shows them. Called
+    /// on load and on every re-sort. The player adopts them as its queue when
+    /// they are its queue's own playlist (a re-sort), when nothing is loaded that
+    /// they would displace, or when one of them is played. Otherwise they wait:
+    /// browsing another playlist must not change what plays next.
     /// </summary>
-    public void SetQueue(IEnumerable<FileEntry> rowsInTableOrder)
+    public void OfferQueue(string playlistUuid, IEnumerable<FileEntry> rowsInTableOrder)
     {
-        var current = CurrentFile is null ? -1 : IndexOf(CurrentFile);
+        _offer = rowsInTableOrder.Where(f => !string.IsNullOrEmpty(f.DriveFileId)).ToList();
+        _offerPlaylist = playlistUuid;
+
+        var loadedHere = _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
+        if (_queuePlaylist == playlistUuid
+            || loadedHere is null
+            // A track cued by PlaybackMemory has no queue until its playlist loads.
+            || (_queue.Count == 0 && _offer.Any(f => f.DriveFileId == loadedHere)))
+            AdoptOffer();
+        else
+            Changed?.Invoke();
+    }
+
+    /// <summary>The page went away. The queue it may have given the player stays.</summary>
+    public void WithdrawOffer(string playlistUuid)
+    {
+        if (_offerPlaylist != playlistUuid) return;
+        _offer = [];
+        _offerPlaylist = null;
+    }
+
+    private void AdoptOffer()
+    {
+        if (_offerPlaylist is null) return;
+
+        var current = _file is null ? -1 : IndexOf(_file);
         if (current >= 0) _lastIndex = current;
 
-        _queue = rowsInTableOrder.Where(f => !string.IsNullOrEmpty(f.DriveFileId)).ToList();
+        // Gig preview walks one playlist; another one taking over ends it.
+        if (_preview && _queuePlaylist is not null && _queuePlaylist != _offerPlaylist)
+            EndPreview("another playlist started");
 
-        // A track cued by PlaybackMemory has no row until its playlist loads.
-        if (CurrentFile is null && _localFileId is not null)
-            CurrentFile = _queue.FirstOrDefault(f => f.DriveFileId == _localFileId);
+        _queue = _offer;
+        _queuePlaylist = _offerPlaylist;
+
+        var loadedHere = _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
+        if (_file is null && loadedHere is not null)
+            _file = _queue.FirstOrDefault(f => f.DriveFileId == loadedHere);
 
         // A re-sort moves the current row; remember where it now sits.
-        if (CurrentFile is not null && IndexOf(CurrentFile) is var moved and >= 0) _lastIndex = moved;
+        if (_file is not null && IndexOf(_file) is var moved and >= 0) _lastIndex = moved;
         Changed?.Invoke();
     }
 
-    /// <summary>Leaving the playlist leaves nothing to advance through.</summary>
-    public void ClearQueue()
+    /// <summary>Playing a row of the offered playlist makes it the queue.</summary>
+    private void AdoptOfferFor(FileEntry file)
     {
-        _queue = [];
-        _lastIndex = -1;
-        if (PreviewActive) EndPreview("left the playlist");
-        Changed?.Invoke();
+        if (_offerPlaylist is not null && _offerPlaylist != _queuePlaylist && _offer.Contains(file))
+            AdoptOffer();
     }
 
     public async Task LoadPreferencesAsync()
     {
         if (_preferencesLoaded) return;
         _preferencesLoaded = true;
-        try { ContinuousPlay = await _js.InvokeAsync<string?>("localStorage.getItem", ContinuousPlayKey) == "1"; }
+        try { _continuous = await _js.InvokeAsync<string?>("localStorage.getItem", ContinuousPlayKey) == "1"; }
         catch { /* storage unavailable — default off */ }
         Changed?.Invoke();
     }
 
     public async Task SetContinuousPlayAsync(bool on)
     {
-        ContinuousPlay = on;
+        _continuous = on;
         Changed?.Invoke();
         try { await _js.InvokeVoidAsync("localStorage.setItem", ContinuousPlayKey, on ? "1" : "0"); }
         catch { /* not worth failing over */ }
     }
 
     /// <summary>
-    /// Where "Preview set" would start: the loaded track when it is one of this
-    /// playlist's rows (playing, paused, or restored after a reload), otherwise
-    /// the first playable row in table order. Null with nothing queued.
+    /// Where "Preview set" would start on the playlist page that is showing: the
+    /// loaded track when it is one of its rows (playing, paused, or restored after
+    /// a reload), otherwise its first playable row in table order. Null with no
+    /// rows offered or queued.
     /// </summary>
-    public FileEntry? PreviewStartEntry => CurrentQueueEntry ?? _queue.FirstOrDefault();
-
-    /// <summary>The queued row for the loaded track, or null when it is not in the queue.</summary>
-    private FileEntry? CurrentQueueEntry
+    public FileEntry? PreviewStartEntry
     {
         get
         {
-            if (CurrentFile is null || CurrentFileId != CurrentFile.DriveFileId) return null;
-            var i = IndexOf(CurrentFile);
-            return i >= 0 ? _queue[i] : null;
+            var rows = _offerPlaylist is not null ? _offer : _queue;
+            return CurrentEntryIn(rows) ?? rows.FirstOrDefault();
         }
     }
 
+    /// <summary>The row of <paramref name="rows"/> for the loaded track, or null when it is not one of them.</summary>
+    private FileEntry? CurrentEntryIn(List<FileEntry> rows)
+    {
+        if (CurrentFile is null || CurrentFileId != CurrentFile.DriveFileId) return null;
+        var i = IndexIn(rows, CurrentFile);
+        return i >= 0 ? rows[i] : null;
+    }
+
     /// <summary>
-    /// Starts gig preview at <see cref="PreviewStartEntry"/>, from its load cue. The
-    /// track already loaded is restarted at its load cue rather than reloaded.
+    /// Starts gig preview at <see cref="PreviewStartEntry"/>, from its load cue,
+    /// with the showing playlist as the queue. The track already loaded is
+    /// restarted at its load cue rather than reloaded.
     /// </summary>
     public async Task StartPreviewAsync()
     {
         if (PreviewStartEntry is not { } start) return;
-        PreviewActive = true;
+        if (_offerPlaylist is not null) AdoptOffer();
+        _preview = true;
         PreviewStoppedReason = null;
         _consecutiveFailures = 0;
         Changed?.Invoke();
@@ -274,19 +374,19 @@ public class PlayerService : IAsyncDisposable
 
     private void LeavePreview()
     {
-        PreviewActive = false;
-        CurrentRange = null;
+        _preview = false;
+        _range = null;
         if (_module is not null) _ = _module.InvokeVoidAsync("setBounds", null).AsTask();
         Changed?.Invoke();
     }
 
-    public Task NextAsync() => StepAsync(+1);
-    public Task PreviousAsync() => StepAsync(-1);
+    public Task NextAsync() => IsRemote ? SendRemoteAsync(RemoteCommandKind.Next) : StepAsync(+1);
+    public Task PreviousAsync() => IsRemote ? SendRemoteAsync(RemoteCommandKind.Previous) : StepAsync(-1);
 
     private async Task StepAsync(int direction)
     {
         if (_queue.Count == 0) return;
-        var from = _requested ?? CurrentFile;
+        var from = _requested ?? _file;
         var index = from is null ? -1 : IndexOf(from);
         // The current row left the queue (or was never in it): continue from
         // where it last was rather than jumping back to the top.
@@ -296,7 +396,7 @@ public class PlayerService : IAsyncDisposable
         if (target < 0 || target >= _queue.Count)
         {
             // End of the list: stop, leaving the last track loaded and paused.
-            if (direction > 0 && PreviewActive)
+            if (direction > 0 && _preview)
             {
                 EndPreview("end of the playlist");
                 await PauseAsync();
@@ -316,20 +416,32 @@ public class PlayerService : IAsyncDisposable
         finally { _advancing = false; }
     }
 
-    private int IndexOf(FileEntry file)
+    private int IndexOf(FileEntry file) => IndexIn(_queue, file);
+
+    private static int IndexIn(List<FileEntry> rows, FileEntry file)
     {
         // By reference first: the same Drive file can sit in a playlist twice.
-        var i = _queue.IndexOf(file);
-        return i >= 0 ? i : _queue.FindIndex(f => f.DriveFileId == file.DriveFileId);
+        var i = rows.IndexOf(file);
+        return i >= 0 ? i : rows.FindIndex(f => f.DriveFileId == file.DriveFileId);
     }
 
     /* ---------- playback ---------- */
 
     public async Task ToggleAsync(FileEntry file, string token)
     {
+        // The row the other device is playing: control it there. Any other row
+        // plays here, and this tab takes over as the player (last press wins).
+        if (IsRemote && CurrentFileId == file.DriveFileId)
+        {
+            await SendRemoteAsync(State == PlaybackState.Playing ? RemoteCommandKind.Pause : RemoteCommandKind.Play);
+            return;
+        }
+
+        AdoptOfferFor(file);
+
         // `token` is whatever the page held when it rendered, which can be over an
         // hour old by now; every load below reads the current one instead.
-        if (CurrentFileId != file.DriveFileId)
+        if ((_cast.IsConnected ? _cast.CurrentFileId : _localFileId) != file.DriveFileId)
         {
             await PlayEntryAsync(file);
             return;
@@ -369,13 +481,13 @@ public class PlayerService : IAsyncDisposable
         if (_localFileId is null || CurrentUrl is null) return;
         await SyncProxyCookieAsync();
 
-        if (!PreviewActive || CurrentFile is not { } file || file.DriveFileId != _localFileId)
+        if (!_preview || _file is not { } file || file.DriveFileId != _localFileId)
         {
             await module.InvokeVoidAsync("play", _localFileId, CurrentUrl, null, null, false);
             return;
         }
 
-        var range = CurrentRange ??= GigPreview.RangeFor(file.Track, _localDuration);
+        var range = _range ??= GigPreview.RangeFor(file.Track, _localDuration);
         var position = await LocalPositionAsync(module);
         double? start = null;
         if (!_previewStartApplied && position < range.Start) { start = range.Start; position = range.Start; }
@@ -418,7 +530,7 @@ public class PlayerService : IAsyncDisposable
         {
             _errors.Report("Cannot play the next track — the Google session expired",
                 "Sign in again and press play.");
-            if (PreviewActive) EndPreview("the Google session expired");
+            if (_preview) EndPreview("the Google session expired");
             return;
         }
 
@@ -426,18 +538,18 @@ public class PlayerService : IAsyncDisposable
         var index = IndexOf(file);
         if (index >= 0) _lastIndex = index;
 
-        CurrentFile = file;
-        CurrentTitle = file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? "");
+        _file = file;
+        _title = file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? "");
         CurrentUrl = DriveAudio.UrlFor(fileId);
-        CurrentIsWav = DriveAudio.IsUncompressed(file);
+        _isWav = DriveAudio.IsUncompressed(file);
         _localTime = 0;
         // Traktor's PLAYTIME until the player reports its own; with sliced
         // range responses that can take a while.
         _localDuration = file.Track?.PlaytimeFloat ?? 0;
-        CurrentRange = PreviewActive ? GigPreview.RangeFor(file.Track, _localDuration) : null;
-        _previewStartApplied = PreviewActive;
+        _range = _preview ? GigPreview.RangeFor(file.Track, _localDuration) : null;
+        _previewStartApplied = _preview;
 
-        var start = CurrentRange?.Start ?? 0;
+        var start = _range?.Start ?? 0;
 
         if (_cast.IsConnected)
         {
@@ -469,7 +581,7 @@ public class PlayerService : IAsyncDisposable
         Changed?.Invoke();
         await SyncProxyCookieAsync();
         if (generation != _playGeneration) return;
-        await module.InvokeVoidAsync("play", fileId, CurrentUrl, start, CurrentRange?.End, true);
+        await module.InvokeVoidAsync("play", fileId, CurrentUrl, start, _range?.End, true);
     }
 
     private async Task<string?> CurrentTokenAsync()
@@ -541,13 +653,13 @@ public class PlayerService : IAsyncDisposable
         if (_localFileId is not null) return;
 
         // The row, if the page already queued it: next/previous then continue
-        // from here, and the waveform gets its cue markers. Otherwise SetQueue
+        // from here, and the waveform gets its cue markers. Otherwise OfferQueue
         // adopts it when the playlist's rows arrive.
-        CurrentFile = _queue.FirstOrDefault(f => f.DriveFileId == fileId);
-        if (CurrentFile is not null) _lastIndex = IndexOf(CurrentFile);
-        CurrentTitle = title;
+        _file = _queue.FirstOrDefault(f => f.DriveFileId == fileId);
+        if (_file is not null) _lastIndex = IndexOf(_file);
+        _title = title;
         CurrentUrl = DriveAudio.UrlFor(fileId);
-        CurrentIsWav = isWav;
+        _isWav = isWav;
         _localFileId = fileId;
         _localTime = position;
         _localDuration = duration;
@@ -574,6 +686,7 @@ public class PlayerService : IAsyncDisposable
     /// <summary>Play or pause whatever is loaded, on whichever output owns it.</summary>
     public async Task ResumeAsync()
     {
+        if (IsRemote) { await SendRemoteAsync(RemoteCommandKind.Play); return; }
         if (_cast.IsConnected) { await _cast.PlayOrPauseAsync(); return; }
         if (NeedsSignIn) { await SignInToContinueAsync(); return; }
         if (_module is null) return;
@@ -582,6 +695,7 @@ public class PlayerService : IAsyncDisposable
 
     public async Task PauseAsync()
     {
+        if (IsRemote) { await SendRemoteAsync(RemoteCommandKind.Pause); return; }
         if (_cast.IsConnected) { await _cast.PlayOrPauseAsync(); return; }
         if (_module is null) return;
         await _module.InvokeVoidAsync("pause");
@@ -589,9 +703,17 @@ public class PlayerService : IAsyncDisposable
 
     public async Task SeekAsync(double seconds)
     {
+        if (IsRemote) { await SendRemoteAsync(RemoteCommandKind.Seek, seconds); return; }
         if (_cast.IsConnected) { await _cast.SeekAsync(seconds); return; }
         if (_module is null) return;
         await _module.InvokeVoidAsync("seek", seconds);
+    }
+
+    private async Task SendRemoteAsync(string kind, double? seconds = null)
+    {
+        var result = await _remote.SendAsync(kind, seconds);
+        if (!result.Ok)
+            _errors.Info($"{RemoteDeviceName ?? "The other device"} did not take that", result.Reason);
     }
 
     /// <summary>
@@ -621,7 +743,7 @@ public class PlayerService : IAsyncDisposable
         // the next track's load is what changes state.
         if (state == "previewEnd")
         {
-            if (PreviewActive) _ = AdvanceAsync();
+            if (_preview) _ = AdvanceAsync();
             return;
         }
 
@@ -646,6 +768,8 @@ public class PlayerService : IAsyncDisposable
         else if (fileId is not null) _localFileId = fileId;
 
         if (state == "playing") _consecutiveFailures = 0;
+        if (state is "playing" or "idle") AutoplayBlocked = false;
+        if (state == "blocked") AutoplayBlocked = true;
 
         switch (state)
         {
@@ -655,16 +779,16 @@ public class PlayerService : IAsyncDisposable
                 // the player bar's sign-in button continues from right here.
                 _startAfterSignIn = null;
                 break;
-            case "error" when PreviewActive:
+            case "error" when _preview:
                 if (++_consecutiveFailures >= MaxConsecutiveFailures)
                 {
                     EndPreview($"{MaxConsecutiveFailures} tracks in a row failed");
                     _errors.Report("Gig preview stopped",
-                        $"{MaxConsecutiveFailures} tracks in a row failed to play. Last: {CurrentTitle} (fileId {fileId}).");
+                        $"{MaxConsecutiveFailures} tracks in a row failed to play. Last: {_title} (fileId {fileId}).");
                 }
                 else
                 {
-                    _errors.Info($"Skipped \"{CurrentTitle}\" — it would not play", $"fileId {fileId}.");
+                    _errors.Info($"Skipped \"{_title}\" — it would not play", $"fileId {fileId}.");
                     _ = AdvanceAsync();
                 }
                 break;
@@ -676,7 +800,7 @@ public class PlayerService : IAsyncDisposable
                 _errors.Report("Playback blocked by the browser",
                     "Autoplay was refused. Click play again — browsers require a direct user gesture.");
                 break;
-            case "ended" when PreviewActive || ContinuousPlay:
+            case "ended" when _preview || _continuous:
                 _ = AdvanceAsync();
                 break;
         }
@@ -689,6 +813,7 @@ public class PlayerService : IAsyncDisposable
         _cast.Changed -= OnCastChanged;
         _cast.Progress -= OnCastProgress;
         _cast.Finished -= OnCastFinished;
+        _remote.Changed -= OnRemoteChanged;
 
         if (_module is not null)
         {

@@ -4,11 +4,13 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:remote": "playwright test -c playwright.remote.config.ts",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
   },
   "devDependencies": {
+    "@microsoft/signalr": "^8.0.29",
     "@playwright/test": "^1.59.1"
   }
 }

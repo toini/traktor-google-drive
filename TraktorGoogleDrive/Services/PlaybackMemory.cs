@@ -25,18 +25,23 @@ public sealed class PlaybackMemory : IAsyncDisposable
     private readonly PlayerService _player;
     private readonly AuthService _auth;
     private readonly DriveService _drive;
+    private readonly RemoteService _remote;
     private IJSObjectReference? _module;
 
     private string? _rememberedId;
     private bool _restoreDone;
     private DateTime _lastCastSave = DateTime.MinValue;
 
-    public PlaybackMemory(IJSRuntime js, PlayerService player, AuthService auth, DriveService drive)
+    /// <summary>How long a restore waits to learn whether another device is playing.</summary>
+    private static readonly TimeSpan RoomWait = TimeSpan.FromSeconds(3);
+
+    public PlaybackMemory(IJSRuntime js, PlayerService player, AuthService auth, DriveService drive, RemoteService remote)
     {
         _js = js;
         _player = player;
         _auth = auth;
         _drive = drive;
+        _remote = remote;
         _player.Changed += OnPlayerChanged;
     }
 
@@ -54,6 +59,10 @@ public sealed class PlaybackMemory : IAsyncDisposable
 
     private void OnPlayerChanged()
     {
+        // Another device's playback is that device's to remember, not this one's
+        // (ADR 20261018-63 §5.5).
+        if (_player.IsRemote) return;
+
         var id = _player.CurrentFileId;
 
         if (id is null)
@@ -140,6 +149,17 @@ public sealed class PlaybackMemory : IAsyncDisposable
         catch (DriveAuthException)
         {
             // Token rejected: the page's own load handles sign-in. Keep the record.
+            return;
+        }
+
+        // While another device is playing, this tab is its remote: cueing this
+        // browser's own last track would turn it into a second player instead.
+        if (_remote.Enabled
+            && await _remote.WaitForRoomAsync(RoomWait) is not null
+            && _remote.RemoteSnapshot is not null)
+        {
+            _restoreDone = true;
+            Console.WriteLine("[PlaybackMemory] another device is playing; not restoring");
             return;
         }
 
