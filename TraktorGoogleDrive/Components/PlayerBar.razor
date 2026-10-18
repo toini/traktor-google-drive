@@ -37,6 +37,11 @@
                         PREVIEW · @Player.QueuePosition/@Player.QueueCount
                     </span>
                 }
+                else if (Player.PreviewStoppedReason is { } why)
+                {
+                    @* Preview never just vanishes: when it ends on its own, say why. *@
+                    <span class="player-preview-stopped" data-preview-stopped role="status">Preview stopped: @why</span>
+                }
                 @(Player.CurrentTitle ?? "…")
                 @if (Player.IsCasting)
                 {

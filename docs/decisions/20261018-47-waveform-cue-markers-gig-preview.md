@@ -317,7 +317,9 @@ function in `Models/`, so all of the rules below sit in one testable place:
   same loop as "the last by `START`" in every track (0 differ), and it does not
   depend on how loops overlap.
 - **The end check runs in JS, not over interop.** `player.js`'s
-  `play(fileId, url, startAt, stopAt)` arms the bound for a newly loaded file
+  `play(fileId, url, startAt, stopAt, rebound)` arms the bound for a newly loaded
+  file, or with `rebound` for the file already loaded (a preview starting on the
+  current track, or a resume during a preview)
   (`setBounds(stopAt)` clears it) and checks `currentTime >= end` on every `timeupdate`
   (~4 Hz, so ≤250 ms late). `PlayerService.OnProgress` is throttled to whole
   seconds, so checking in C# would overshoot. On Cast the check runs on the ~1 Hz
@@ -332,14 +334,19 @@ function in `Models/`, so all of the rules below sit in one testable place:
 | **Last loop ends at or before the start** (1 track) | (a) ignore the end and play to the end; (b) skip; (c) swap start and end | **(a)**, with the reason shown in the player bar. It is almost certainly a stale loop. |
 | **Loop end past the track's duration** | clamp, or ignore | **Treated as "to the end"**, so the element's own `ended` event advances, which is more reliable than waiting for a `timeupdate` at the exact last sample. |
 | **User seeks past the end while previewing** | (a) the seek wins: disarm the end bound for this track and let it play on; (b) advance immediately; (c) clamp the seek to the end | **(a).** Seeking past the range is a deliberate "let me hear this bit". Jumping to the next track would fight the user. The bound re-arms on the next track. Seeking backwards, or before the start, just works. |
-| **Track fails to load** | (a) stop the preview; (b) skip with a notice | **401 → stop** (the token has expired, so skipping cannot help, and the existing `Unauthorized` path takes over). **Any other error → skip** with `Errors.Info` naming the track. **3 failures in a row → stop.** Rows with no Drive file are never queued. |
+| **Track fails to load** | (a) stop the preview; (b) skip with a notice | **401/403 → no skip**: `player.js` asks the proxy for the status (a media element never exposes it), renews the token once, and if that needs the user it pauses there with "Sign in again to continue", preview mode kept (the token-refresh change). An undecodable file gives the same `MEDIA_ERR_SRC_NOT_SUPPORTED` a 401 body does, but the proxy says 200, so it is skipped like any other failure. **Any other error → skip** with `Errors.Info` naming the track. **3 failures in a row → stop.** Rows with no Drive file are never queued. **A superseded load is not a failure**, in preview or not: skipping quickly starts a new load before the last one finished, and whatever the old one still raises (`play()` rejecting with `AbortError`, an `error` event, the pause the switch causes) is ignored, by a load generation in `player.js`. Counting those used to show "Playback failed", skip an extra row and, after three, stop the preview. |
 | **End of the list** | stop or loop | **Stop**, leaving the last track loaded and paused (today's end-of-track behaviour). |
+| **Preview ends without the user** | vanish, or say why | **Say why.** End of the list, 3 failures, an expired session while casting, and leaving the playlist each show "Preview stopped: <reason>" in the player bar for 8 s. Only ✕ Stop preview ends it silently. |
 | **Re-sort during a preview** | — | The next track comes from the new order (§3). The current track is not interrupted. |
-| **Click Play on a row during a preview** | (a) jump the preview to that row; (b) leave preview mode | **(a)**, so "start the preview from track 7" is just a click. Leaving is an explicit control. |
+| **Click Play on a row during a preview** | (a) jump the preview to that row; (b) leave preview mode | **(a)**, so "start the preview from track 7" is just a click. Leaving is an explicit control. Clicking the current row pauses and resumes it, and the end bound stays armed across the pause. |
+| **Resume from before the load cue** | (a) keep the position; (b) jump to the load cue | **(b) only if this preview never started the track at its load cue**, which a cued or restored track has not. Otherwise an earlier position came from a seek, and the seek wins, like seeking past the end. |
 
 **UI.** Options: (a) a toggle in the player bar; (b) a "Preview set" button in the
 playlist header; (c) both. **Chosen: (b) plus a status chip in the bar.** "▶ Preview
-set" in the header starts at the first playable row in table order. While it runs,
+set" in the header starts at the loaded track when it is one of the playlist's rows
+(playing, paused, or restored after a reload), restarting it at its load cue, and
+otherwise at the first playable row in table order. Its tooltip says which
+("Preview from #6"). While it runs,
 the bar shows **`PREVIEW · 3/18`**, the range (`1:52 → 4:13`, or the reason when a
 default applied, e.g. "no loop — to end"), ⏮ ⏭, and **✕ Stop preview**. On the
 waveform the range is lit and outside it is dimmed (§2). A bar-only toggle (a) hides

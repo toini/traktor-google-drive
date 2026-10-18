@@ -209,6 +209,24 @@ test.describe('gig preview', () => {
     await expect(title(page)).toContainText('Gig One');
   });
 
+  test('on a Cast device, starts from the track playing on the TV, at its load cue', async ({ page }) => {
+    await mockCastSdk(page);
+    await open(page);
+    await page.locator('.cast-button').click();
+    await expect(page.locator('[data-cast-bar]')).toBeVisible();
+
+    await play(page, 'Gig Three');
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+    await expect(page.locator('[data-preview-set]')).toHaveAttribute('data-preview-from', '4');
+
+    await page.locator('[data-preview-set]').click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(2);
+    const load = (await castLoads(page))[1];
+    expect(load.title).toBe('Gig Three');
+    expect(load.currentTime).toBeCloseTo(0.4);
+    await expect(page.locator('[data-preview-chip]')).toContainText('3/4');
+  });
+
   test('on a Cast device, each LOAD starts at the load cue and the end is watched from the ticks', async ({ page }) => {
     await mockCastSdk(page);
     await open(page);
@@ -226,5 +244,332 @@ test.describe('gig preview', () => {
     const second = (await castLoads(page))[1];
     expect(second.title).toBe('Gig Two');
     expect(second.currentTime).toBe(0);
+  });
+});
+
+/*
+ * "Going to preview mode starts from the first track. I want to start at song 6
+ * where I am, but if I click play on it then preview gets disabled."
+ *
+ * The 2-second fixture files leave no time to click around, so these tests play
+ * at a tenth of normal speed and switch back to 1x (`speed`) to let a bound or an
+ * end go by.
+ */
+test.describe('gig preview from where you are', () => {
+  const PLAYBACK_KEY = 'playback:v1';
+
+  async function slowMotion(page: Page) {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __rate: number };
+      w.__rate = 0.1;
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+        this.playbackRate = w.__rate;
+        return play.call(this);
+      };
+    });
+  }
+
+  const speed = (page: Page, rate: number) =>
+    page.evaluate(async (r) => {
+      (window as unknown as { __rate: number }).__rate = r;
+      const m = await import('/player.js');
+      (m.element() as HTMLAudioElement).playbackRate = r;
+    }, rate);
+
+  const paused = (page: Page) =>
+    page.evaluate(async () => {
+      const m = await import('/player.js');
+      return (m.element() as HTMLAudioElement).paused;
+    });
+
+  /** Seeds PlaybackMemory with Gig Three at `position`, so it is cued on load. */
+  async function restoreGigThree(page: Page, position = 0) {
+    await page.addInitScript(([k, v]) => {
+      if (!sessionStorage.getItem('seeded-playback')) {
+        localStorage.setItem(k, v);
+        sessionStorage.setItem('seeded-playback', '1');
+      }
+    }, [PLAYBACK_KEY, JSON.stringify({ v: 1, fileId: 'drive-gig-three', title: 'Gig Three', isWav: false, duration: 2, position, savedAt: 1 })]);
+  }
+
+  const previewButton = (page: Page) => page.locator('[data-preview-set]');
+  const chip = (page: Page) => page.locator('[data-preview-chip]');
+
+  /**
+   * The preview STARTED on `name`. Short timeout on purpose: at a tenth of normal
+   * speed a preview that started at Gig One takes ~18 s to advance to Gig Three
+   * by itself, which the default 20 s expect timeout would accept.
+   */
+  async function previewStartedAt(page: Page, queuePosition: string, name: string) {
+    await expect(chip(page)).toContainText(queuePosition, { timeout: 3_000 });
+    await expect(title(page)).toContainText(name, { timeout: 3_000 });
+  }
+
+  test('with nothing loaded, Preview set says it starts at the first row', async ({ page }) => {
+    await open(page);
+    await expect(previewButton(page)).toHaveAttribute('data-preview-from', '1');
+    await expect(previewButton(page)).toHaveAttribute('title', /^Preview from #1:/);
+  });
+
+  test('starts from the playing track, at its load cue, and carries on from there', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await play(page, 'Gig Three');
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+
+    // Gig Three is row #4 in the table (Local Only is #3).
+    await expect(previewButton(page)).toHaveAttribute('data-preview-from', '4');
+    await expect(previewButton(page)).toHaveAttribute('title', /^Preview from #4 \(the current track\)/);
+
+    await previewButton(page).click();
+    await previewStartedAt(page, '3/4', 'Gig Three');
+    await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-start', '0.4');
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
+
+    // Still previewing: Gig Three ends and the preview moves on to Gig Four.
+    await speed(page, 1);
+    await expect(title(page)).toContainText('Gig Four', { timeout: 10_000 });
+  });
+
+  test('starts from a paused track at its load cue', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await play(page, 'Gig Four');
+    await expect(row(page, 'Gig Four').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+    await play(page, 'Gig Four'); // pause
+    await expect.poll(() => paused(page)).toBe(true);
+
+    await previewButton(page).click();
+    await previewStartedAt(page, '4/4', 'Gig Four');
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(1.5);
+    expect(await paused(page)).toBe(false);
+  });
+
+  test('starts from a track restored after a reload, at its load cue', async ({ page }) => {
+    await slowMotion(page);
+    await restoreGigThree(page);
+    await open(page);
+    await expect(title(page)).toContainText('Gig Three');
+    await expect(previewButton(page)).toHaveAttribute('data-preview-from', '4');
+
+    await previewButton(page).click();
+    await previewStartedAt(page, '3/4', 'Gig Three');
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
+  });
+
+  test('a restored track played from its row first, then Preview set, previews that track', async ({ page }) => {
+    await slowMotion(page);
+    await restoreGigThree(page);
+    await open(page);
+    await expect(title(page)).toContainText('Gig Three');
+    await play(page, 'Gig Three');
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+
+    await previewButton(page).click();
+    await previewStartedAt(page, '3/4', 'Gig Three');
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
+  });
+
+  // The reported bug. A row clicked while the previous track is still buffering
+  // interrupts that track's play() (an AbortError), which was reported as a
+  // failed track: the preview skipped ahead, and three in a row stopped it.
+  test('clicking rows while a track is still loading stays in preview', async ({ page }) => {
+    await slowMotion(page);
+    await mockDrive(page);
+    // Registered after the mock, so it runs first: every audio request is slow.
+    await page.route((u) => u.pathname.startsWith('/api/proxy/drive/'), async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fallback();
+    });
+    await seedToken(page);
+    await page.goto(`/playlist/${GIG}`);
+    await expect(row(page, 'Gig One')).toBeVisible();
+
+    await previewButton(page).click();
+    await expect(title(page)).toContainText('Gig One');
+    await play(page, 'Gig Two');
+    await expect(title(page)).toContainText('Gig Two');
+    await play(page, 'Gig Three');
+
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('3/4');
+    await expect(title(page)).toContainText('Gig Three');
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  test('pausing and resuming the current row keeps the preview and its end bound', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await previewButton(page).click();
+    await expect(row(page, 'Gig One').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+
+    await play(page, 'Gig One'); // pause
+    await expect.poll(() => paused(page)).toBe(true);
+    await expect(chip(page)).toContainText('1/4');
+    await play(page, 'Gig One'); // resume
+    await expect.poll(() => paused(page)).toBe(false);
+    await expect(chip(page)).toContainText('1/4');
+
+    // The 1.5 s bound is still armed: the preview moves on rather than playing
+    // Gig One to its end.
+    await speed(page, 1);
+    await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('2/4');
+  });
+
+  test('the player bar pause and play keep the end bound too', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await previewButton(page).click();
+    await expect(row(page, 'Gig One').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+
+    await page.locator('.player-toggle').click(); // pause
+    await expect.poll(() => paused(page)).toBe(true);
+    await page.locator('.player-toggle').click(); // play
+    await expect.poll(() => paused(page)).toBe(false);
+
+    await speed(page, 1);
+    await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
+  });
+
+  test('clicking the playlist again in the sidebar does not end the preview', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await previewButton(page).click();
+    await previewStartedAt(page, '1/4', 'Gig One');
+
+    await page.getByRole('link', { name: 'Gig Prep' }).click();
+    await page.waitForTimeout(500);
+    await expect(chip(page)).toContainText('1/4');
+    expect(await paused(page)).toBe(false);
+  });
+
+  /** Opens Gig Prep with every audio request held back, like a large file over the proxy. */
+  async function openBuffering(page: Page) {
+    await slowMotion(page);
+    await mockDrive(page);
+    // Registered after the mock, so it runs first.
+    await page.route((u) => u.pathname.startsWith('/api/proxy/drive/'), async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fallback();
+    });
+    await seedToken(page);
+    await page.goto(`/playlist/${GIG}`);
+    await expect(row(page, 'Gig One')).toBeVisible();
+  }
+
+  const next = (page: Page) => page.getByRole('button', { name: 'Next track' }).click();
+
+  // "I started preview from the beginning and clicked Next a few times; preview
+  // stayed on. After a few more clicks preview mode went away." Each Next while a
+  // track was still buffering aborted its play(), counted as a failed track,
+  // skipped one more row, and the third stopped the preview.
+  test('rapid Next while tracks are buffering moves one row per click and stays in preview', async ({ page }) => {
+    await openBuffering(page);
+    await previewButton(page).click();
+    await expect(title(page)).toContainText('Gig One');
+    await next(page);
+    await next(page);
+
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('3/4');
+    await page.waitForTimeout(1000); // nothing skips on further
+    await expect(title(page)).toContainText('Gig Three');
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  // Toni got ten "Playback failed" banners in six seconds skipping quickly, while
+  // the proxy answered every request 206: superseded loads reporting as failures.
+  const previous = (page: Page) => page.getByRole('button', { name: 'Previous track' }).click();
+
+  test('eight quick Next clicks in normal playback: no failure banners, the last track plays', async ({ page }) => {
+    await openBuffering(page);
+    await play(page, 'Gig One');
+    for (let i = 0; i < 8; i++) await next(page); // the last four are past the end: no-ops
+
+    await expect(row(page, 'Gig Four').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(title(page)).toContainText('Gig Four');
+    await page.waitForTimeout(500);
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  test('eight quick Next/Previous clicks in preview: no failures, one row per click, still previewing', async ({ page }) => {
+    await openBuffering(page);
+    await previewButton(page).click();
+    await expect(title(page)).toContainText('Gig One');
+    // One → Two → Three → Four → Three → Two → Three → Four → Three.
+    for (const step of [next, next, next, previous, previous, next, next, previous]) await step(page);
+
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('3/4');
+    await page.waitForTimeout(500);
+    await expect(title(page)).toContainText('Gig Three');
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  test('Next with pauses between clicks while buffering stays in preview', async ({ page }) => {
+    await openBuffering(page);
+    await previewButton(page).click();
+    await expect(title(page)).toContainText('Gig One');
+    for (const expected of ['Gig Two', 'Gig Three']) {
+      await page.waitForTimeout(400);
+      await next(page);
+      await expect(title(page)).toContainText(expected);
+    }
+    await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('3/4');
+    await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  test('Next past the last row ends the preview and the bar says why', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await previewButton(page).click();
+    for (const expected of ['2/4', '3/4', '4/4']) {
+      await next(page);
+      await expect(chip(page)).toContainText(expected);
+    }
+    await next(page);
+    await expect(chip(page)).toHaveCount(0);
+    await expect(page.locator('[data-preview-stopped]')).toContainText('Preview stopped: end of the playlist');
+  });
+
+  test('a file the browser cannot decode is skipped, not taken for an expired token', async ({ page }) => {
+    await slowMotion(page);
+    await mockDrive(page);
+    // Gig Two arrives as bytes no decoder accepts: MEDIA_ERR_SRC_NOT_SUPPORTED,
+    // the same code a 401 body produces, but the proxy said 200.
+    await page.route((u) => u.pathname.startsWith('/api/proxy/drive/drive-gig-two'), (route) =>
+      route.fulfill({ status: 200, contentType: 'audio/flac', body: 'this is not audio at all' }));
+    await seedToken(page);
+    await page.goto(`/playlist/${GIG}`);
+    await expect(row(page, 'Gig One')).toBeVisible();
+
+    await previewButton(page).click();
+    await previewStartedAt(page, '1/4', 'Gig One');
+    await next(page);
+
+    await expect(title(page)).toContainText('Gig Three', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('3/4');
+    await expect(page.locator('.error-banner')).toContainText('Skipped "Gig Two"');
+    await expect(page.locator('.error-banner')).not.toContainText('rejected the token');
+  });
+
+  test('a seek before the load cue while paused is kept on resume', async ({ page }) => {
+    await slowMotion(page);
+    await open(page);
+    await previewButton(page).click();
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.3);
+
+    await play(page, 'Gig One'); // pause
+    await expect.poll(() => paused(page)).toBe(true);
+    await page.evaluate(async () => (await import('/player.js')).seek(0.1));
+    await expect.poll(() => position(page)).toBeLessThan(0.2);
+
+    await play(page, 'Gig One'); // resume
+    await expect.poll(() => paused(page)).toBe(false);
+    expect(await position(page)).toBeLessThan(0.3);
+    await expect(chip(page)).toContainText('1/4');
   });
 });

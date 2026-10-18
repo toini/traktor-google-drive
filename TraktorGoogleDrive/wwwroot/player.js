@@ -21,6 +21,20 @@ let wantPlaying = false;   // the user's intent, which an error does not change
 let retriedAuth = false;   // one silent renewal per failure, not a loop
 let stalled = null;        // { at, wasPlaying } while waiting for a sign-in
 
+// Every new source is a new load. Skipping quickly through tracks supersedes
+// loads before they finish, and whatever a superseded load still raises (its
+// play() rejecting, an error event, the pause the switch causes) is about a
+// track nobody is waiting for any more. It used to surface as "Playback
+// failed", count as a dead track in gig preview, and auto-advance.
+let generation = 0;
+let switching = false; // a playing element is being given a new source
+
+function load(url) {
+    generation++;
+    switching = !audio.paused;
+    audio.src = url;
+}
+
 const report = (state) => dotnet?.invokeMethodAsync('OnPlaybackStateChanged', state, currentId);
 
 // timeupdate fires ~4x/second; that is already a lot of interop, so only push
@@ -39,7 +53,7 @@ export function init(dotNetRef) {
     audio = new Audio();
     audio.preload = 'metadata';
 
-    audio.addEventListener('loadstart', () => report('loading'));
+    audio.addEventListener('loadstart', () => { switching = false; report('loading'); });
     audio.addEventListener('canplay', () => { report('ready'); reportProgress(true); });
     audio.addEventListener('timeupdate', () => {
         if (endAt != null && audio.currentTime >= endAt) {
@@ -62,7 +76,8 @@ export function init(dotNetRef) {
     audio.addEventListener('durationchange', () => reportProgress(true));
     audio.addEventListener('seeked', () => reportProgress(true));
     audio.addEventListener('playing', () => { retriedAuth = false; report('playing'); });
-    audio.addEventListener('pause', () => report('paused'));
+    // Switching tracks pauses the old one on the way; that is not the user pausing.
+    audio.addEventListener('pause', () => { if (!switching) report('paused'); });
     audio.addEventListener('ended', () => report('ended'));
     audio.addEventListener('error', () => { onError(); });
 }
@@ -87,15 +102,20 @@ function reload(at, play) {
     if (!audio || !currentUrl) return;
     pendingStart = at > 0 ? at : null;
     wantPlaying = play;
-    audio.src = currentUrl;
+    load(currentUrl);
+    const gen = generation;
     if (play) {
-        audio.play().catch(playFailed);
+        audio.play().catch((e) => playFailed(e, gen));
     } else {
         audio.addEventListener('loadedmetadata', () => report('paused'), { once: true });
     }
 }
 
 async function onError() {
+    // A new load resets `error`, so an event left over from a superseded load
+    // finds none.
+    if (!audio.error) return;
+    const gen = generation;
     const id = currentId;
     const url = currentUrl;
     if (!id || !url) { report('error'); return; }
@@ -104,14 +124,16 @@ async function onError() {
     const at = pendingStart ?? audio.currentTime;
     const wasPlaying = wantPlaying;
 
+    // Also how an undecodable file (MEDIA_ERR_SRC_NOT_SUPPORTED, the same code a
+    // 401 body gives) is told apart from an expired token: the proxy says 200.
     const status = await probe(url);
-    if (currentId !== id) return; // another track started meanwhile
+    if (gen !== generation) return; // another load started meanwhile
     if (status !== 401 && status !== 403) { report('error'); return; }
 
     if (!retriedAuth) {
         retriedAuth = true;
         const token = await (window.authRefreshToken?.() ?? Promise.resolve(null));
-        if (currentId !== id) return;
+        if (gen !== generation) return;
         if (token) { reload(at, wasPlaying); return; }
     }
 
@@ -137,40 +159,55 @@ export function resume() {
 }
 
 /**
- * Plays `fileId`. `startAt`/`stopAt` apply only when this loads a new file: a
- * resume of the same file keeps its position and its preview bound.
+ * Plays `fileId`. `startAt`/`stopAt` apply when this loads a new file. For the
+ * file already loaded they apply only with `rebound`: then `stopAt` replaces the
+ * preview bound and a non-null `startAt` seeks. Without it, a resume of the same
+ * file keeps its position and its preview bound.
  */
-export async function play(fileId, url, startAt, stopAt) {
+export async function play(fileId, url, startAt, stopAt, rebound) {
     if (!audio) return;
     if (currentId !== fileId) {
         pendingStart = startAt > 0 ? startAt : null;
         endAt = stopAt ?? null;
-        audio.src = url;
         currentUrl = url;
         currentId = fileId;
         stalled = null;
         retriedAuth = false;
+        load(url);
     } else if (stalled) {
         resume();
         return;
+    } else if (rebound) {
+        // The file is already loaded: the bounds were passed on purpose, for gig
+        // preview starting on (or resuming) the current track.
+        endAt = stopAt ?? null;
+        if (startAt != null) {
+            // currentTime cannot be set before metadata; a cued track may lack it.
+            if (audio.readyState >= 1) { pendingStart = null; audio.currentTime = Math.max(0, startAt); }
+            else pendingStart = startAt > 0 ? startAt : null;
+        }
     }
     wantPlaying = true;
+    const gen = generation;
     try {
         await audio.play();
     } catch (e) {
-        playFailed(e);
+        playFailed(e, gen);
     }
 }
 
 /**
  * Autoplay rejection or a load failure — surface it rather than hanging the
  * button in a permanent "loading" state. A failed load also fires the
- * element's error event, whose handler knows whether it was the token; and an
- * AbortError only means a newer load replaced this one.
+ * element's error event, whose handler knows whether it was the token. An
+ * AbortError only means a newer load or a pause overtook this play(), e.g. Next
+ * clicked while the track was still buffering; and anything raised once another
+ * load has started is stale the same way.
  */
-function playFailed(e) {
+function playFailed(e, gen) {
+    if (gen !== generation || e?.name === 'AbortError') return;
     if (e?.name === 'NotAllowedError') { report('blocked'); return; }
-    if (audio?.error || e?.name === 'AbortError') return;
+    if (audio?.error) return;
     report('error');
 }
 
@@ -188,7 +225,7 @@ export function cue(fileId, url, position) {
     stalled = null;
     retriedAuth = false;
     wantPlaying = false;
-    audio.src = url;
+    load(url);
     // Registered after init's listener, so the pending seek has been applied.
     audio.addEventListener('loadedmetadata', () => {
         if (currentId === fileId && audio.paused) report('paused');
@@ -202,6 +239,7 @@ export function pause() {
 
 export function stop() {
     if (!audio) return;
+    generation++;
     audio.pause();
     audio.removeAttribute('src');
     audio.load();
