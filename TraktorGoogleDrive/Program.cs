@@ -20,5 +20,7 @@ builder.Services.AddScoped<SetMatcher>();
 // reason, and outlives navigation.
 builder.Services.AddSingleton<CastService>();
 builder.Services.AddSingleton<PlayerService>();
+// Scoped only because it reads the token and Drive, which are; WASM has one scope.
+builder.Services.AddScoped<PlaybackMemory>();
 
 await builder.Build().RunAsync();

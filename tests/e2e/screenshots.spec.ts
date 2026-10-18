@@ -155,7 +155,8 @@ test('capture the sidebar with a nested playlist active', async ({ page }) => {
   await mockDrive(page, { nml: manyFoldersNml() });
   await seedToken(page);
   await page.goto(`/playlist/${NESTED_HISTORY_UUID}`);
-  await page.locator('.folder-tree summary', { hasText: 'History' }).click();
+  // No click on History: the folder holding the active playlist opens by
+  // itself (remember.spec.ts), and a click would collapse it again.
   await page.locator('.folder-tree a.active').waitFor();
   await page.locator('.folder-tree summary', { hasText: 'Gigs' }).click();
   await page.locator('.folder-tree a', { hasText: 'Kaiku' }).hover();

@@ -150,6 +150,10 @@ public class PlayerService : IAsyncDisposable
 
         _queue = rowsInTableOrder.Where(f => !string.IsNullOrEmpty(f.DriveFileId)).ToList();
 
+        // A track cued by PlaybackMemory has no row until its playlist loads.
+        if (CurrentFile is null && _localFileId is not null)
+            CurrentFile = _queue.FirstOrDefault(f => f.DriveFileId == _localFileId);
+
         // A re-sort moves the current row; remember where it now sits.
         if (CurrentFile is not null && IndexOf(CurrentFile) is var moved and >= 0) _lastIndex = moved;
         Changed?.Invoke();
@@ -318,6 +322,33 @@ public class PlayerService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Loads a track paused at <paramref name="position"/> without playing it,
+    /// always on the local element: a reload brings back the last session's
+    /// track, and a TV should not start up on its own. Resume plays it from there.
+    /// </summary>
+    public async Task CueAsync(string fileId, string? title, bool isWav, double duration, double position, string token)
+    {
+        if (_localFileId is not null) return;
+
+        // The row, if the page already queued it: next/previous then continue
+        // from here, and the waveform gets its cue markers. Otherwise SetQueue
+        // adopts it when the playlist's rows arrive.
+        CurrentFile = _queue.FirstOrDefault(f => f.DriveFileId == fileId);
+        if (CurrentFile is not null) _lastIndex = IndexOf(CurrentFile);
+        CurrentTitle = title;
+        CurrentUrl = DriveAudio.UrlFor(fileId, token);
+        CurrentIsWav = isWav;
+        _localFileId = fileId;
+        _localTime = position;
+        _localDuration = duration;
+        _localState = PlaybackState.Paused;
+
+        var module = await ModuleAsync();
+        Changed?.Invoke();
+        await module.InvokeVoidAsync("cue", fileId, CurrentUrl, position);
+    }
+
+    /// <summary>
     /// The underlying media element, so WaveSurfer can attach to it rather than
     /// loading a second copy of a 1-2 GB file.
     /// </summary>
@@ -382,7 +413,10 @@ public class PlayerService : IAsyncDisposable
 
         _localState = state switch
         {
-            "loading" or "ready" => _localState == PlaybackState.Playing ? PlaybackState.Playing : PlaybackState.Loading,
+            "loading" => _localState == PlaybackState.Playing ? PlaybackState.Playing : PlaybackState.Loading,
+            // canplay also fires after a seek while paused, and for a cued track;
+            // neither should turn the play button back into a spinner.
+            "ready" => _localState is PlaybackState.Playing or PlaybackState.Paused ? _localState : PlaybackState.Loading,
             "playing" => PlaybackState.Playing,
             "paused" => PlaybackState.Paused,
             // Keep the track loaded and paused rather than clearing it: a set

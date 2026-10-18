@@ -6,6 +6,9 @@
 @inject CollectionService CollectionService
 @inject AuthService Auth
 @inject AppErrors Errors
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IDisposable
 
 <nav class="folder-tree">
     @if (loadError is not null)
@@ -24,7 +27,8 @@
            to carry it and picked up the playlist-link rules instead of its own. *@
         @foreach (var folder in folders)
         {
-            <details class="tree-folder" open="@(folders.Count <= 3)">
+            <details class="tree-folder" open="@IsOpen(folder)" data-folder="@folder.Name"
+                     @ontoggle="() => OnToggled(folder)">
                 <summary class="tree-row" title="@folder.Name">
                     <span class="tree-icon folder-icon" aria-hidden="true">
                         <svg class="folder-closed" viewBox="0 0 16 16"><path d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>
@@ -89,6 +93,8 @@
         {
             folders = await CollectionService.GetFoldersAsync();
             rootPlaylists = await CollectionService.GetRootPlaylistsAsync();
+            await LoadOpenStateAsync();
+            ExpandActiveFolder();
             loaded = true;
         }
         catch (DriveAuthException ex)
@@ -105,4 +111,65 @@
             loaded = true;
         }
     }
+
+    // Remembered per folder name (Traktor folders carry no UUID). Only folders
+    // in this map deviate from the default; the rest follow folders.Count <= 3.
+    const string OpenStateKey = "sidebar-folders:v1";
+    Dictionary<string, bool> openState = new(StringComparer.Ordinal);
+    IJSObjectReference? memory;
+
+    bool IsOpen(Folder folder) =>
+        openState.TryGetValue(folder.Name ?? "", out var open) ? open : folders.Count <= 3;
+
+    protected override void OnInitialized() => Navigation.LocationChanged += OnLocationChanged;
+
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (ExpandActiveFolder()) InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Opens the folder holding the playlist in the URL, so a reload never hides it.</summary>
+    bool ExpandActiveFolder()
+    {
+        var path = new Uri(Navigation.Uri).AbsolutePath;
+        const string prefix = "/playlist/";
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        var uuid = path[prefix.Length..];
+
+        var folder = folders.FirstOrDefault(f => f.Playlists.Any(p => p.Uuid == uuid));
+        if (folder is null || IsOpen(folder)) return false;
+        openState[folder.Name ?? ""] = true;
+        return true;
+    }
+
+    // The toggle event carries no state, and it also fires when Blazor itself
+    // sets the attribute, so read the element rather than flipping a bool.
+    async Task OnToggled(Folder folder)
+    {
+        try
+        {
+            memory ??= await JS.InvokeAsync<IJSObjectReference>("import", "./remember.js");
+            var open = await memory.InvokeAsync<bool?>("folderOpen", folder.Name ?? "");
+            // Matching what was rendered means Blazor set it, not the user.
+            if (open is null || open == IsOpen(folder)) return;
+            openState[folder.Name ?? ""] = open.Value;
+            await JS.InvokeVoidAsync("localStorage.setItem", OpenStateKey,
+                System.Text.Json.JsonSerializer.Serialize(openState));
+        }
+        catch { /* storage or module unavailable: the sidebar still works, it just forgets */ }
+    }
+
+    async Task LoadOpenStateAsync()
+    {
+        try
+        {
+            var raw = await JS.InvokeAsync<string?>("localStorage.getItem", OpenStateKey);
+            if (string.IsNullOrEmpty(raw)) return;
+            openState = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(raw)
+                        ?? new(StringComparer.Ordinal);
+        }
+        catch { openState = new(StringComparer.Ordinal); } // unreadable or old format: start from defaults
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
 }

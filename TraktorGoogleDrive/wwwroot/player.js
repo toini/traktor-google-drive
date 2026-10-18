@@ -81,6 +81,23 @@ export async function play(fileId, url, startAt, stopAt) {
     }
 }
 
+/**
+ * Loads a track without playing it, at a saved position. The seek waits for
+ * metadata: currentTime cannot be set on a fresh source before it.
+ */
+export function cue(fileId, url, position) {
+    if (!audio) return;
+    // No preview bound: a restored track plays on to its natural end.
+    endAt = null;
+    pendingStart = position > 0 ? position : null;
+    currentId = fileId;
+    audio.src = url;
+    // Registered after init's listener, so the pending seek has been applied.
+    audio.addEventListener('loadedmetadata', () => {
+        if (currentId === fileId && audio.paused) report('paused');
+    }, { once: true });
+}
+
 export function pause() {
     audio?.pause();
 }
