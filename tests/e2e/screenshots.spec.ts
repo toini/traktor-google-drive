@@ -4,9 +4,13 @@
  *   npx playwright test screenshots
  * and look at the output.
  */
-import { test } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { test, type Page } from '@playwright/test';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mockDrive, seedToken } from './drive-mock';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const OUT = 'screenshots';
 const PSYTECH_UUID = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
@@ -104,4 +108,56 @@ test('capture the column picker open', async ({ page }) => {
   await page.getByRole('button', { name: 'Columns' }).click();
   await page.getByRole('group', { name: 'Visible columns' }).waitFor();
   await page.screenshot({ path: `${OUT}/10-column-picker.png`, fullPage: true });
+});
+
+/**
+ * A sidebar shaped like a real collection: more than three folders (so they
+ * render collapsed), loose playlists after them, and Traktor's long history
+ * playlist names, which have to ellipsise rather than run off the edge.
+ */
+function manyFoldersNml(): string {
+  const base = readFileSync(join(here, 'fixtures', 'collection.nml'), 'utf8');
+  let n = 0;
+  const uuid = () => `ffff${String(++n).padStart(28, '0')}`;
+  const playlist = (name: string) =>
+    `<NODE TYPE="PLAYLIST" NAME="${name}"><PLAYLIST ENTRIES="1" TYPE="LIST" UUID="${uuid()}">`
+    + '<ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Sets/:alpha.wav"></PRIMARYKEY></ENTRY>'
+    + '</PLAYLIST></NODE>';
+  const folder = (name: string, children: string[]) =>
+    `<NODE TYPE="FOLDER" NAME="${name}"><SUBNODES COUNT="${children.length}">`
+    + children.map(playlist).join('') + '</SUBNODES></NODE>';
+  const extra = [
+    folder('C', ['C1 Warmup', 'C2 Peak']),
+    folder('DNB', ['Liquid', 'Neuro']),
+    folder('Gigs', ['Flow 2025', 'Kaiku 2026-05-02']),
+    folder('History', ['history_2020y01m27d_23h14m05s_a_very_long_name', 'history_2020y02m03d']),
+    folder('X', ['X1']),
+    playlist('Preparation'),
+    playlist('history_2020y01m27d_19h02m44s_another_long_one'),
+  ].join('\n');
+  return base.replace(/(\s*<\/SUBNODES>\s*<\/NODE>\s*<\/PLAYLISTS>)/, `\n${extra}$1`);
+}
+
+// 'History' is the 4th folder; its first child is the 7th generated playlist.
+const NESTED_HISTORY_UUID = `ffff${'7'.padStart(28, '0')}`;
+
+const sidebar = (page: Page) => page.locator('aside.sidebar');
+
+test('capture the sidebar', async ({ page }) => {
+  await mockDrive(page, { nml: manyFoldersNml() });
+  await seedToken(page);
+  await page.goto('/music');
+  await page.locator('.folder-tree summary', { hasText: 'History' }).waitFor();
+  await sidebar(page).screenshot({ path: `${OUT}/11-sidebar.png`, animations: 'disabled' });
+});
+
+test('capture the sidebar with a nested playlist active', async ({ page }) => {
+  await mockDrive(page, { nml: manyFoldersNml() });
+  await seedToken(page);
+  await page.goto(`/playlist/${NESTED_HISTORY_UUID}`);
+  await page.locator('.folder-tree summary', { hasText: 'History' }).click();
+  await page.locator('.folder-tree a.active').waitFor();
+  await page.locator('.folder-tree summary', { hasText: 'Gigs' }).click();
+  await page.locator('.folder-tree a', { hasText: 'Kaiku' }).hover();
+  await sidebar(page).screenshot({ path: `${OUT}/12-sidebar-nested-active.png`, animations: 'disabled' });
 });
