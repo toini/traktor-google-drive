@@ -4,35 +4,55 @@
 @implements IDisposable
 @inject PlayerService Player
 
-@if (Player.CurrentFileId is not null)
+@if (Player.CurrentFileId is not null || Player.PreviewActive)
 {
-    <div class="player-bar" role="region" aria-label="Now playing">
-        <button class="player-toggle @(Player.State == PlaybackState.Playing ? "playing" : "")"
-                title="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
-                aria-label="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
-                @onclick="Toggle">
-            @if (Player.State == PlaybackState.Loading)
-            {
-                <span class="spinner" aria-hidden="true"></span>
-            }
-            else
-            {
-                <span aria-hidden="true">@(Player.State == PlaybackState.Playing ? "❚❚" : "▶")</span>
-            }
-        </button>
+    <div class="player-bar @(Player.PreviewActive ? "previewing" : "")" role="region" aria-label="Now playing">
+        <div class="player-transport">
+            <button class="player-step" title="Previous track" aria-label="Previous track"
+                    disabled="@(!Player.HasQueue)" @onclick="Player.PreviousAsync">⏮</button>
+            <button class="player-toggle @(Player.State == PlaybackState.Playing ? "playing" : "")"
+                    title="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
+                    aria-label="@(Player.State == PlaybackState.Playing ? "Pause" : "Play")"
+                    @onclick="Toggle">
+                @if (Player.State == PlaybackState.Loading)
+                {
+                    <span class="spinner" aria-hidden="true"></span>
+                }
+                else
+                {
+                    <span aria-hidden="true">@(Player.State == PlaybackState.Playing ? "❚❚" : "▶")</span>
+                }
+            </button>
+            <button class="player-step" title="Next track" aria-label="Next track"
+                    disabled="@(!Player.HasQueue)" @onclick="Player.NextAsync">⏭</button>
+        </div>
 
         <div class="player-body">
             <div class="player-title">
+                @if (Player.PreviewActive)
+                {
+                    <span class="player-preview-chip" data-preview-chip
+                          title="Gig preview: each track plays from its load cue to the end of its last loop">
+                        PREVIEW · @Player.QueuePosition/@Player.QueueCount
+                    </span>
+                }
                 @(Player.CurrentTitle ?? "…")
                 @if (Player.IsCasting)
                 {
                     <span class="player-output">▶ @(Player.CastDeviceName ?? "TV")</span>
                 }
+                @if (Player.PreviewActive && Player.CurrentRange is { } range)
+                {
+                    <span class="player-preview-range" data-preview-range
+                          data-start="@range.Start.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                          data-end="@(range.End?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")">@range.Describe()</span>
+                }
             </div>
 
-            @if (Player.CurrentIsWav && !Player.IsCasting)
+            @if (Player.CurrentFile is { } file && Player.CurrentFile.DriveFileId == Player.CurrentFileId)
             {
-                <Waveform Url="@Player.CurrentUrl" FileId="@Player.CurrentFileId" />
+                <Waveform File="@file" Url="@Player.CurrentUrl" Casting="@Player.IsCasting"
+                          Range="@(Player.PreviewActive ? Player.CurrentRange : null)" />
             }
             else
             {
@@ -48,6 +68,18 @@
             <span class="player-time-sep">/</span>
             <span>@TrackTime.Format(Player.Duration)</span>
         </div>
+
+        <div class="player-modes">
+            <label class="player-continuous" title="When a track ends, play the next row in the table">
+                <input type="checkbox" checked="@Player.ContinuousPlay" data-continuous-play
+                       @onchange="OnContinuousChanged" />
+                Continuous
+            </label>
+            @if (Player.PreviewActive)
+            {
+                <button class="player-preview-stop" data-stop-preview @onclick="Player.StopPreview">✕ Stop preview</button>
+            }
+        </div>
     </div>
 }
 
@@ -56,6 +88,8 @@
 
     protected override void OnInitialized() => Player.Changed += OnChanged;
 
+    protected override Task OnInitializedAsync() => Player.LoadPreferencesAsync();
+
     void OnChanged() => InvokeAsync(StateHasChanged);
 
     async Task Toggle()
@@ -63,6 +97,8 @@
         if (Player.State == PlaybackState.Playing) await Player.PauseAsync();
         else await Player.ResumeAsync();
     }
+
+    Task OnContinuousChanged(ChangeEventArgs e) => Player.SetContinuousPlayAsync(e.Value is true);
 
     async Task OnSeekInput(ChangeEventArgs e)
     {

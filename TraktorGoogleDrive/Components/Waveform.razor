@@ -1,26 +1,33 @@
 @namespace TraktorGoogleDrive.Components
 @using Microsoft.JSInterop
+@using TraktorGoogleDrive.Models
+@using TraktorGoogleDrive.Services
 @implements IAsyncDisposable
 @inject IJSRuntime JS
-@inject TraktorGoogleDrive.Services.PlayerService Player
-@inject TraktorGoogleDrive.Services.AppErrors Errors
+@inject PlayerService Player
+@inject AuthService Auth
+@inject AppErrors Errors
 
-<div class="waveform @(failed ? "failed" : "")">
+<div class="waveform @(failed ? "failed" : "")" data-waveform-source="@source">
     <div @ref="container" class="waveform-canvas"></div>
 
     @if (progress is { } p && !mounted && !failed)
     {
-        <div class="waveform-status">Sampling waveform… @((int)(p * 100))%</div>
+        <div class="waveform-status">Drawing waveform… @((int)(p * 100))%</div>
     }
-    else if (failed)
+    else if (notice is not null)
     {
-        <div class="waveform-status">Waveform unavailable</div>
+        <div class="waveform-status">@notice</div>
     }
 </div>
 
 @code {
+    /// <summary>The row being played: its cues become markers, its format picks the peak source.</summary>
+    [Parameter] public FileEntry? File { get; set; }
     [Parameter] public string? Url { get; set; }
-    [Parameter] public string? FileId { get; set; }
+    /// <summary>Playing on a Cast device: draw, but never fetch the audio here.</summary>
+    [Parameter] public bool Casting { get; set; }
+    [Parameter] public PreviewRange? Range { get; set; }
 
     ElementReference container;
     IJSObjectReference? module;
@@ -29,47 +36,132 @@
     double? progress;
     bool mounted;
     bool failed;
+    string? notice;
+    string? source;
     string? loadedFor;
+    int lastCastSecond = -1;
+
+    string? FileId => File?.DriveFileId;
+
+    string LoadKey => $"{FileId}|{Casting}|{Range?.Start}|{Range?.End}";
+
+    protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
+
+    // While casting there is no media element to follow, so the cursor follows the
+    // TV's position ticks instead.
+    void OnPlayerChanged()
+    {
+        if (!Casting || !mounted || module is null) return;
+        var second = (int)Player.CurrentTime;
+        if (second == lastCastSecond) return;
+        lastCastSecond = second;
+        _ = InvokeAsync(async () =>
+        {
+            try { await module.InvokeVoidAsync("setTime", Player.CurrentTime); }
+            catch (JSDisconnectedException) { }
+        });
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (string.IsNullOrEmpty(Url) || string.IsNullOrEmpty(FileId)) return;
-        if (loadedFor == FileId) return;
+        if (File is null || string.IsNullOrEmpty(FileId)) return;
+        if (loadedFor == LoadKey) return;
 
-        loadedFor = FileId;
+        loadedFor = LoadKey;
         mounted = false;
-        progress = 0;
+        progress = null;
         failed = false;
-        await LoadAsync(FileId, Url);
+        notice = null;
+        await LoadAsync(File);
     }
 
-    async Task LoadAsync(string fileId, string url)
+    async Task LoadAsync(FileEntry file)
     {
+        var key = LoadKey;
+        module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./waveform.js");
+        self ??= DotNetObjectReference.Create(this);
+
+        var duration = Player.Duration > 0 ? Player.Duration : file.Track?.PlaytimeFloat ?? 0;
+        double[]? peaks;
         try
         {
-            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./waveform.js");
-            self ??= DotNetObjectReference.Create(this);
-
-            var peaks = await module.InvokeAsync<double[]>("computePeaks", url, fileId, self);
-            progress = null;
-
-            media = await Player.MediaElementAsync();
-            if (media is null) throw new InvalidOperationException("no media element to attach to");
-
-            // Traktor's PLAYTIME, because a sliced 206 response can leave the
-            // element's own duration unknown for a long while.
-            await module.InvokeVoidAsync("mount", container, media, peaks, Player.Duration);
-            mounted = true;
-            StateHasChanged();
+            peaks = await PeaksAsync(file);
         }
         catch (Exception ex)
         {
-            // A missing waveform must never stop playback, so this is a notice.
+            // A missing waveform must never stop playback, so this is a notice, and
+            // the markers still get drawn on a flat line below.
             failed = true;
-            progress = null;
-            Errors.Info("Could not build a waveform for this recording", ex.Message);
-            StateHasChanged();
+            peaks = null;
+            notice = "Waveform unavailable";
+            Errors.Info("Could not build a waveform for this track", ex.Message);
         }
+        progress = null;
+
+        // The track changed while we were downloading: drawing now would put the
+        // old track's picture under the new one's cursor.
+        if (key != LoadKey) return;
+
+        try
+        {
+            media = Casting ? null : await Player.MediaElementAsync();
+            if (!Casting && media is null) throw new InvalidOperationException("no media element to attach to");
+
+            var markers = CueMarkers.For(file.Track)
+                .Select(m => new { start = m.Start, end = m.End, kind = m.Kind, label = m.Label })
+                .ToArray();
+            var range = Range is null ? null : new { start = Range.Start, end = Range.End };
+
+            // Flat peaks keep the markers and click-to-seek even with no picture.
+            await module.InvokeVoidAsync("mount", container, media, peaks ?? Flat, duration, markers, range, self);
+            mounted = true;
+            if (Casting) await module.InvokeVoidAsync("setTime", Player.CurrentTime);
+        }
+        catch (Exception ex)
+        {
+            failed = true;
+            notice = "Waveform unavailable";
+            Errors.Info("Could not draw the waveform", ex.Message);
+        }
+        StateHasChanged();
+    }
+
+    static readonly double[] Flat = Enumerable.Repeat(0.0, 400).ToArray();
+
+    async Task<double[]?> PeaksAsync(FileEntry file)
+    {
+        if (Casting)
+        {
+            // "This browser never fetches the audio while casting" (adr-001), so
+            // only peaks already in the cache are used.
+            source = "cache";
+            var cached = await module!.InvokeAsync<double[]?>("cachedPeaks", file.DriveFileId);
+            if (cached is null) notice = "Markers only while casting";
+            return cached;
+        }
+
+        if (DriveAudio.IsUncompressed(file))
+        {
+            source = "range";
+            progress = 0;
+            StateHasChanged();
+            return await module!.InvokeAsync<double[]>("computePeaks", Url, file.DriveFileId, self);
+        }
+
+        if (!DriveAudio.CanDecodeInBrowser(file))
+        {
+            source = "none";
+            notice = "Too large to draw — markers only";
+            return null;
+        }
+
+        source = "decode";
+        var token = await Auth.GetTokenAsync();
+        if (string.IsNullOrEmpty(token)) throw new InvalidOperationException("no access token");
+        progress = 0;
+        StateHasChanged();
+        return await module!.InvokeAsync<double[]>("computeCompressedPeaks",
+            DriveAudio.DirectUrlFor(file.DriveFileId), token, file.DriveFileId, self);
     }
 
     [JSInvokable]
@@ -79,8 +171,13 @@
         InvokeAsync(StateHasChanged);
     }
 
+    /// <summary>A click on the waveform or a marker while casting: seek the TV.</summary>
+    [JSInvokable]
+    public Task OnSeekRequested(double seconds) => Player.SeekAsync(seconds);
+
     public async ValueTask DisposeAsync()
     {
+        Player.Changed -= OnPlayerChanged;
         if (module is not null)
         {
             try

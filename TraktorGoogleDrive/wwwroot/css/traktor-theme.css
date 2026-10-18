@@ -456,12 +456,12 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Waveform ------------------------------------------------------------- */
 
-.waveform { position: relative; height: 40px; }
+.waveform { position: relative; height: 56px; }
 
 .waveform-canvas {
     display: block;
     width: 100%;
-    height: 40px;
+    height: 56px;
     cursor: pointer;
 }
 
@@ -494,3 +494,78 @@ h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
     vertical-align: middle;
 }
+
+/* Transport, continuous play and gig preview (ADR 20261018-47) ------------ */
+
+.player-transport { flex: 0 0 auto; display: flex; align-items: center; gap: 0.35rem; }
+
+.player-step {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    font-size: 11px;
+    cursor: pointer;
+}
+.player-step:hover:not(:disabled) { border-color: #ff6600; color: #ff6600; }
+.player-step:disabled { opacity: 0.35; cursor: default; }
+
+.player-modes {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    font-size: 11px;
+    color: #8b949e;
+}
+
+.player-continuous { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; }
+.player-continuous input { accent-color: #ff6600; }
+
+.player-preview-chip {
+    margin-right: 0.5rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #ffd21f;
+    color: #1a1a1a;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+}
+
+.player-preview-range {
+    margin-left: 0.5rem;
+    color: #8b949e;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.player-preview-stop {
+    padding: 1px 8px;
+    border-radius: 3px;
+    background: transparent;
+    border: 1px solid #444c56;
+    color: #c9d1d9;
+    font-size: 11px;
+    cursor: pointer;
+}
+.player-preview-stop:hover { border-color: #ff6600; color: #ff6600; }
+
+.player-bar.previewing { border-top-color: #ffd21f; }
+
+.preview-set-button {
+    margin-left: 1rem;
+    padding: 4px 12px;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid #ffd21f;
+    color: #ffd21f;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.preview-set-button:hover { background: #ffd21f; color: #1a1a1a; }

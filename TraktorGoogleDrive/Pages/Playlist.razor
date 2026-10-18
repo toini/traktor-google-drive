@@ -23,6 +23,14 @@
     @if (files is not null)
     {
         <span class="track-count">@files.Count @(files.Count == 1 ? "track" : "tracks")</span>
+        @if (files.Count > missingCount)
+        {
+            @* Gig preview walks the table top to bottom in its current sort, each
+               track from its load cue to the end of its last loop (ADR 20261018-47). *@
+            <button class="preview-set-button" data-preview-set
+                    title="Play each track from its load cue to the end of its last loop, then the next"
+                    @onclick="StartPreview">▶ Preview set</button>
+        }
     }
 </header>
 
@@ -201,7 +209,17 @@ else
         else if (sortAscending) { sortAscending = false; }
         else { sortColumn = null; } // third click: back to Traktor's own order
 
+        PushQueue();
         await SaveSortStateAsync();
+    }
+
+    /// <summary>"Next track" is the next row on screen, so the player gets every re-sort.</summary>
+    void PushQueue() => Player.SetQueue(SortedFiles());
+
+    async Task StartPreview()
+    {
+        PushQueue();
+        await Player.StartPreviewAsync();
     }
 
     string Arrow(SortColumn column) =>
@@ -292,6 +310,7 @@ else
 
         // Switching playlists should not leave the previous track playing.
         await Player.StopAsync();
+        Player.ClearQueue();
 
         files = null;
         loadError = null;
@@ -323,6 +342,7 @@ else
             // ENTRY order under the NML PLAYLIST node.
             for (var i = 0; i < files.Count; i++) files[i].PlaylistIndex = i + 1;
             missingCount = files.Count(f => string.IsNullOrEmpty(f.DriveFileId));
+            PushQueue();
 
             Console.WriteLine($"[Playlist] {playlist.Name}: {files.Count} tracks, "
                             + $"{missingCount} unmatched, {watch.Elapsed.TotalSeconds:0.00}s");
@@ -353,6 +373,7 @@ else
     public void Dispose()
     {
         Player.Changed -= OnPlayerChanged;
+        Player.ClearQueue();
         // Fire-and-forget: Dispose cannot await, and the player owns its own
         // teardown if the circuit is already gone.
         _ = Player.StopAsync();

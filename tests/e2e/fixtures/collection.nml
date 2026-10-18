@@ -88,6 +88,50 @@
       <INFO BITRATE="1411000" PLAYTIME="90" PLAYTIME_FLOAT="90.0"></INFO>
     </ENTRY>
 
+    <!--
+      Gig preview (ADR 20261018-47). Every cue sits inside the first 2 s, because
+      the mock serves the same 2-second WAV for every file, and PLAYTIME matches
+      it. CUE_V2 START/LEN are milliseconds; HOTCUE is 0-based, -1 = none.
+    -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig One" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-one.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="4000"></INFO>
+      <TEMPO BPM="120.000000"></TEMPO>
+      <CUE_V2 NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="10.0" LEN="0.0" REPEATS="-1" HOTCUE="-1"><GRID BPM="120.0"></GRID></CUE_V2>
+      <CUE_V2 NAME="Intro" DISPL_ORDER="0" TYPE="0" START="100.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="300.0" LEN="0.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="500.0" LEN="400.0" REPEATS="-1" HOTCUE="2"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="1000.0" LEN="500.0" REPEATS="-1" HOTCUE="3"></CUE_V2>
+    </ENTRY>
+
+    <!-- No load cue: preview starts at 0. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Two" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-two.flac" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="900000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="200"></INFO>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="200.0" LEN="400.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+    </ENTRY>
+
+    <!-- Not in Drive: preview must skip it. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Local Only" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-local.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0"></INFO>
+    </ENTRY>
+
+    <!-- No loop cue: preview plays to the end. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Three" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-three.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="80"></INFO>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="400.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
+    </ENTRY>
+
+    <!-- The only loop ends before the load cue: ignored, so it plays to the end. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Four" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-four.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="80"></INFO>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="1500.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="200.0" LEN="300.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+    </ENTRY>
+
   </COLLECTION>
 
   <PLAYLISTS>
@@ -140,6 +184,16 @@
               </PLAYLIST>
             </NODE>
           </SUBNODES>
+        </NODE>
+
+        <NODE TYPE="PLAYLIST" NAME="Gig Prep">
+          <PLAYLIST ENTRIES="5" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f66">
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-one.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-two.flac"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-local.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-three.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-four.mp3"></PRIMARYKEY></ENTRY>
+          </PLAYLIST>
         </NODE>
 
         <NODE TYPE="PLAYLIST" NAME="Recorded sets">

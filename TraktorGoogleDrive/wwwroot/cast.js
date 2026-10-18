@@ -23,6 +23,9 @@ function snapshot() {
         fileId: currentId,
         currentTime: player?.currentTime ?? 0,
         duration: player?.duration ?? 0,
+        // IDLE means both "nothing loaded yet" and "finished"; only the media
+        // session can tell them apart, and auto-advance needs to.
+        idleReason: session?.getMediaSession?.()?.idleReason ?? null,
     };
 }
 
@@ -30,7 +33,7 @@ function snapshot() {
 // change so a 500-row playlist is not re-rendered on every frame.
 function push() {
     const s = snapshot();
-    const key = [s.available, s.connected, s.deviceName, s.state, s.fileId,
+    const key = [s.available, s.connected, s.deviceName, s.state, s.idleReason, s.fileId,
                  Math.floor(s.currentTime), Math.floor(s.duration)].join('|');
     if (key === lastKey) return;
     lastKey = key;

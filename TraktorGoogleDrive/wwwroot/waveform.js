@@ -1,10 +1,17 @@
-// Waveform peaks for very large uncompressed audio, without downloading it.
+// Waveform peaks for every format, without ever downloading audio through the
+// proxy twice. See docs/decisions/20261018-47-waveform-cue-markers-gig-preview.md.
 //
-// A 1-2 GB WAV cannot be decoded in the browser: decodeAudioData expands PCM to
-// Float32, so a 1.4 GB file needs ~2.8 GB of RAM and kills the tab. But WAV is
-// uncompressed, so the amplitude at any point is readable straight from the
-// bytes at that offset — a few hundred small range reads (~1 MB total) give a
-// pixel-accurate picture. Peaks are then cached so it only ever happens once.
+// Uncompressed (WAV/AIFF): a 1-2 GB WAV cannot be decoded in the browser, since
+// decodeAudioData expands PCM to Float32 and a 1.4 GB file needs ~2.8 GB of RAM.
+// But the amplitude at any point is readable straight from the bytes at that
+// offset, so a few hundred small range reads (~1 MB total) give the picture.
+//
+// Compressed (MP3/FLAC/AAC): has to be decoded, so it is fetched once straight
+// from Drive (not the Cloud Run proxy, which bills egress per GiB) and decoded at
+// 8 kHz, which keeps a 7-minute track at ~27 MB of samples. The caller caps the
+// file size, so a 2-hour MP3 set never gets here.
+//
+// Either way the peaks are cached in IndexedDB, so this happens once per file.
 
 const DB_NAME = 'traktor-waveforms';
 const STORE = 'peaks';
@@ -12,6 +19,7 @@ const VERSION = 1;
 const BUCKETS = 400;      // horizontal resolution
 const WINDOW_BYTES = 2048; // bytes sampled per bucket
 const CONCURRENCY = 12;
+const DECODE_RATE = 8000; // Hz; plenty for a 400-bucket envelope
 
 /* ---------- IndexedDB cache ---------- */
 
@@ -50,6 +58,12 @@ async function cachePut(key, value) {
             tx.onabort = () => reject(tx.error);
         });
     } catch { /* private mode or quota — recompute next time */ }
+}
+
+/** Peaks already computed for this file, or null. Never fetches anything. */
+export async function cachedPeaks(fileId) {
+    const cached = await cacheGet(fileId);
+    return cached?.version === VERSION ? cached.peaks : null;
 }
 
 /* ---------- WAV parsing ---------- */
@@ -124,11 +138,11 @@ async function mapLimit(items, limit, fn) {
     return out;
 }
 
-/* ---------- public API ---------- */
+/* ---------- public API: peaks ---------- */
 
 export async function computePeaks(url, fileId, dotNetRef) {
-    const cached = await cacheGet(fileId);
-    if (cached?.version === VERSION) return cached.peaks;
+    const cached = await cachedPeaks(fileId);
+    if (cached) return cached;
 
     const header = parseHeader(await readRange(url, 0, 4095));
     if (header.format !== 1 && header.format !== 3) throw new Error(`unsupported WAV format ${header.format}`);
@@ -158,24 +172,163 @@ export async function computePeaks(url, fileId, dotNetRef) {
     return peaks;
 }
 
+/** Reads a response body while reporting progress against its length. */
+async function readWithProgress(res, onProgress) {
+    const total = Number(res.headers.get('content-length')) || 0;
+    if (!res.body || !total) return await res.arrayBuffer();
+
+    const reader = res.body.getReader();
+    const out = new Uint8Array(total);
+    let received = 0;
+    let lastReport = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // A server that under-reports its length must not overflow the buffer.
+        if (received + value.length > out.length) return await concatRest(out, received, value, reader);
+        out.set(value, received);
+        received += value.length;
+        if (received - lastReport > total / 20) { lastReport = received; onProgress(received / total); }
+    }
+    return out.buffer.slice(0, received);
+}
+
+async function concatRest(head, used, value, reader) {
+    const chunks = [head.subarray(0, used), value];
+    while (true) {
+        const { done, value: v } = await reader.read();
+        if (done) break;
+        chunks.push(v);
+    }
+    return await new Blob(chunks).arrayBuffer();
+}
+
+/**
+ * Peaks for a compressed file: one direct download from Drive, decoded at a low
+ * sample rate. `directUrl` is the googleapis.com media URL, which takes the
+ * token as a header — unlike the proxy it costs no Cloud Run egress.
+ */
+export async function computeCompressedPeaks(directUrl, token, fileId, dotNetRef) {
+    const cached = await cachedPeaks(fileId);
+    if (cached) return cached;
+
+    const res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`download for waveform: HTTP ${res.status}`);
+
+    // Download is the slow half; report it as the first 90%.
+    const bytes = await readWithProgress(res,
+        (f) => dotNetRef?.invokeMethodAsync('OnPeakProgress', f * 0.9));
+
+    // OfflineAudioContext resamples to its own rate while decoding, which is
+    // what keeps memory bounded: 8 kHz is ~1/5 of the samples at 44.1 kHz.
+    const ctx = new OfflineAudioContext(1, 1, DECODE_RATE);
+    const audio = await ctx.decodeAudioData(bytes);
+
+    const channels = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c));
+    const length = audio.length;
+    const buckets = Math.max(1, Math.min(BUCKETS, length));
+    const peaks = new Array(buckets).fill(0);
+    for (let b = 0; b < buckets; b++) {
+        const from = Math.floor((length * b) / buckets);
+        const to = Math.floor((length * (b + 1)) / buckets);
+        let peak = 0;
+        for (const data of channels) {
+            for (let i = from; i < to; i++) {
+                const a = data[i] < 0 ? -data[i] : data[i];
+                if (a > peak) peak = a;
+            }
+        }
+        peaks[b] = Math.min(peak, 1);
+    }
+
+    await cachePut(fileId, { version: VERSION, peaks });
+    return peaks;
+}
+
 /* ---------- rendering ---------- */
 
 // WaveSurfer does the drawing, cursor and click-to-seek. Given `media` plus
-// `peaks` and `duration` it renders from the data we sampled and never fetches
+// `peaks` and `duration` it renders from the data we computed and never fetches
 // or decodes the file itself, which is the only reason it can be used on a
-// 1-2 GB set at all.
-let ws = null;
+// 1-2 GB set at all. Without `media` (casting) it is a picture whose cursor is
+// moved by setTime, and clicks are handed back to .NET to seek the TV.
 
-export async function mount(container, mediaElement, peaks, duration) {
-    const { default: WaveSurfer } = await import('./lib/wavesurfer/wavesurfer.esm.js');
+// Traktor's own palette, near enough: blue cues, orange fades, yellow load,
+// green loops.
+const COLORS = {
+    cue: '#3d8bfd',
+    fade: '#ff8c1a',
+    load: '#ffd21f',
+    loop: 'rgba(63, 191, 90, 0.28)',
+    loopLabel: '#3fbf5a',
+    outside: 'rgba(10, 12, 15, 0.62)',
+};
+
+let ws = null;
+let regions = null;
+
+function labelElement(marker, index) {
+    const el = document.createElement('span');
+    el.textContent = marker.label ?? '';
+    el.dataset.kind = marker.kind;
+    el.dataset.cueIndex = String(index);
+    if (marker.label) el.dataset.label = marker.label;
+    const color = marker.kind === 'loop' ? COLORS.loopLabel : COLORS[marker.kind];
+    el.style.cssText =
+        `display:inline-block;padding:0 3px;font:600 9px/12px system-ui,sans-serif;`
+        + `color:#111;background:${color};border-radius:2px;white-space:nowrap;`
+        + (marker.label ? '' : 'min-width:4px;min-height:4px;padding:0;');
+    return el;
+}
+
+function addMarkers(markers, range, duration) {
+    if (!regions) return;
+    regions.clearRegions();
+
+    // Dim what gig preview will skip, so the range is visible on the waveform.
+    if (range) {
+        if (range.start > 0) {
+            regions.addRegion({ id: 'preview-before', start: 0, end: range.start, color: COLORS.outside, drag: false, resize: false });
+        }
+        if (range.end != null && range.end < duration) {
+            regions.addRegion({ id: 'preview-after', start: range.end, end: duration, color: COLORS.outside, drag: false, resize: false });
+        }
+    }
+
+    (markers ?? []).forEach((m, i) => {
+        // Clamped, not dropped: a cue past Traktor's PLAYTIME is still a cue.
+        const start = Math.max(0, Math.min(m.start, duration));
+        const params = {
+            id: `cue-${m.kind}-${i}`,
+            start,
+            drag: false,
+            resize: false,
+            content: labelElement(m, i),
+        };
+        if (m.kind === 'loop' && m.end != null) {
+            params.end = Math.max(start, Math.min(m.end, duration));
+            params.color = COLORS.loop;
+        } else {
+            params.color = COLORS[m.kind] ?? COLORS.cue;
+        }
+        regions.addRegion(params);
+    });
+}
+
+export async function mount(container, mediaElement, peaks, duration, markers, range, dotNetRef) {
+    const [{ default: WaveSurfer }, { default: RegionsPlugin }] = await Promise.all([
+        import('./lib/wavesurfer/wavesurfer.esm.js'),
+        import('./lib/wavesurfer/plugins/regions.esm.js'),
+    ]);
 
     destroy();
-    ws = WaveSurfer.create({
+    regions = RegionsPlugin.create();
+
+    const options = {
         container,
-        media: mediaElement,
         peaks: [peaks],
         duration,
-        height: 40,
+        height: 56,
         waveColor: '#4a5058',
         progressColor: '#ff6600',
         cursorColor: '#ffaa44',
@@ -183,13 +336,44 @@ export async function mount(container, mediaElement, peaks, duration) {
         barWidth: 2,
         barGap: 1,
         barRadius: 1,
-        normalize: true,
+        // All-zero peaks (markers only) would divide by zero.
+        normalize: peaks.some((p) => p > 0),
+        plugins: [regions],
+    };
+    if (mediaElement) options.media = mediaElement;
+
+    ws = WaveSurfer.create(options);
+
+    regions.on('region-clicked', (region, e) => {
+        // A marker is a place to jump to; without this the click would also
+        // fall through to the waveform and seek to the pixel instead.
+        e.stopPropagation();
+        if (mediaElement) ws.setTime(region.start);
+        else dotNetRef?.invokeMethodAsync('OnSeekRequested', region.start);
     });
+
+    if (!mediaElement) {
+        ws.on('interaction', (t) => dotNetRef?.invokeMethodAsync('OnSeekRequested', t));
+    }
+
+    // Regions need the renderer's width, which exists once WaveSurfer is ready.
+    const draw = () => addMarkers(markers, range, duration);
+    if (ws.getDuration() > 0) draw();
+    ws.once('ready', draw);
+    ws.once('redraw', draw);
+    container.dataset.markers = String((markers ?? []).length);
     return true;
+}
+
+/** Moves the cursor without a media element, for a track playing on the TV. */
+export function setTime(seconds) {
+    if (!ws || !isFinite(seconds)) return;
+    try { ws.setTime(seconds); } catch { /* not ready yet */ }
 }
 
 export function destroy() {
     if (!ws) return;
     try { ws.destroy(); } catch { /* already torn down with its container */ }
     ws = null;
+    regions = null;
 }
