@@ -41,7 +41,12 @@ const titleColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell
 const artistColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell-artist').allTextContents();
 const labelColumn = (page: Page) => page.locator('#playlist-table tbody tr .cell-label').allTextContents();
 
+const indexColumn = (page: Page) => page.locator('#playlist-table tbody tr td.col-index').allTextContents();
+const comment2Column = (page: Page) => page.locator('#playlist-table tbody tr .cell-comment2').allTextContents();
+
 const header = (page: Page, name: string) => page.getByRole('columnheader', { name, exact: false });
+// "#" plus the sort arrow; a role-name match on "#" alone is too loose.
+const indexHeader = (page: Page) => page.locator('#playlist-table th.col-index');
 
 test.describe('playlist column sorting', () => {
   test.beforeEach(async ({ page }) => {
@@ -49,10 +54,70 @@ test.describe('playlist column sorting', () => {
     await seedToken(page);
   });
 
-  test('defaults to ascending by Title', async ({ page }) => {
+  test('defaults to ascending by Traktor playlist index', async ({ page }) => {
     await page.goto(`/playlist/${PSYTECH_UUID}`);
     await expect(page.getByRole('row')).toHaveCount(5);
 
+    await expect(indexHeader(page)).toHaveAttribute('aria-sort', 'ascending');
+    await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'none');
+    // ENTRY order under the PLAYLIST node, not alphabetical: the Archive Cut is
+    // the fourth entry even though it sorts second by title.
+    await expect(indexColumn(page)).resolves.toEqual(['1', '2', '3', '4']);
+    await expect(titleColumn(page)).resolves.toEqual([
+      'Alpha Drift',
+      'Beta Pulse',
+      'Gamma Echo',
+      'Alpha Drift (Archive Cut)',
+    ]);
+  });
+
+  test('sorts by index descending and keeps each track\'s number', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5);
+
+    await indexHeader(page).click();
+    await expect(indexHeader(page)).toHaveAttribute('aria-sort', 'descending');
+    await expect(indexColumn(page)).resolves.toEqual(['4', '3', '2', '1']);
+
+    // Sorting another column moves the rows, not the numbers.
+    await header(page, 'Title').click();
+    await expect(titleColumn(page)).resolves.toEqual([
+      'Alpha Drift',
+      'Alpha Drift (Archive Cut)',
+      'Beta Pulse',
+      'Gamma Echo',
+    ]);
+    await expect(indexColumn(page)).resolves.toEqual(['1', '4', '2', '3']);
+  });
+
+  test('a saved sort still wins over the index default', async ({ page }) => {
+    await page.addInitScript((uuid) => localStorage.setItem(`playlist-sort:${uuid}`, 'Title:asc'), PSYTECH_UUID);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5);
+
+    await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'ascending');
+    await expect(indexHeader(page)).toHaveAttribute('aria-sort', 'none');
+  });
+
+  test('sorts Comment 2 (INFO RATING) as text, blanks last', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5);
+
+    const comment2 = header(page, 'Comment 2');
+    await comment2.click();
+    await expect(comment2).toHaveAttribute('aria-sort', 'ascending');
+    await expect(comment2Column(page)).resolves.toEqual(['build 4:17', 'peak 2:10', '', '']);
+
+    await comment2.click();
+    await expect(comment2).toHaveAttribute('aria-sort', 'descending');
+    await expect(comment2Column(page)).resolves.toEqual(['peak 2:10', 'build 4:17', '', '']);
+  });
+
+  test('cycles ascending -> descending -> Traktor\'s original order -> ascending', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.getByRole('row')).toHaveCount(5);
+
+    await header(page, 'Title').click();
     await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'ascending');
     await expect(titleColumn(page)).resolves.toEqual([
       'Alpha Drift',
@@ -60,13 +125,7 @@ test.describe('playlist column sorting', () => {
       'Beta Pulse',
       'Gamma Echo',
     ]);
-  });
 
-  test('cycles ascending -> descending -> Traktor\'s original order -> ascending', async ({ page }) => {
-    await page.goto(`/playlist/${PSYTECH_UUID}`);
-    await expect(page.getByRole('row')).toHaveCount(5);
-
-    // Already ascending on load; first click flips to descending.
     await header(page, 'Title').click();
     await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'descending');
     await expect(titleColumn(page)).resolves.toEqual([
@@ -180,13 +239,14 @@ test.describe('playlist column sorting', () => {
   test('remembers a different sort per playlist', async ({ page }) => {
     await page.goto(`/playlist/${PSYTECH_UUID}`);
     await expect(page.getByRole('row')).toHaveCount(5);
+    await header(page, 'Title').click();
     await header(page, 'Title').click(); // ascending -> descending
     await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'descending');
 
     await page.goto(`/playlist/${OLD_SETS_UUID}`);
     await expect(page.getByRole('row')).toHaveCount(2);
     // A playlist visited for the first time still gets the plain default.
-    await expect(header(page, 'Title')).toHaveAttribute('aria-sort', 'ascending');
+    await expect(indexHeader(page)).toHaveAttribute('aria-sort', 'ascending');
     await header(page, 'Artist').click();
     await expect(header(page, 'Artist')).toHaveAttribute('aria-sort', 'ascending');
 

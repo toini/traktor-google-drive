@@ -10,7 +10,7 @@ test('dragging the column resizer does not trigger a sort', async ({ page }) => 
   await expect(page.getByRole('row')).toHaveCount(5);
 
   const titleHeader = page.getByRole('columnheader', { name: 'Title' });
-  await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
   await expect(page.locator('#playlist-table th .column-resizer').first()).toBeAttached();
 
   const widthBefore = await titleHeader.evaluate((el) => (el as HTMLElement).offsetWidth);
@@ -32,8 +32,8 @@ test('dragging the column resizer does not trigger a sort', async ({ page }) => 
     resizer.dispatchEvent(new MouseEvent('click', { ...opts, clientX: rect.x + 80 }));
   });
 
-  // Still ascending — the drag+click sequence must not have been read as a sort click.
-  await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
+  // Still unsorted — the drag+click sequence must not have been read as a sort click.
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'none');
 
   const widthAfter = await titleHeader.evaluate((el) => (el as HTMLElement).offsetWidth);
   // Relative, not absolute: the starting width depends on how many
@@ -49,5 +49,5 @@ test('a real header click (no resizer involved) still sorts', async ({ page }) =
 
   const titleHeader = page.getByRole('columnheader', { name: 'Title' });
   await titleHeader.click({ position: { x: 20, y: 8 } }); // away from the resizer edge
-  await expect(titleHeader).toHaveAttribute('aria-sort', 'descending');
+  await expect(titleHeader).toHaveAttribute('aria-sort', 'ascending');
 });

@@ -44,7 +44,7 @@
 #playlist-table {
     table-layout: fixed;
     width: 100%;
-    min-width: 990px;
+    min-width: 1100px;
     background-color: #1a1a1a;
     color: #e6e6e6;
     margin-bottom: 0;
@@ -134,6 +134,27 @@
     width: 84px;
     text-align: right;
     font-variant-numeric: tabular-nums;
+    color: #8b949e;
+}
+
+.col-index {
+    width: 52px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #8b949e;
+}
+
+/* Traktor's track color (INFO COLOR 1-7), drawn as a bar down the left of
+   the index cell. An inset shadow, so the zebra/hover backgrounds still apply. */
+#playlist-table td.track-color-1 { box-shadow: inset 5px 0 0 #e8382f; }
+#playlist-table td.track-color-2 { box-shadow: inset 5px 0 0 #f28c28; }
+#playlist-table td.track-color-3 { box-shadow: inset 5px 0 0 #f2d22e; }
+#playlist-table td.track-color-4 { box-shadow: inset 5px 0 0 #4cc94c; }
+#playlist-table td.track-color-5 { box-shadow: inset 5px 0 0 #3d7cf2; }
+#playlist-table td.track-color-6 { box-shadow: inset 5px 0 0 #9b5cf2; }
+#playlist-table td.track-color-7 { box-shadow: inset 5px 0 0 #e84cc9; }
+
+.cell-comment2 {
     color: #8b949e;
 }
 
