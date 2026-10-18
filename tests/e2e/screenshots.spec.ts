@@ -95,3 +95,13 @@ test('capture the player bar with a waveform', async ({ page }) => {
   await page.locator('.waveform-status').waitFor({ state: 'detached', timeout: 60000 });
   await page.screenshot({ path: `${OUT}/08-player-waveform.png`, fullPage: true });
 });
+
+test('capture the column picker open', async ({ page }) => {
+  await mockDrive(page);
+  await seedToken(page);
+  await page.goto(`/playlist/${PSYTECH_UUID}`);
+  await page.getByText('Beta Pulse').waitFor();
+  await page.getByRole('button', { name: 'Columns' }).click();
+  await page.getByRole('group', { name: 'Visible columns' }).waitFor();
+  await page.screenshot({ path: `${OUT}/10-column-picker.png`, fullPage: true });
+});

@@ -1,0 +1,82 @@
+@* "Columns" button with a checkbox list of the table's columns. Stateless:
+   the page owns which columns are visible and where that is remembered. *@
+
+<div class="column-picker" @onkeydown="OnKeyDown">
+    <button type="button"
+            class="column-picker-toggle"
+            aria-haspopup="true"
+            aria-expanded="@(open ? "true" : "false")"
+            aria-controls="column-picker-menu"
+            @ref="toggleButton"
+            @onclick="ToggleOpen">
+        Columns <span aria-hidden="true">▾</span>
+    </button>
+
+    @if (open)
+    {
+        @* Click anywhere outside the menu closes it. *@
+        <div class="column-picker-backdrop" @onclick="CloseAsync"></div>
+        <div id="column-picker-menu"
+             class="column-picker-menu"
+             role="group"
+             aria-label="Visible columns"
+             tabindex="-1"
+             @ref="menu">
+            @foreach (var column in Columns)
+            {
+                <label class="column-picker-option @(column.Locked ? "locked" : "")"
+                       title="@(column.Locked ? "Always shown" : null)">
+                    <input type="checkbox"
+                           data-col="@column.Id"
+                           checked="@column.Visible"
+                           disabled="@column.Locked"
+                           @onchange="() => OnToggle.InvokeAsync(column.Id)" />
+                    <span>@column.Label</span>
+                </label>
+            }
+            <button type="button" class="column-picker-reset" @onclick="OnReset">
+                Reset to default
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    public sealed record Choice(string Id, string Label, bool Visible, bool Locked);
+
+    [Parameter, EditorRequired] public IReadOnlyList<Choice> Columns { get; set; } = [];
+    [Parameter] public EventCallback<string> OnToggle { get; set; }
+    [Parameter] public EventCallback OnReset { get; set; }
+
+    bool open;
+    bool focusMenu;
+    ElementReference toggleButton;
+    ElementReference menu;
+
+    void ToggleOpen()
+    {
+        open = !open;
+        focusMenu = open;
+    }
+
+    async Task CloseAsync()
+    {
+        open = false;
+        await toggleButton.FocusAsync();
+    }
+
+    async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (open && e.Key == "Escape") await CloseAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Move focus into the menu so Tab walks the checkboxes next.
+        if (focusMenu)
+        {
+            focusMenu = false;
+            await menu.FocusAsync();
+        }
+    }
+}
