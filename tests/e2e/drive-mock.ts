@@ -56,6 +56,11 @@ export const DRIVE_FILES = [
   { id: 'drive-gig-two', name: 'gig-two.flac', mimeType: 'audio/flac', parents: ['folder-gig'] },
   { id: 'drive-gig-three', name: 'gig-three.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
   { id: 'drive-gig-four', name: 'gig-four.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
+  // Gig Night. The separator's silent file is in Drive and must still never
+  // be requested; Cafe Noir is stored NFC while the collection has it NFD.
+  { id: 'drive-silent', name: 'silent.wav', mimeType: 'audio/wav', parents: ['folder-gig'] },
+  { id: 'drive-cafe', name: 'Caf\u00e9 Noir.wav', mimeType: 'audio/wav', parents: ['folder-gig'] },
+  { id: 'drive-usb', name: 'usb-anthem.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
 ];
 
 /**

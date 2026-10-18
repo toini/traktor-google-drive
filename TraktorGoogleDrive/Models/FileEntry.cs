@@ -13,6 +13,14 @@ namespace TraktorGoogleDrive.Models
         public int? Ranking { get; set; }
         /// <summary>The release (album) title, ALBUM TITLE; null when absent. Set by the playlist page.</summary>
         public string? Release { get; set; }
+        /// <summary>What the playlist ENTRY is; anything but Track never gets a Drive file.</summary>
+        public EntryKind Kind { get; set; } = EntryKind.Track;
+        /// <summary>Row title when the track has none: the key's file name, or the stream's address.</summary>
+        public string EntryTitle { get; set; } = string.Empty;
+        /// <summary>The playlist ENTRY's PRIMARYKEY KEY, as Traktor wrote it.</summary>
+        public string EntryKey { get; set; } = string.Empty;
+        /// <summary>Has a Drive file, so it gets a play button and a place in the queue.</summary>
+        public bool IsPlayable => Kind == EntryKind.Track && !string.IsNullOrEmpty(DriveFileId);
         public string? Title => Track?.Title;
         public double? PlaytimeFloat => Track?.PlaytimeFloat;
     }

@@ -251,12 +251,16 @@ public class DriveService
     /// </summary>
     public async Task<List<FileEntry>> ResolveTracksAsync(IReadOnlyList<Track> tracks, string token)
     {
+        // Drive's name = '...' is an exact match, and a file synced from macOS
+        // can be stored NFD while Traktor wrote the name NFC (or the other way
+        // round), so ask for both spellings and compare them as one.
         var names = tracks
             .Select(t => Path.GetFileName(t.Path))
-            .Where(n => !string.IsNullOrEmpty(n));
+            .Where(n => !string.IsNullOrEmpty(n))
+            .SelectMany(n => new[] { n, Normalized(n, System.Text.NormalizationForm.FormC), Normalized(n, System.Text.NormalizationForm.FormD) });
 
         var driveFiles = await FindByNamesAsync(names, token);
-        var byName = driveFiles.GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+        var byName = driveFiles.GroupBy(f => Nfc(f.Name), StringComparer.OrdinalIgnoreCase)
                                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
 
         var result = new List<FileEntry>(tracks.Count);
@@ -266,7 +270,7 @@ public class DriveService
             var entry = new FileEntry { Track = track };
             var fileName = Path.GetFileName(track.Path);
 
-            if (!string.IsNullOrEmpty(fileName) && byName.TryGetValue(fileName, out var candidates))
+            if (!string.IsNullOrEmpty(fileName) && byName.TryGetValue(Nfc(fileName), out var candidates))
             {
                 var match = candidates.Count == 1
                     ? candidates[0]
@@ -284,6 +288,14 @@ public class DriveService
         }
 
         return result;
+    }
+
+    private static string Nfc(string s) => Normalized(s, System.Text.NormalizationForm.FormC);
+
+    private static string Normalized(string s, System.Text.NormalizationForm form)
+    {
+        try { return s.Normalize(form); }
+        catch (ArgumentException) { return s; } // invalid UTF-16: use it as is
     }
 
     /// <summary>

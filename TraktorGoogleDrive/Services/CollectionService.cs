@@ -40,6 +40,7 @@ public class CollectionService
     private Collection? _collection;
     private Task<Collection>? _inFlight;
     private Dictionary<string, TrackExtras> _extrasByPath = [];
+    private Dictionary<string, List<Models.PlaylistEntry>> _entriesByUuid = [];
 
     public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js)
     {
@@ -94,6 +95,7 @@ public class CollectionService
             var doc = XDocument.Parse(content, LoadOptions.None);
             _collection = Collection.FromXml(doc);
             _extrasByPath = ReadTrackExtras(doc);
+            _entriesByUuid = Models.PlaylistEntries.Read(doc, _collection.Tracks);
 
             LastAdded = _collection.Tracks
                 .Where(t => Models.TrackDate.Parse(t.ImportDate) is not null)
@@ -310,10 +312,22 @@ public class CollectionService
             .FirstOrDefault(p => p.Uuid == uuid);
     }
 
+    /// <summary>
+    /// Every ENTRY of the playlist, in Traktor's order, including the ones
+    /// Playlist.Tracks leaves out (separators, streaming tracks, keys with no
+    /// collection entry). Null when there is no such playlist.
+    /// </summary>
+    public async Task<IReadOnlyList<Models.PlaylistEntry>?> GetPlaylistEntriesAsync(string uuid)
+    {
+        await GetCollectionAsync();
+        return _entriesByUuid.TryGetValue(uuid, out var entries) ? entries : null;
+    }
+
     public void Invalidate()
     {
         _collection = null;
         _inFlight = null;
         _extrasByPath = [];
+        _entriesByUuid = [];
     }
 }

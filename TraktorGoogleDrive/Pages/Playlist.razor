@@ -22,8 +22,18 @@
     </h1>
     @if (files is not null)
     {
-        <span class="track-count">@files.Count @(files.Count == 1 ? "track" : "tracks")</span>
-        @if (files.Count > missingCount)
+        @* Every ENTRY counts, separators and unplayable ones too, so this is
+           the number Traktor shows for the playlist. *@
+        <span class="track-count" data-track-count="@files.Count">
+            @files.Count @(files.Count == 1 ? "track" : "tracks")@if (separatorCount > 0)
+            {
+                <span data-separator-count="@separatorCount"> · @separatorCount @(separatorCount == 1 ? "separator" : "separators")</span>
+            }@if (NotPlayableCount > 0)
+            {
+                <span class="not-playable-count" data-not-playable="@NotPlayableCount" title="@NotPlayableBreakdown"> · @NotPlayableCount not playable</span>
+            }
+        </span>
+        @if (files.Any(f => f.IsPlayable))
         {
             @* Gig preview walks the table top to bottom in its current sort, each
                track from its load cue to the end of its last loop (ADR 20261018-47). *@
@@ -73,11 +83,28 @@ else
             <tbody>
                 @foreach (var file in SortedFiles())
                 {
-                    var missing = string.IsNullOrEmpty(file.DriveFileId);
+                    @if (file.Kind == EntryKind.Separator)
+                    {
+                        @* Keeps its place and its # but is never played: no play
+                           button, and PlayerService.SetQueue drops it (no Drive id). *@
+                        <tr class="separator-row" data-entry-kind="separator" title="@file.EntryKey">
+                            <td class="col-expand"></td>
+                            <td class="col-play"></td>
+                            <td class="col-index">@file.PlaylistIndex</td>
+                            <td colspan="@VisibleColumns.Count" class="separator-cell">
+                                <span class="separator-rule" aria-hidden="true"></span>
+                                <span class="separator-label">@PlaylistEntries.SeparatorLabel(file.EntryTitle)</span>
+                                <span class="separator-rule" aria-hidden="true"></span>
+                            </td>
+                        </tr>
+                        continue;
+                    }
+                    var missing = !file.IsPlayable;
                     var recording = IsRecording(file);
                     var open = expanded.Contains(file.DriveFileId);
                     var color = CollectionService.ColorOf(file.Track);
-                    <tr class="@RowClass(file)" title="@file.Track?.Path">
+                    <tr class="@RowClass(file)" title="@(file.Track?.Path is { Length: > 0 } path ? path : file.EntryKey)"
+                        data-entry-kind="@KindAttribute(file)">
                         <td class="col-expand">
                             @if (recording)
                             {
@@ -90,7 +117,7 @@ else
                         <td class="col-play">
                             @if (missing)
                             {
-                                <span class="missing-marker" title="No matching file in Drive">—</span>
+                                <span class="missing-marker" title="@NotPlayableReason(file)">—</span>
                             }
                             else
                             {
@@ -139,7 +166,7 @@ else
             @if (showMissing)
             {
                 <ul>
-                    @foreach (var file in files.Where(f => string.IsNullOrEmpty(f.DriveFileId)))
+                    @foreach (var file in files.Where(f => f.Kind == EntryKind.Track && !f.IsPlayable))
                     {
                         <li>
                             <span class="missing-name">@(file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""))</span>
@@ -165,8 +192,62 @@ else
     List<FileEntry>? files;
     string? token;
     string? loadError;
+    // Collection tracks with no Drive file; the existing "missing" list.
     int missingCount;
+    int separatorCount;
+    int streamingCount;
+    int notInCollectionCount;
     bool showMissing;
+
+    int NotPlayableCount => missingCount + streamingCount + notInCollectionCount;
+
+    string NotPlayableBreakdown => string.Join("\n", new[]
+    {
+        (missingCount, "no matching file in Drive"),
+        (streamingCount, "streaming (Beatport/Beatsource), no file to play"),
+        (notInCollectionCount, "not in the collection.nml in Drive"),
+    }.Where(r => r.Item1 > 0).Select(r => $"{r.Item1} {r.Item2}"));
+
+    static string KindAttribute(FileEntry file) => file.Kind switch
+    {
+        EntryKind.Streaming => "streaming",
+        EntryKind.NotInCollection => "not-in-collection",
+        EntryKind.Separator => "separator",
+        _ => file.IsPlayable ? "track" : "no-drive-file",
+    };
+
+    static string NotPlayableReason(FileEntry file) => file.Kind switch
+    {
+        EntryKind.Streaming => "Streaming track: there is no file to play",
+        EntryKind.NotInCollection => "Not in the collection.nml in Drive",
+        _ => "No matching file in Drive",
+    };
+
+    // The words on the row's marker; null for an ordinary track.
+    static string? MarkerText(FileEntry file) => file.Kind switch
+    {
+        EntryKind.Streaming => "streaming",
+        EntryKind.NotInCollection => "not in collection",
+        _ => null,
+    };
+
+    static string TitleOf(FileEntry f) =>
+        f.Track?.Title is { Length: > 0 } title ? title
+        : f.EntryTitle is { Length: > 0 } entry ? entry
+        : Path.GetFileName(f.Track?.Path ?? "");
+
+    static RenderFragment TitleCell(FileEntry f)
+    {
+        var marker = MarkerText(f);
+        var kind = KindAttribute(f);
+        var reason = NotPlayableReason(f);
+        // Marker first: the title cell truncates with an ellipsis, and the
+        // marker is the part that must stay visible.
+        return @<span>@if (marker is not null)
+        {
+            <span class="entry-marker" data-entry-marker="@kind" title="@reason">@marker</span>
+        }@TitleOf(f)</span>;
+    }
 
     // Comment2 is Traktor's "Comment 2", which the NML stores as INFO RATING
     // (the star rating is RANKING), hence Track.Rating below.
@@ -292,7 +373,7 @@ else
 
     static string? TextKey(FileEntry file, SortColumn column) => column switch
     {
-        SortColumn.Title => file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""),
+        SortColumn.Title => TitleOf(file),
         SortColumn.Artist => file.Track?.Artist,
         SortColumn.Release => file.Release,
         SortColumn.Folder => FolderOf(file.Track?.Path),
@@ -348,7 +429,7 @@ else
     static readonly DataColumn[] DataColumns =
     [
         new("title", "Title", SortColumn.Title, "sortable", "cell-title", Locked: true, DefaultVisible: true,
-            f => f.Track?.Title ?? Path.GetFileName(f.Track?.Path ?? "")),
+            TitleOf) { Render = TitleCell },
         new("artist", "Artist", SortColumn.Artist, "sortable", "cell-artist", false, true, f => f.Track?.Artist ?? ""),
         // Off by default: the release (ALBUM TITLE) is something to look up,
         // not something to read down a playlist.
@@ -496,7 +577,7 @@ else
 
         files = null;
         loadError = null;
-        missingCount = 0;
+        missingCount = separatorCount = streamingCount = notInCollectionCount = 0;
         await LoadSortStateAsync();
         await LoadColumnStateAsync();
         await FallBackFromHiddenSortAsync();
@@ -521,21 +602,17 @@ else
                 return;
             }
 
-            files = await Drive.ResolveTracksAsync(playlist.Tracks, token);
-            // ResolveTracksAsync keeps playlist.Tracks' order, which is the
-            // ENTRY order under the NML PLAYLIST node.
-            for (var i = 0; i < files.Count; i++)
-            {
-                files[i].PlaylistIndex = i + 1;
-                // What the parser package does not read, from the same NML.
-                files[i].Ranking = CollectionService.RankingOf(files[i].Track);
-                files[i].Release = CollectionService.AlbumOf(files[i].Track);
-            }
-            missingCount = files.Count(f => string.IsNullOrEmpty(f.DriveFileId));
+            files = await BuildRowsAsync(playlist, token);
+            missingCount = files.Count(f => f.Kind == EntryKind.Track && !f.IsPlayable);
+            separatorCount = files.Count(f => f.Kind == EntryKind.Separator);
+            streamingCount = files.Count(f => f.Kind == EntryKind.Streaming);
+            notInCollectionCount = files.Count(f => f.Kind == EntryKind.NotInCollection);
             PushQueue();
 
-            Console.WriteLine($"[Playlist] {playlist.Name}: {files.Count} tracks, "
-                            + $"{missingCount} unmatched, {watch.Elapsed.TotalSeconds:0.00}s");
+            Console.WriteLine($"[Playlist] {playlist.Name}: {files.Count} entries, "
+                            + $"{separatorCount} separators, {missingCount} not in Drive, "
+                            + $"{streamingCount} streaming, {notInCollectionCount} not in collection, "
+                            + $"{watch.Elapsed.TotalSeconds:0.00}s");
         }
         catch (DriveAuthException ex)
         {
@@ -547,6 +624,36 @@ else
             loadError = ex.Message;
             Errors.Report("Could not load this playlist", ex);
         }
+    }
+
+    /// <summary>
+    /// One row per playlist ENTRY, numbered as Traktor numbers them. Only
+    /// collection tracks are looked up in Drive: a separator is never played
+    /// even if its silent file is there, and the rest have no file to find.
+    /// </summary>
+    async Task<List<FileEntry>> BuildRowsAsync(TraktorNmlParser.Models.Playlist playlist, string token)
+    {
+        var entries = await CollectionService.GetPlaylistEntriesAsync(playlist.Uuid)
+            ?? playlist.Tracks.Select((t, i) => new PlaylistEntry(i + 1, "", EntryKind.Track, t, t.Title ?? "")).ToList();
+
+        var toResolve = entries.Where(e => e.Kind == EntryKind.Track).Select(e => e.Track!).ToList();
+        // ResolveTracksAsync returns one FileEntry per track, in the order given.
+        var resolved = new Queue<FileEntry>(await Drive.ResolveTracksAsync(toResolve, token));
+
+        var rows = new List<FileEntry>(entries.Count);
+        foreach (var entry in entries)
+        {
+            var row = entry.Kind == EntryKind.Track ? resolved.Dequeue() : new FileEntry { Track = entry.Track };
+            row.Kind = entry.Kind;
+            row.EntryKey = entry.Key;
+            row.EntryTitle = entry.Title;
+            row.PlaylistIndex = entry.Position;
+            // What the parser package does not read, from the same NML.
+            row.Ranking = CollectionService.RankingOf(row.Track);
+            row.Release = CollectionService.AlbumOf(row.Track);
+            rows.Add(row);
+        }
+        return rows;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
