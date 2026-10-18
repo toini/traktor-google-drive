@@ -32,6 +32,10 @@
                     @onclick="StartPreview">▶ Preview set</button>
         }
     }
+    @if (files is { Count: > 0 })
+    {
+        <ColumnPicker Columns="@ColumnChoices" OnToggle="ToggleColumnAsync" OnReset="ResetColumnsAsync" />
+    }
 </header>
 
 @if (loadError is not null)
@@ -49,20 +53,21 @@ else if (files.Count == 0)
 else
 {
     <div class="table-responsive">
-        <table id="playlist-table" class="table table-hover playlist-table">
+        @* data-legacy-cols: the column order of the old position-keyed widths,
+           so table-resize.js can carry them over to id keys once. *@
+        <table id="playlist-table" class="table table-hover playlist-table"
+               data-legacy-cols="expand,play,index,title,artist,folder,label,comment2,comment,length,added">
             <thead>
                 <tr>
-                    <th scope="col" class="col-expand"><span class="visually-hidden">Set</span></th>
-                    <th scope="col" class="col-play"><span class="visually-hidden">Play</span></th>
-                    <th scope="col" class="col-index sortable" aria-sort="@AriaSort(SortColumn.Index)" @onclick="() => SortBy(SortColumn.Index)">#<span class="sort-indicator">@Arrow(SortColumn.Index)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Title)" @onclick="() => SortBy(SortColumn.Title)">Title<span class="sort-indicator">@Arrow(SortColumn.Title)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Artist)" @onclick="() => SortBy(SortColumn.Artist)">Artist<span class="sort-indicator">@Arrow(SortColumn.Artist)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Folder)" @onclick="() => SortBy(SortColumn.Folder)">Folder<span class="sort-indicator">@Arrow(SortColumn.Folder)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Label)" @onclick="() => SortBy(SortColumn.Label)">Label<span class="sort-indicator">@Arrow(SortColumn.Label)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment2)" @onclick="() => SortBy(SortColumn.Comment2)">Comment 2<span class="sort-indicator">@Arrow(SortColumn.Comment2)</span></th>
-                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment)" @onclick="() => SortBy(SortColumn.Comment)">Comment<span class="sort-indicator">@Arrow(SortColumn.Comment)</span></th>
-                    <th scope="col" class="col-time sortable" aria-sort="@AriaSort(SortColumn.Length)" @onclick="() => SortBy(SortColumn.Length)">Length<span class="sort-indicator">@Arrow(SortColumn.Length)</span></th>
-                    <th scope="col" class="col-added sortable" aria-sort="@AriaSort(SortColumn.Added)" @onclick="() => SortBy(SortColumn.Added)">Added<span class="sort-indicator">@Arrow(SortColumn.Added)</span></th>
+                    <th scope="col" class="col-expand" data-col="expand"><span class="visually-hidden">Set</span></th>
+                    <th scope="col" class="col-play" data-col="play"><span class="visually-hidden">Play</span></th>
+                    <th scope="col" class="col-index sortable" data-col="index" aria-sort="@AriaSort(SortColumn.Index)" @onclick="() => SortBy(SortColumn.Index)">#<span class="sort-indicator">@Arrow(SortColumn.Index)</span></th>
+                    @* Keyed, so a <th> keeps its identity (and its resized width)
+                       when a column before it is hidden. *@
+                    @foreach (var column in VisibleColumns)
+                    {
+                        <th @key="column.Id" scope="col" class="@column.HeaderClass" data-col="@column.Id" aria-sort="@AriaSort(column.Sort)" @onclick="() => SortBy(column.Sort)">@column.Label<span class="sort-indicator">@Arrow(column.Sort)</span></th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -97,20 +102,16 @@ else
                         <td class="col-index @(color is null ? "" : $"track-color-{color}")"
                             data-track-color="@color"
                             title="@(color is null ? null : $"Color: {ColorNames[color.Value]}")">@file.PlaylistIndex</td>
-                        <td class="cell-title">@(file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""))</td>
-                        <td class="cell-artist">@(file.Track?.Artist ?? "")</td>
-                        <td class="cell-folder">@FolderOf(file.Track?.Path)</td>
-                        <td class="cell-label">@(file.Track?.Label ?? "")</td>
-                        <td class="cell-comment2">@(file.Track?.Rating ?? "")</td>
-                        <td class="cell-comment">@(file.Track?.Comment ?? "")</td>
-                        <td class="col-time">@TrackTime.Format(file.Track?.PlaytimeFloat)</td>
-                        <td class="col-added">@TrackDate.Format(file.Track?.ImportDate)</td>
+                        @foreach (var column in VisibleColumns)
+                        {
+                            <td @key="column.Id" class="@column.CellClass">@column.Value(file)</td>
+                        }
                     </tr>
 
                     @if (recording && open)
                     {
                         <tr class="set-detail-row">
-                            <td colspan="11">
+                            <td colspan="@(FixedColumnCount + VisibleColumns.Count)">
                                 <SetDetail Recording="@file" Token="@token" />
                             </td>
                         </tr>
@@ -304,6 +305,119 @@ else
         catch { /* storage unavailable — not worth failing the sort over */ }
     }
 
+    // Columns ---------------------------------------------------------------
+    // Expand, play and # are always shown and are not in this list. Title is
+    // Locked: a table of tracks with no names is not worth offering.
+
+    sealed record DataColumn(
+        string Id, string Label, SortColumn Sort, string HeaderClass, string CellClass,
+        bool Locked, bool DefaultVisible, Func<FileEntry, string> Value);
+
+    const int FixedColumnCount = 3; // expand, play, #
+
+    static readonly DataColumn[] DataColumns =
+    [
+        new("title", "Title", SortColumn.Title, "sortable", "cell-title", Locked: true, DefaultVisible: true,
+            f => f.Track?.Title ?? Path.GetFileName(f.Track?.Path ?? "")),
+        new("artist", "Artist", SortColumn.Artist, "sortable", "cell-artist", false, true, f => f.Track?.Artist ?? ""),
+        // Off by default: the playlist already says where its tracks belong,
+        // and the Drive folder name rarely adds anything to that.
+        new("folder", "Folder", SortColumn.Folder, "sortable", "cell-folder", false, false, f => FolderOf(f.Track?.Path)),
+        new("label", "Label", SortColumn.Label, "sortable", "cell-label", false, true, f => f.Track?.Label ?? ""),
+        new("comment2", "Comment 2", SortColumn.Comment2, "sortable", "cell-comment2", false, true, f => f.Track?.Rating ?? ""),
+        new("comment", "Comment", SortColumn.Comment, "sortable", "cell-comment", false, true, f => f.Track?.Comment ?? ""),
+        new("length", "Length", SortColumn.Length, "col-time sortable", "col-time", false, true,
+            f => TrackTime.Format(f.Track?.PlaytimeFloat)),
+        new("added", "Added", SortColumn.Added, "col-added sortable", "col-added", false, true,
+            f => TrackDate.Format(f.Track?.ImportDate)),
+    ];
+
+    HashSet<string> visibleColumnIds = DefaultVisibleColumnIds();
+
+    static HashSet<string> DefaultVisibleColumnIds() =>
+        DataColumns.Where(c => c.Locked || c.DefaultVisible).Select(c => c.Id).ToHashSet();
+
+    bool IsVisible(DataColumn column) => column.Locked || visibleColumnIds.Contains(column.Id);
+
+    List<DataColumn> VisibleColumns => DataColumns.Where(IsVisible).ToList();
+
+    IReadOnlyList<ColumnPicker.Choice> ColumnChoices =>
+        DataColumns.Select(c => new ColumnPicker.Choice(c.Id, c.Label, IsVisible(c), c.Locked)).ToList();
+
+    // { "folder": false, "label": true, ... } for every toggleable column.
+    // An explicit map rather than a list of visible ids, so a column added
+    // later is simply absent and gets its own default.
+    string ColumnsStorageKey => $"playlist-columns:v1:{Uuid}";
+
+    async Task LoadColumnStateAsync()
+    {
+        visibleColumnIds = DefaultVisibleColumnIds();
+
+        string? raw;
+        try { raw = await JS.InvokeAsync<string?>("localStorage.getItem", ColumnsStorageKey); }
+        catch { return; }
+        if (string.IsNullOrEmpty(raw)) return;
+
+        Dictionary<string, bool>? stored;
+        try { stored = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, bool>>(raw); }
+        catch (System.Text.Json.JsonException) { return; } // corrupt: defaults
+        if (stored is null) return;
+
+        // Unknown ids (a column since removed) are ignored by construction.
+        foreach (var column in DataColumns.Where(c => !c.Locked))
+        {
+            if (!stored.TryGetValue(column.Id, out var visible)) continue;
+            if (visible) visibleColumnIds.Add(column.Id);
+            else visibleColumnIds.Remove(column.Id);
+        }
+    }
+
+    async Task SaveColumnStateAsync()
+    {
+        var map = DataColumns.Where(c => !c.Locked).ToDictionary(c => c.Id, c => visibleColumnIds.Contains(c.Id));
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", ColumnsStorageKey,
+                System.Text.Json.JsonSerializer.Serialize(map));
+        }
+        catch { /* storage unavailable — the choice still applies for this visit */ }
+    }
+
+    async Task ToggleColumnAsync(string id)
+    {
+        var column = DataColumns.FirstOrDefault(c => c.Id == id);
+        if (column is null || column.Locked) return;
+
+        if (!visibleColumnIds.Remove(id)) visibleColumnIds.Add(id);
+        await SaveColumnStateAsync();
+        await FallBackFromHiddenSortAsync();
+    }
+
+    async Task ResetColumnsAsync()
+    {
+        visibleColumnIds = DefaultVisibleColumnIds();
+        try { await JS.InvokeVoidAsync("localStorage.removeItem", ColumnsStorageKey); }
+        catch { /* storage unavailable */ }
+        await FallBackFromHiddenSortAsync();
+    }
+
+    // Sorting by a column you cannot see gives an order with no visible
+    // reason, so hiding the sorted column falls back to # (Traktor's order),
+    // and that is saved as the sort. A stored sort on a column that is hidden
+    // when the page loads is treated the same way.
+    async Task FallBackFromHiddenSortAsync()
+    {
+        var sorted = DataColumns.FirstOrDefault(c => c.Sort == sortColumn);
+        if (sorted is null || IsVisible(sorted)) return;
+
+        sortColumn = SortColumn.Index;
+        sortAscending = true;
+        // Playback follows the table order, so it follows this change too.
+        // (On load files is still null; the load pushes the queue itself.)
+        if (files is not null) PushQueue();
+        await SaveSortStateAsync();
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (string.IsNullOrEmpty(Uuid)) return;
@@ -316,6 +430,8 @@ else
         loadError = null;
         missingCount = 0;
         await LoadSortStateAsync();
+        await LoadColumnStateAsync();
+        await FallBackFromHiddenSortAsync();
 
         var watch = Stopwatch.StartNew();
 

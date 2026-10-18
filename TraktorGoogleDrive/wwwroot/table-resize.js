@@ -1,32 +1,80 @@
 // Drag-to-resize playlist columns, persisted per table in localStorage.
 // (Was previously bundled into wavesurfer-blazor.js alongside a waveform player
 // that rendered hardcoded dummy peaks; only this survived.)
+//
+// Widths are keyed by each header's data-col id, not by position: columns can
+// be hidden and shown per playlist, and a positional key would move every
+// saved width onto whichever column slid into that slot.
+//
+//   table-widths:v2:<tableId>  ->  {"title": 260, "label": 140, ...}
+//
+// Only the column the user actually dragged is stored. The others stay auto,
+// so with table-layout: fixed they absorb the slack when a column is hidden
+// instead of every remembered width being stretched.
 
-window.initResizableTable = function (tableId) {
-    const table = document.getElementById(tableId);
-    if (!table || table.dataset.resizableInit === '1') return;
-    table.dataset.resizableInit = '1';
+(function () {
+    const storageKey = (tableId) => `table-widths:v2:${tableId}`;
+    // The v1 format: an array of widths by header position.
+    const legacyKey = (tableId) => `table-widths-${tableId}`;
 
-    const headers = [...table.querySelectorAll('th')];
-    const storageKey = `table-widths-${tableId}`;
-
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
+    function readWidths(tableId) {
         try {
-            const widths = JSON.parse(saved);
-            // Widths are stored by position: once columns are added or removed
-            // they would land on the wrong headers, so start over instead.
-            if (!Array.isArray(widths) || widths.length !== headers.length) throw new Error('stale widths');
-            headers.forEach((h, i) => {
-                if (widths[i]) h.style.width = `${widths[i]}px`;
-            });
+            const parsed = JSON.parse(localStorage.getItem(storageKey(tableId)) || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
         } catch {
-            localStorage.removeItem(storageKey);
+            return {};
         }
     }
 
-    headers.forEach((header, index) => {
-        if (index === headers.length - 1) return; // last column has nothing to its right
+    function writeWidths(tableId, widths) {
+        try {
+            localStorage.setItem(storageKey(tableId), JSON.stringify(widths));
+        } catch {
+            /* storage unavailable or full: resizing still works for this visit */
+        }
+    }
+
+    // A v1 array is only meaningful against the column order it was saved
+    // with, which the table declares in data-legacy-cols. Map it onto ids
+    // when the length matches that order exactly; otherwise it was saved by
+    // an even older column set and cannot be placed, so drop it.
+    function migrateLegacy(table, tableId) {
+        let raw;
+        try {
+            raw = localStorage.getItem(legacyKey(tableId));
+        } catch {
+            return;
+        }
+        if (raw === null) return;
+
+        try {
+            const legacyCols = (table.dataset.legacyCols || '').split(',').filter(Boolean);
+            const widths = JSON.parse(raw);
+            if (Array.isArray(widths) && legacyCols.length > 0 && widths.length === legacyCols.length
+                && localStorage.getItem(storageKey(tableId)) === null) {
+                const migrated = {};
+                legacyCols.forEach((id, i) => {
+                    const w = parseInt(widths[i], 10);
+                    if (w > 0) migrated[id] = w;
+                });
+                writeWidths(tableId, migrated);
+            }
+        } catch {
+            /* unparseable: nothing to carry over */
+        }
+
+        try {
+            localStorage.removeItem(legacyKey(tableId));
+        } catch {
+            /* ignore */
+        }
+    }
+
+    function wireHeader(table, tableId, header) {
+        header.dataset.resizable = '1';
+
+        const saved = readWidths(tableId)[header.dataset.col];
+        if (saved > 0) header.style.width = `${saved}px`;
 
         const resizer = document.createElement('div');
         resizer.className = 'column-resizer';
@@ -44,10 +92,9 @@ window.initResizableTable = function (tableId) {
         const stopDrag = () => {
             document.removeEventListener('mousemove', doDrag);
             document.removeEventListener('mouseup', stopDrag);
-            localStorage.setItem(
-                storageKey,
-                JSON.stringify(headers.map((h) => parseInt(h.style.width || h.offsetWidth, 10))),
-            );
+            const widths = readWidths(tableId);
+            widths[header.dataset.col] = parseInt(header.style.width || header.offsetWidth, 10);
+            writeWidths(tableId, widths);
         };
 
         resizer.addEventListener('mousedown', (e) => {
@@ -67,5 +114,22 @@ window.initResizableTable = function (tableId) {
             e.preventDefault();
             e.stopPropagation();
         });
-    });
-};
+    }
+
+    // Idempotent, and cheap enough to call after every render: it only wires
+    // headers it has not seen. A column shown again is a new <th> element, so
+    // it gets its resizer and its remembered width here.
+    window.initResizableTable = function (tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+
+        if (table.dataset.resizableInit !== '1') {
+            table.dataset.resizableInit = '1';
+            migrateLegacy(table, tableId);
+        }
+
+        table.querySelectorAll('thead th[data-col]').forEach((header) => {
+            if (header.dataset.resizable !== '1') wireHeader(table, tableId, header);
+        });
+    };
+})();
