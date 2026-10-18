@@ -170,7 +170,7 @@ else
 
     // Comment2 is Traktor's "Comment 2", which the NML stores as INFO RATING
     // (the star rating is RANKING), hence Track.Rating below.
-    enum SortColumn { Index, Title, Artist, Release, Folder, Label, Comment2, Comment, Rating, Length, Added }
+    enum SortColumn { Index, Title, Artist, Release, Folder, Label, Comment2, Comment, Rating, Bpm, Length, Added }
 
     static readonly Dictionary<int, string> ColorNames = new()
     {
@@ -266,6 +266,14 @@ else
                 : byRated.ThenByDescending(f => StarsOf(f.Ranking));
         }
 
+        if (sortColumn == SortColumn.Bpm)
+        {
+            var byHasBpm = files.OrderBy(f => BpmOf(f) is null);
+            return sortAscending
+                ? byHasBpm.ThenBy(f => BpmOf(f) ?? 0)
+                : byHasBpm.ThenByDescending(f => BpmOf(f) ?? 0);
+        }
+
         if (sortColumn == SortColumn.Added)
         {
             // Parsed, never lexical: "2023/10/10" sorts before "2023/3/12" as text.
@@ -353,11 +361,24 @@ else
         new("comment", "Comment", SortColumn.Comment, "sortable", "cell-comment", false, true, f => f.Track?.Comment ?? ""),
         new("rating", "Rating", SortColumn.Rating, "col-rating sortable", "col-rating", false, true,
             f => StarsOf(f.Ranking) is var n and > 0 ? $"{n} of 5" : "") { Render = f => RatingStars(f.Ranking) },
+        // TEMPO BPM, which TraktorNmlParser reads as Track.Bpm.
+        new("bpm", "BPM", SortColumn.Bpm, "col-bpm sortable", "col-bpm", false, true, f => FormatBpm(BpmOf(f))),
         new("length", "Length", SortColumn.Length, "col-time sortable", "col-time", false, true,
             f => TrackTime.Format(f.Track?.PlaytimeFloat)),
         new("added", "Added", SortColumn.Added, "col-added sortable", "col-added", false, true,
             f => TrackDate.Format(f.Track?.ImportDate)),
     ];
+
+    /// <summary>The track's BPM; null when Traktor has none (no TEMPO, or 0).</summary>
+    static float? BpmOf(FileEntry file) => file.Track?.Bpm is float bpm && bpm > 0 ? bpm : null;
+
+    /// <summary>
+    /// One decimal place, without a trailing ".0": 128.000061 is "128" and
+    /// 127.53 is "127.5". Blank when there is no BPM.
+    /// </summary>
+    static string FormatBpm(float? bpm) =>
+        bpm is null ? "" : Math.Round((double)bpm.Value, 1, MidpointRounding.AwayFromZero)
+            .ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// RANKING to whole stars. Traktor writes multiples of 51; anything else

@@ -55,7 +55,7 @@ test.describe('Rating and Release columns', () => {
     await openPsytech(page);
 
     await expect(headerIds(page)).resolves.toEqual([
-      'expand', 'play', 'index', 'title', 'artist', 'folder', 'label', 'comment2', 'rating', 'length', 'added',
+      'expand', 'play', 'index', 'title', 'artist', 'folder', 'label', 'comment2', 'rating', 'bpm', 'length', 'added',
     ]);
   });
 

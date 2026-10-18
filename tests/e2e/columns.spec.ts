@@ -35,7 +35,7 @@ test.describe('playlist column picker', () => {
     await openPlaylist(page, PSYTECH_UUID, 4);
 
     await expect(headerIds(page)).resolves.toEqual([
-      'expand', 'play', 'index', 'title', 'artist', 'label', 'comment2', 'comment', 'rating', 'length', 'added',
+      'expand', 'play', 'index', 'title', 'artist', 'label', 'comment2', 'comment', 'rating', 'bpm', 'length', 'added',
     ]);
     await expect(page.locator('#playlist-table .cell-folder')).toHaveCount(0);
 
@@ -122,15 +122,15 @@ test.describe('playlist column picker', () => {
   });
 
   test('ignores unknown ids and defaults columns missing from stored data', async ({ page }) => {
-    // Written by a future (or past) version: "bpm" is not a column here, and
+    // Written by a future (or past) version: "key" is not a column here, and
     // "comment2" is absent, as a column added after the save would be.
     await page.addInitScript((uuid) => {
-      localStorage.setItem(`playlist-columns:v1:${uuid}`, JSON.stringify({ bpm: true, folder: true, label: false }));
+      localStorage.setItem(`playlist-columns:v1:${uuid}`, JSON.stringify({ key: true, folder: true, label: false }));
     }, PSYTECH_UUID);
     await openPlaylist(page, PSYTECH_UUID, 4);
 
     await expect(headerIds(page)).resolves.toEqual([
-      'expand', 'play', 'index', 'title', 'artist', 'folder', 'comment2', 'comment', 'rating', 'length', 'added',
+      'expand', 'play', 'index', 'title', 'artist', 'folder', 'comment2', 'comment', 'rating', 'bpm', 'length', 'added',
     ]);
   });
 
