@@ -6,6 +6,11 @@ let audio = null;
 let dotnet = null;
 let currentId = null;
 
+// Gig preview (ADR 20261018-47 §4). Checked here on every timeupdate (~4 Hz)
+// rather than in .NET, whose progress callback is throttled to whole seconds.
+let endAt = null;      // seconds; null = play to the natural end
+let pendingStart = null; // seek once metadata is known
+
 const report = (state) => dotnet?.invokeMethodAsync('OnPlaybackStateChanged', state, currentId);
 
 // timeupdate fires ~4x/second; that is already a lot of interop, so only push
@@ -26,7 +31,24 @@ export function init(dotNetRef) {
 
     audio.addEventListener('loadstart', () => report('loading'));
     audio.addEventListener('canplay', () => { report('ready'); reportProgress(true); });
-    audio.addEventListener('timeupdate', () => reportProgress(false));
+    audio.addEventListener('timeupdate', () => {
+        if (endAt != null && audio.currentTime >= endAt) {
+            endAt = null; // once per track
+            report('previewEnd');
+        }
+        reportProgress(false);
+    });
+    // Seeking past the end is a deliberate "let me hear this bit": the seek wins
+    // and the track plays on, rather than jumping straight to the next one.
+    audio.addEventListener('seeking', () => {
+        if (endAt != null && audio.currentTime > endAt) endAt = null;
+    });
+    audio.addEventListener('loadedmetadata', () => {
+        if (pendingStart != null) {
+            audio.currentTime = pendingStart;
+            pendingStart = null;
+        }
+    });
     audio.addEventListener('durationchange', () => reportProgress(true));
     audio.addEventListener('seeked', () => reportProgress(true));
     audio.addEventListener('playing', () => report('playing'));
@@ -38,9 +60,15 @@ export function init(dotNetRef) {
     });
 }
 
-export async function play(fileId, url) {
+/**
+ * Plays `fileId`. `startAt`/`stopAt` apply only when this loads a new file: a
+ * resume of the same file keeps its position and its preview bound.
+ */
+export async function play(fileId, url, startAt, stopAt) {
     if (!audio) return;
     if (currentId !== fileId) {
+        pendingStart = startAt > 0 ? startAt : null;
+        endAt = stopAt ?? null;
         audio.src = url;
         currentId = fileId;
     }
@@ -63,7 +91,14 @@ export function stop() {
     audio.removeAttribute('src');
     audio.load();
     currentId = null;
+    endAt = null;
+    pendingStart = null;
     report('idle');
+}
+
+/** Arms or clears the preview end for the loaded file. */
+export function setBounds(stopAt) {
+    endAt = stopAt ?? null;
 }
 
 export function seek(seconds) {

@@ -68,15 +68,19 @@ test.describe('waveform', () => {
     await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
   });
 
-  test('falls back to a plain seek bar for a compressed recording', async ({ page }) => {
-    await mockDrive(page);
+  test('draws markers only for a compressed recording too large to decode', async ({ page }) => {
+    const calls = await mockDrive(page);
     await seedToken(page);
     await page.goto(`/playlist/${RECORDED}`);
 
-    // Z11-3 is an .mp3, which would have to be fully decoded to get peaks.
+    // Z11-3 is a 2-hour .mp3 (~300 MB by bitrate x length), over the 150 MB cap.
     await page.locator('#playlist-table tbody tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.play-button').click();
-    await expect(page.locator('.player-seek')).toBeVisible();
-    await expect(page.locator('.waveform-canvas')).toHaveCount(0);
+    await expect(page.locator('.waveform')).toHaveAttribute('data-waveform-source', 'none');
+    await expect(page.locator('.waveform-status')).toContainText('markers only');
+    await expect.poll(() => waveformMounted(page), { timeout: 30_000 }).toBe(true);
+
+    // Never downloaded for a picture: only playback reaches Drive, via the proxy.
+    expect(calls.filter((c) => c.url.startsWith('https://www.googleapis.com/drive/v3/files/drive-z11-3'))).toHaveLength(0);
   });
 
   test('reuses cached peaks instead of re-sampling', async ({ page }) => {

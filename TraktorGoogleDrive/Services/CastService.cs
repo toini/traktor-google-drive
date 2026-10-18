@@ -13,7 +13,8 @@ public record CastSnapshot(
     string? State,
     string? FileId,
     double CurrentTime,
-    double Duration);
+    double Duration,
+    string? IdleReason = null);
 
 /// <summary>
 /// Playback on a Cast device. Deliberately shaped like <see cref="PlayerService"/>
@@ -61,6 +62,9 @@ public class CastService : IAsyncDisposable
     /// <summary>Position ticks, roughly once a second. Separate from
     /// <see cref="Changed"/> so a long playlist is not re-rendered every second.</summary>
     public event Action? Progress;
+
+    /// <summary>The device played a track to its end (not stopped, not failed).</summary>
+    public event Action? Finished;
 
     public bool IsPlaying(string fileId) => CurrentFileId == fileId && State == PlaybackState.Playing;
     public bool IsLoading(string fileId) => CurrentFileId == fileId && State == PlaybackState.Loading;
@@ -116,6 +120,24 @@ public class CastService : IAsyncDisposable
         _current = (file.DriveFileId, ContentTypeOf(file),
                     file.Track?.Title ?? file.DriveFileName, file.Track?.Artist ?? "");
         await SendLoadAsync(token, 0);
+    }
+
+    /// <summary>
+    /// Always loads, even the file already on the device, starting at
+    /// <paramref name="startTime"/>: gig preview and auto-advance both need a
+    /// fresh LOAD, never the toggle <see cref="ToggleAsync"/> would do.
+    /// </summary>
+    public async Task LoadAsync(FileEntry file, string token, double startTime)
+    {
+        await ModuleAsync();
+        CurrentFileId = file.DriveFileId;
+        State = PlaybackState.Loading;
+        _refreshDeclined = false;
+        Changed?.Invoke();
+
+        _current = (file.DriveFileId, ContentTypeOf(file),
+                    file.Track?.Title ?? file.DriveFileName, file.Track?.Artist ?? "");
+        await SendLoadAsync(token, startTime);
     }
 
     public async Task PlayOrPauseAsync()
@@ -181,6 +203,13 @@ public class CastService : IAsyncDisposable
 
         CurrentFileId = State == PlaybackState.Idle ? null : snapshot.FileId ?? previousFile;
 
+        // FINISHED is the receiver's own word for it. A receiver that does not
+        // report a reason still counts if it went idle at the very end.
+        var finished = previousState == PlaybackState.Playing && State == PlaybackState.Idle
+            && (snapshot.IdleReason == "FINISHED"
+                || (snapshot.IdleReason is null && snapshot.Duration > 0
+                    && snapshot.CurrentTime >= snapshot.Duration - 1.5));
+
         // Idle means nothing is on the device, so the casting bar must stop showing
         // the track that just finished.
         if (State == PlaybackState.Idle) _current = null;
@@ -194,6 +223,8 @@ public class CastService : IAsyncDisposable
             Changed?.Invoke();
         else
             Progress?.Invoke();
+
+        if (finished) Finished?.Invoke();
     }
 
     [JSInvokable]

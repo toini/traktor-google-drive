@@ -73,6 +73,16 @@ test('capture an expanded set', async ({ page }) => {
   await page.screenshot({ path: `${OUT}/07-set-expanded.png`, fullPage: true });
 });
 
+test('capture gig preview with cue markers', async ({ page }) => {
+  await mockDrive(page);
+  await seedToken(page);
+  await page.goto('/playlist/0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f66');
+  await page.locator('#playlist-table').getByText('Gig One').waitFor();
+  await page.locator('[data-preview-set]').click();
+  await page.locator('.waveform-canvas [data-kind="load"]').waitFor();
+  await page.screenshot({ path: `${OUT}/09-gig-preview.png`, fullPage: true });
+});
+
 test('capture the player bar with a waveform', async ({ page }) => {
   await mockDrive(page);
   await seedToken(page);

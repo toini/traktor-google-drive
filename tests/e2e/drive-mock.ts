@@ -14,6 +14,7 @@ export const FAKE_TOKEN = 'fixture-access-token';
 export const DRIVE_FOLDERS: Record<string, string> = {
   'folder-sets': 'Sets',
   'folder-archive': 'Archive',
+  'folder-gig': 'Gig',
   // Mirrors a real Traktor install: one collection.nml per version, plus backups.
   'folder-tk-3': 'Traktor 3.11.1',
   'folder-tk-40': 'Traktor 4.0.0',
@@ -49,6 +50,12 @@ export const DRIVE_FILES = [
   { id: 'drive-delta', name: 'delta.wav', mimeType: 'audio/wav', parents: ['folder-archive'] },
   { id: 'drive-z11-3', name: 'Z11-3 2021-09-17.mp3', mimeType: 'audio/mpeg', parents: ['folder-sets'] },
   { id: 'drive-c4-2026', name: 'C4 2026-08-16.wav', mimeType: 'audio/wav', parents: ['folder-sets'] },
+  // Gig preview. Named as compressed formats; the mock still serves its WAV,
+  // which the browser decodes just the same.
+  { id: 'drive-gig-one', name: 'gig-one.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
+  { id: 'drive-gig-two', name: 'gig-two.flac', mimeType: 'audio/flac', parents: ['folder-gig'] },
+  { id: 'drive-gig-three', name: 'gig-three.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
+  { id: 'drive-gig-four', name: 'gig-four.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
 ];
 
 /**
