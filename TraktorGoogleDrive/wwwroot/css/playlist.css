@@ -137,6 +137,14 @@
     color: #8b949e;
 }
 
+/* BPM: "127.5" at most, plus the header's sort arrow. */
+.col-bpm {
+    width: 72px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: #8b949e;
+}
+
 .col-index {
     width: 52px;
     text-align: right;

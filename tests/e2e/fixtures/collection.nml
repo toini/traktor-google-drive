@@ -17,6 +17,11 @@
     ALBUM element's TITLE. The app reads COLOR, RANKING and ALBUM itself; the
     parser does not.
 
+    TEMPO BPM is a float as Traktor writes it (128.000061, not 128); the parser
+    reads it as Track.Bpm. The Sets/ entries cover the BPM column's rounding
+    (-> 128, 127.5, 142) and the Archive/ alpha.wav has no TEMPO at all, so it
+    probes the blank cell and missing-last sort.
+
   So DIR="/:Music/:Sets/:" FILE="alpha.wav" -> "Music/Sets/alpha.wav".
 -->
 <NML VERSION="19">
@@ -29,7 +34,7 @@
       <ALBUM TITLE="Fixture Album"></ALBUM>
       <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="first track"
             PLAYTIME="245" PLAYTIME_FLOAT="245.5" RATING="peak 2:10" RANKING="255" KEY="8A" IMPORT_DATE="2023/3/12" COLOR="1"></INFO>
-      <TEMPO BPM="145.000000" BPM_QUALITY="100.000000"></TEMPO>
+      <TEMPO BPM="128.000061" BPM_QUALITY="100.000000"></TEMPO>
     </ENTRY>
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Beta Pulse" ARTIST="Test Artist Two">
@@ -37,13 +42,13 @@
       <ALBUM TRACK="2" TITLE="Another Release"></ALBUM>
       <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="second track"
             PLAYTIME="312" PLAYTIME_FLOAT="312.0" RATING="build 4:17" RANKING="204" KEY="9A" IMPORT_DATE="2023/10/10" COLOR="5"></INFO>
-      <TEMPO BPM="148.000000" BPM_QUALITY="100.000000"></TEMPO>
+      <TEMPO BPM="127.530014" BPM_QUALITY="100.000000"></TEMPO>
     </ENTRY>
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Gamma Echo" ARTIST="Test Artist Three">
       <LOCATION DIR="/:Music/:Sets/:" FILE="gamma.wav" VOLUME="Macintosh HD"></LOCATION>
       <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="180" PLAYTIME_FLOAT="180.25" RANKING="0" IMPORT_DATE="2023/11/6"></INFO>
-      <TEMPO BPM="142.000000"></TEMPO>
+      <TEMPO BPM="141.960007" BPM_QUALITY="100.000000"></TEMPO>
     </ENTRY>
 
     <!--
@@ -53,7 +58,6 @@
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift (Archive Cut)" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Archive/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
       <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="250" PLAYTIME_FLOAT="250.0" RANKING="60"></INFO>
-      <TEMPO BPM="145.000000"></TEMPO>
     </ENTRY>
 
     <!--
