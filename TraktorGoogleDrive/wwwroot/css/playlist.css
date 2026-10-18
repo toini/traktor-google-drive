@@ -170,6 +170,55 @@
     color: #6e7681;
 }
 
+/* Rows with no file to play ------------------------------------------- */
+
+.entry-marker {
+    margin-right: 8px;
+    padding: 0 6px;
+    border: 1px solid #484f58;
+    border-radius: 8px;
+    color: #8b949e;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+#playlist-table tbody tr[data-entry-kind="streaming"] td,
+#playlist-table tbody tr[data-entry-kind="not-in-collection"] td {
+    color: #8b949e;
+}
+
+/* A Traktor "==== Part 2" placeholder: a dim rule across the row. */
+#playlist-table tbody tr.separator-row td {
+    color: #6e7681;
+    background: #141414;
+}
+
+.separator-cell {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.separator-cell .separator-label {
+    padding: 0 10px;
+    white-space: nowrap;
+}
+
+.separator-cell .separator-rule {
+    display: inline-block;
+    width: 80px;
+    height: 0;
+    border-top: 1px solid #484f58;
+    vertical-align: middle;
+}
+
+.not-playable-count {
+    cursor: help;
+    text-decoration: underline dotted;
+}
+
 /* Now playing ---------------------------------------------------------- */
 
 #playlist-table tbody tr.currently-playing td {

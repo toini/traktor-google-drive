@@ -8,7 +8,11 @@
     PRIMARYKEY   = same normalization; must match Track.Path exactly or the
                    playlist entry is silently dropped.
     $ROOT        = required, and Collection.FromXml does .Single() on it.
-    Paths containing "silent" are filtered out by the parser — don't use that word.
+    Paths containing "silent" are filtered out by the parser, and so is any
+    entry without a FILE (streaming) and any key on a volume other than
+    "Macintosh HD". Playlist.Tracks silently drops all of those; the app
+    reads every ENTRY itself (Models/PlaylistEntry.cs), and the "Gig Night"
+    playlist below has one of each. Don't use "silent" elsewhere.
 
     INFO attributes as Traktor writes them: RATING is the free-text "Comment 2"
     column (NOT stars, those are RANKING 0-255), and COLOR is the track color,
@@ -27,7 +31,7 @@
 <NML VERSION="19">
   <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
   <MUSICFOLDERS></MUSICFOLDERS>
-  <COLLECTION ENTRIES="8">
+  <COLLECTION ENTRIES="17">
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
@@ -139,6 +143,39 @@
       <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="200.0" LEN="300.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
     </ENTRY>
 
+    <!--
+      Unresolved-entry probes, all in the "Gig Night" playlist.
+
+      A separator as Traktor users make one: a few seconds of silence, titled
+      and "artisted" with rule characters. Its path contains "silent", so the
+      parser drops it. It IS in Drive (see drive-mock.ts) and must still never play.
+    -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="==== Part 2" ARTIST="==============">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="silent.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411200" LABEL="====" PLAYTIME="4" PLAYTIME_FLOAT="4.0" RANKING="0" COLOR="1"></INFO>
+    </ENTRY>
+
+    <!-- A Beatport streaming track: a web address, no file. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Stream Only" ARTIST="Gig Artist">
+      <LOCATION WEBADDRESS="beatport://tracks/16477657"></LOCATION>
+      <INFO BITRATE="128000" PLAYTIME="189" PLAYTIME_FLOAT="189.0"></INFO>
+    </ENTRY>
+
+    <!--
+      FILE in NFD ("e" + U+0301 combining acute, as macOS stores it) while the
+      playlist key below spells it NFC. Drive has it NFC.
+    -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Cafe Accent" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="Cafe&#x301; Noir.wav" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="1411000" PLAYTIME="2" PLAYTIME_FLOAT="2.0"></INFO>
+    </ENTRY>
+
+    <!-- On a USB stick: the parser only strips "Macintosh HD", so its key never matched. -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="USB Anthem" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:" FILE="usb-anthem.mp3" VOLUME="TONIPIONEER"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0"></INFO>
+    </ENTRY>
+
   </COLLECTION>
 
   <PLAYLISTS>
@@ -200,6 +237,26 @@
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-local.mp3"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-three.mp3"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-four.mp3"></PRIMARYKEY></ENTRY>
+          </PLAYLIST>
+        </NODE>
+
+        <!--
+          Every kind of entry Playlist.Tracks used to drop, between playable
+          ones. Traktor numbers all ten. "vanished-dub" is in no collection
+          entry at all; Gig One appears twice, both rows kept.
+        -->
+        <NODE TYPE="PLAYLIST" NAME="Gig Night">
+          <PLAYLIST ENTRIES="10" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f67">
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-one.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:silent.wav"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-two.flac"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="STREAM" KEY="beatport://tracks/16477657"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:Caf&#xE9; Noir.wav"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gone/:vanished-dub.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="TONIPIONEER/:Music/:usb-anthem.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-local.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-one.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-three.mp3"></PRIMARYKEY></ENTRY>
           </PLAYLIST>
         </NODE>
 
