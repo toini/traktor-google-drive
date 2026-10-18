@@ -14,6 +14,9 @@ window.initResizableTable = function (tableId) {
     if (saved) {
         try {
             const widths = JSON.parse(saved);
+            // Widths are stored by position: once columns are added or removed
+            // they would land on the wrong headers, so start over instead.
+            if (!Array.isArray(widths) || widths.length !== headers.length) throw new Error('stale widths');
             headers.forEach((h, i) => {
                 if (widths[i]) h.style.width = `${widths[i]}px`;
             });

@@ -312,6 +312,52 @@ test.describe('added-at column', () => {
   });
 });
 
+test.describe('Traktor track color and Comment 2', () => {
+  test.beforeEach(async ({ page }) => {
+    await mockDrive(page);
+    await seedToken(page);
+  });
+
+  test('shows INFO COLOR as a swatch on the index cell, none when absent', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    const rows = page.locator('#playlist-table tbody tr');
+    await expect(rows).toHaveCount(4);
+
+    // Default order is the playlist order: Alpha (red), Beta (blue), Gamma and
+    // the Archive Cut (no COLOR attribute).
+    const index = (i: number) => rows.nth(i).locator('td.col-index');
+    await expect(index(0)).toHaveAttribute('data-track-color', '1');
+    await expect(index(0)).toHaveAttribute('title', 'Color: Red');
+    await expect(index(1)).toHaveAttribute('data-track-color', '5');
+    await expect(index(2)).not.toHaveAttribute('data-track-color');
+    await expect(index(3)).not.toHaveAttribute('data-track-color');
+
+    // A swatch, not text: the cell holds only the number, and the bar is drawn.
+    await expect(index(0)).toHaveText('1');
+    const shadow = (i: number) => index(i).evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(await shadow(0)).toContain('rgb(232, 56, 47)');
+    // Bootstrap's table cells carry their own 9999px inset layer; what matters
+    // is that no 5px color bar is added.
+    expect(await shadow(2)).not.toContain(' 5px 0px 0px');
+  });
+
+  test('puts Comment 2 (INFO RATING) right before Comment', async ({ page }) => {
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await expect(page.locator('#playlist-table tbody tr')).toHaveCount(4);
+
+    const headers = (await page.locator('#playlist-table thead th').allTextContents()).map((t) =>
+      t.replace(/[▲▼]/g, '').trim(),
+    );
+    const at = headers.indexOf('Comment 2');
+    expect(at).toBeGreaterThan(-1);
+    expect(headers[at + 1]).toBe('Comment');
+
+    const first = page.locator('#playlist-table tbody tr').first();
+    await expect(first.locator('.cell-comment2')).toHaveText('peak 2:10');
+    await expect(first.locator('.cell-comment')).toHaveText('first track');
+  });
+});
+
 test.describe('recording -> playlist match', () => {
   const RECORDED = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f62';
 

@@ -10,6 +10,10 @@
     $ROOT        = required, and Collection.FromXml does .Single() on it.
     Paths containing "silent" are filtered out by the parser — don't use that word.
 
+    INFO attributes as Traktor writes them: RATING is the free-text "Comment 2"
+    column (NOT stars, those are RANKING 0-255), and COLOR is the track color,
+    1 red .. 7 magenta. The app reads COLOR itself; the parser does not.
+
   So DIR="/:Music/:Sets/:" FILE="alpha.wav" -> "Music/Sets/alpha.wav".
 -->
 <NML VERSION="19">
@@ -21,7 +25,7 @@
       <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
       <ALBUM TITLE="Fixture Album"></ALBUM>
       <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="first track"
-            PLAYTIME="245" PLAYTIME_FLOAT="245.5" RATING="255" KEY="8A" IMPORT_DATE="2023/3/12"></INFO>
+            PLAYTIME="245" PLAYTIME_FLOAT="245.5" RATING="peak 2:10" RANKING="255" KEY="8A" IMPORT_DATE="2023/3/12" COLOR="1"></INFO>
       <TEMPO BPM="145.000000" BPM_QUALITY="100.000000"></TEMPO>
     </ENTRY>
 
@@ -29,7 +33,7 @@
       <LOCATION DIR="/:Music/:Sets/:" FILE="beta.wav" VOLUME="Macintosh HD"></LOCATION>
       <ALBUM TITLE="Fixture Album"></ALBUM>
       <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="second track"
-            PLAYTIME="312" PLAYTIME_FLOAT="312.0" RATING="204" KEY="9A" IMPORT_DATE="2023/10/10"></INFO>
+            PLAYTIME="312" PLAYTIME_FLOAT="312.0" RATING="build 4:17" RANKING="204" KEY="9A" IMPORT_DATE="2023/10/10" COLOR="5"></INFO>
       <TEMPO BPM="148.000000" BPM_QUALITY="100.000000"></TEMPO>
     </ENTRY>
 

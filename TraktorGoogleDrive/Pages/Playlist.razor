@@ -46,10 +46,12 @@ else
                 <tr>
                     <th scope="col" class="col-expand"><span class="visually-hidden">Set</span></th>
                     <th scope="col" class="col-play"><span class="visually-hidden">Play</span></th>
+                    <th scope="col" class="col-index sortable" aria-sort="@AriaSort(SortColumn.Index)" @onclick="() => SortBy(SortColumn.Index)">#<span class="sort-indicator">@Arrow(SortColumn.Index)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Title)" @onclick="() => SortBy(SortColumn.Title)">Title<span class="sort-indicator">@Arrow(SortColumn.Title)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Artist)" @onclick="() => SortBy(SortColumn.Artist)">Artist<span class="sort-indicator">@Arrow(SortColumn.Artist)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Folder)" @onclick="() => SortBy(SortColumn.Folder)">Folder<span class="sort-indicator">@Arrow(SortColumn.Folder)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Label)" @onclick="() => SortBy(SortColumn.Label)">Label<span class="sort-indicator">@Arrow(SortColumn.Label)</span></th>
+                    <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment2)" @onclick="() => SortBy(SortColumn.Comment2)">Comment 2<span class="sort-indicator">@Arrow(SortColumn.Comment2)</span></th>
                     <th scope="col" class="sortable" aria-sort="@AriaSort(SortColumn.Comment)" @onclick="() => SortBy(SortColumn.Comment)">Comment<span class="sort-indicator">@Arrow(SortColumn.Comment)</span></th>
                     <th scope="col" class="col-time sortable" aria-sort="@AriaSort(SortColumn.Length)" @onclick="() => SortBy(SortColumn.Length)">Length<span class="sort-indicator">@Arrow(SortColumn.Length)</span></th>
                     <th scope="col" class="col-added sortable" aria-sort="@AriaSort(SortColumn.Added)" @onclick="() => SortBy(SortColumn.Added)">Added<span class="sort-indicator">@Arrow(SortColumn.Added)</span></th>
@@ -61,6 +63,7 @@ else
                     var missing = string.IsNullOrEmpty(file.DriveFileId);
                     var recording = IsRecording(file);
                     var open = expanded.Contains(file.DriveFileId);
+                    var color = CollectionService.ColorOf(file.Track);
                     <tr class="@RowClass(file)" title="@file.Track?.Path">
                         <td class="col-expand">
                             @if (recording)
@@ -81,10 +84,16 @@ else
                                 <AudioTrack File="@file" Token="@token" />
                             }
                         </td>
+                        @* Traktor shows its track color as a swatch, not a word: here a
+                           bar down the left of the index cell. *@
+                        <td class="col-index @(color is null ? "" : $"track-color-{color}")"
+                            data-track-color="@color"
+                            title="@(color is null ? null : $"Color: {ColorNames[color.Value]}")">@file.PlaylistIndex</td>
                         <td class="cell-title">@(file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""))</td>
                         <td class="cell-artist">@(file.Track?.Artist ?? "")</td>
                         <td class="cell-folder">@FolderOf(file.Track?.Path)</td>
                         <td class="cell-label">@(file.Track?.Label ?? "")</td>
+                        <td class="cell-comment2">@(file.Track?.Rating ?? "")</td>
                         <td class="cell-comment">@(file.Track?.Comment ?? "")</td>
                         <td class="col-time">@TrackTime.Format(file.Track?.PlaytimeFloat)</td>
                         <td class="col-added">@TrackDate.Format(file.Track?.ImportDate)</td>
@@ -93,7 +102,7 @@ else
                     @if (recording && open)
                     {
                         <tr class="set-detail-row">
-                            <td colspan="9">
+                            <td colspan="11">
                                 <SetDetail Recording="@file" Token="@token" />
                             </td>
                         </tr>
@@ -142,7 +151,15 @@ else
     int missingCount;
     bool showMissing;
 
-    enum SortColumn { Title, Artist, Folder, Label, Comment, Length, Added }
+    // Comment2 is Traktor's "Comment 2", which the NML stores as INFO RATING
+    // (the star rating is RANKING), hence Track.Rating below.
+    enum SortColumn { Index, Title, Artist, Folder, Label, Comment2, Comment, Length, Added }
+
+    static readonly Dictionary<int, string> ColorNames = new()
+    {
+        [1] = "Red", [2] = "Orange", [3] = "Yellow", [4] = "Green",
+        [5] = "Blue", [6] = "Violet", [7] = "Magenta",
+    };
 
     readonly HashSet<string> expanded = [];
 
@@ -160,9 +177,10 @@ else
         if (!expanded.Remove(file.DriveFileId)) expanded.Add(file.DriveFileId);
     }
 
-    // Default: ascending by Title. Null column means Traktor's own playlist
-    // order — the mix order the user built, so it must stay reachable.
-    SortColumn? sortColumn = SortColumn.Title;
+    // Default: ascending by Index, i.e. Traktor's playlist order, so a playlist
+    // reads (and is listened through) the way it was built. Null column is the
+    // same order reached by the third click on any other header.
+    SortColumn? sortColumn = SortColumn.Index;
     bool sortAscending = true;
 
     protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
@@ -197,6 +215,13 @@ else
         if (files is null) return [];
         if (sortColumn is null) return files;
 
+        if (sortColumn == SortColumn.Index)
+        {
+            return sortAscending
+                ? files.OrderBy(f => f.PlaylistIndex)
+                : files.OrderByDescending(f => f.PlaylistIndex);
+        }
+
         if (sortColumn == SortColumn.Length)
         {
             var byHasLength = files.OrderBy(f => f.Track?.PlaytimeFloat is null);
@@ -227,6 +252,7 @@ else
         SortColumn.Artist => file.Track?.Artist,
         SortColumn.Folder => FolderOf(file.Track?.Path),
         SortColumn.Label => file.Track?.Label,
+        SortColumn.Comment2 => file.Track?.Rating,
         SortColumn.Comment => file.Track?.Comment,
         _ => null,
     };
@@ -235,7 +261,7 @@ else
 
     async Task LoadSortStateAsync()
     {
-        sortColumn = SortColumn.Title;
+        sortColumn = SortColumn.Index;
         sortAscending = true;
 
         string? raw;
@@ -293,6 +319,9 @@ else
             }
 
             files = await Drive.ResolveTracksAsync(playlist.Tracks, token);
+            // ResolveTracksAsync keeps playlist.Tracks' order, which is the
+            // ENTRY order under the NML PLAYLIST node.
+            for (var i = 0; i < files.Count; i++) files[i].PlaylistIndex = i + 1;
             missingCount = files.Count(f => string.IsNullOrEmpty(f.DriveFileId));
 
             Console.WriteLine($"[Playlist] {playlist.Name}: {files.Count} tracks, "

@@ -1,3 +1,5 @@
+using System.Xml.Linq;
+
 using Microsoft.JSInterop;
 
 using TraktorNmlParser.Models;
@@ -37,6 +39,7 @@ public class CollectionService
 
     private Collection? _collection;
     private Task<Collection>? _inFlight;
+    private Dictionary<string, int> _colorByPath = [];
 
     public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js)
     {
@@ -85,8 +88,12 @@ public class CollectionService
                     $"{CollectionFileName} (id {ResolvedFileId}) is not Traktor XML. "
                   + $"First bytes: {Truncate(content, 200)}");
 
-            var parser = new TraktorNmlParser.NmlParser();
-            _collection = parser.Load(content);
+            // The same two calls NmlParser.Load makes, done here so the document
+            // can be read again for what the package does not model, without
+            // parsing a multi-MB file twice.
+            var doc = XDocument.Parse(content, LoadOptions.None);
+            _collection = Collection.FromXml(doc);
+            _colorByPath = ReadTrackColors(doc);
 
             LastAdded = _collection.Tracks
                 .Where(t => Models.TrackDate.Parse(t.ImportDate) is not null)
@@ -169,6 +176,36 @@ public class CollectionService
         {
             return null; // 404 / gone — fall through to discovery
         }
+    }
+
+    /// <summary>
+    /// Traktor's track color, ENTRY/INFO COLOR: 1 red, 2 orange, 3 yellow,
+    /// 4 green, 5 blue, 6 violet, 7 magenta. Null when the track has none.
+    /// </summary>
+    public int? ColorOf(Track? track) =>
+        track is not null && _colorByPath.TryGetValue(track.Path, out var color) ? color : null;
+
+    // TraktorNmlParser does not read COLOR. Keyed by the path normalised exactly
+    // as Track.FromXml does it, since that is the Track.Path playlists hold.
+    private static Dictionary<string, int> ReadTrackColors(XDocument doc)
+    {
+        var colors = new Dictionary<string, int>();
+        var entries = doc.Root?.Element("COLLECTION")?.Elements("ENTRY") ?? [];
+
+        foreach (var entry in entries)
+        {
+            if (!int.TryParse((string?)entry.Element("INFO")?.Attribute("COLOR"), out var color)
+                || color is < 1 or > 7)
+                continue;
+
+            var location = entry.Element("LOCATION");
+            var path = $"{location?.Attribute("DIR")?.Value}{location?.Attribute("FILE")?.Value}"
+                .Replace("Macintosh HD/", "").Replace(":", "").TrimStart('/');
+
+            if (path.Length > 0) colors[path] = color;
+        }
+
+        return colors;
     }
 
     private static bool LooksLikeNml(string content) =>
@@ -258,5 +295,6 @@ public class CollectionService
     {
         _collection = null;
         _inFlight = null;
+        _colorByPath = [];
     }
 }
