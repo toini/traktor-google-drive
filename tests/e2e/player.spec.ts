@@ -35,9 +35,14 @@ test.describe('player bar', () => {
     await expect(page.locator('.player-bar')).toBeVisible();
 
     // Switching playlists stops playback, so the bar goes with it rather than
-    // claiming something is playing when nothing is.
-    await page.goto('/music');
+    // claiming something is playing when nothing is. In-app navigation, not
+    // page.goto: a full reload deliberately brings the last track back
+    // (remember.spec.ts).
+    await page.locator('a.traktor-logo').click();
+    await expect(page).toHaveURL(/\/music/);
     await expect(page.locator('.player-bar')).toHaveCount(0);
+    // Stopped, so there is nothing for a reload to bring back either.
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('playback:v1'))).toBeNull();
   });
 
   test('shows elapsed and total time', async ({ page }) => {

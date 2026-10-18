@@ -154,6 +154,7 @@ else
     [Parameter] public string? Uuid { get; set; }
 
     string? Name;
+    string? shownUuid;
     List<FileEntry>? files;
     string? token;
     string? loadError;
@@ -422,8 +423,11 @@ else
     {
         if (string.IsNullOrEmpty(Uuid)) return;
 
-        // Switching playlists should not leave the previous track playing.
-        await Player.StopAsync();
+        // Switching playlists should not leave the previous track playing. Only
+        // a real switch: on a fresh page the only thing loaded is the track
+        // PlaybackMemory restored after a reload, and that must survive.
+        if (shownUuid is not null && shownUuid != Uuid) await Player.StopAsync();
+        shownUuid = Uuid;
         Player.ClearQueue();
 
         files = null;

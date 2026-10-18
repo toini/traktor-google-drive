@@ -3,6 +3,7 @@
 @using TraktorGoogleDrive.Services
 @implements IDisposable
 @inject PlayerService Player
+@inject PlaybackMemory Memory
 
 @if (Player.CurrentFileId is not null || Player.PreviewActive)
 {
@@ -89,6 +90,13 @@
     protected override void OnInitialized() => Player.Changed += OnChanged;
 
     protected override Task OnInitializedAsync() => Player.LoadPreferencesAsync();
+
+    // After render, not in OnInitialized: restoring awaits Drive, and the bar
+    // should not hold up the first paint of the page for it.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Memory.RestoreAsync();
+    }
 
     void OnChanged() => InvokeAsync(StateHasChanged);
 
