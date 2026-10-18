@@ -99,7 +99,24 @@ public class PlayerService : IAsyncDisposable
     /// whether it comes out of this browser or the television.
     /// </summary>
     public string? CurrentTitle { get; private set; }
+
+    /// <summary>
+    /// The proxy URL for the loaded file. It carries no token: auth.js keeps the
+    /// current one in a cookie, so a set that outlives the ~1h token keeps working.
+    /// </summary>
     public string? CurrentUrl { get; private set; }
+
+    /// <summary>
+    /// Playback stopped because the Google token ran out and could not be renewed
+    /// without the user. The player bar offers a one-click sign-in that resumes at
+    /// the same position (or starts the track it was about to start).
+    /// </summary>
+    public bool NeedsSignIn => !_cast.IsConnected && _localState == PlaybackState.Unauthorized;
+
+    // The track an advance could not start for want of a token, so a sign-in
+    // starts it with its preview range. Null when a 401 stalled the loaded track:
+    // player.js holds that position itself.
+    private FileEntry? _startAfterSignIn;
 
     /// <summary>The playlist row that is loaded, for its cues and format.</summary>
     public FileEntry? CurrentFile { get; private set; }
@@ -250,15 +267,23 @@ public class PlayerService : IAsyncDisposable
 
     public async Task ToggleAsync(FileEntry file, string token)
     {
+        // `token` is whatever the page held when it rendered, which can be over an
+        // hour old by now; every load below reads the current one instead.
         if (CurrentFileId != file.DriveFileId)
         {
-            await PlayEntryAsync(file, token);
+            await PlayEntryAsync(file);
             return;
         }
 
         if (_cast.IsConnected)
         {
-            await _cast.ToggleAsync(file, token);
+            await _cast.ToggleAsync(file, await CurrentTokenAsync() ?? token);
+            return;
+        }
+
+        if (NeedsSignIn)
+        {
+            await SignInToContinueAsync();
             return;
         }
 
@@ -268,6 +293,7 @@ public class PlayerService : IAsyncDisposable
             await module.InvokeVoidAsync("pause");
             return;
         }
+        await SyncProxyCookieAsync();
         await module.InvokeVoidAsync("play", file.DriveFileId, CurrentUrl, null, null);
     }
 
@@ -275,10 +301,11 @@ public class PlayerService : IAsyncDisposable
     /// Loads a row and plays it. In gig preview that means from its load cue, with
     /// the end bound armed; otherwise from the top.
     /// </summary>
-    private async Task PlayEntryAsync(FileEntry file, string? token = null)
+    private async Task PlayEntryAsync(FileEntry file)
     {
-        token ??= await CurrentTokenAsync();
-        if (string.IsNullOrEmpty(token))
+        // Expired between tracks: one silent try before asking the user.
+        var token = await CurrentTokenAsync() ?? await RenewTokenAsync();
+        if (string.IsNullOrEmpty(token) && _cast.IsConnected)
         {
             _errors.Report("Cannot play the next track — the Google session expired",
                 "Sign in again and press play.");
@@ -292,7 +319,7 @@ public class PlayerService : IAsyncDisposable
 
         CurrentFile = file;
         CurrentTitle = file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? "");
-        CurrentUrl = DriveAudio.UrlFor(fileId, token);
+        CurrentUrl = DriveAudio.UrlFor(fileId);
         CurrentIsWav = DriveAudio.IsUncompressed(file);
         _localTime = 0;
         // Traktor's PLAYTIME until the player reports its own; with sliced
@@ -304,14 +331,29 @@ public class PlayerService : IAsyncDisposable
 
         if (_cast.IsConnected)
         {
-            await _cast.LoadAsync(file, token, start);
+            await _cast.LoadAsync(file, token!, start);
             return;
         }
 
         var module = await ModuleAsync();
+
+        if (string.IsNullOrEmpty(token))
+        {
+            // Nothing to fetch it with. Stop the old track, show this one, and let
+            // the sign-in prompt start it; preview mode and its range stay as they are.
+            await module.InvokeVoidAsync("stop");
+            _startAfterSignIn = file;
+            _localFileId = fileId;
+            _localState = PlaybackState.Unauthorized;
+            Changed?.Invoke();
+            return;
+        }
+
+        _startAfterSignIn = null;
         _localFileId = fileId;
         _localState = PlaybackState.Loading;
         Changed?.Invoke();
+        await SyncProxyCookieAsync();
         await module.InvokeVoidAsync("play", fileId, CurrentUrl, start > 0 ? start : null, CurrentRange?.End);
     }
 
@@ -322,11 +364,64 @@ public class PlayerService : IAsyncDisposable
     }
 
     /// <summary>
+    /// A fresh token without a consent screen, or null. Shared with the Cast
+    /// sender through auth.js, which runs one renewal at a time. Outside a click
+    /// the browser usually blocks Google's popup, so null is a normal answer.
+    /// </summary>
+    private async Task<string?> RenewTokenAsync()
+    {
+        try { return await _js.InvokeAsync<string?>("authRefreshToken"); }
+        catch (JSException) { return null; }
+    }
+
+    /// <summary>
+    /// The proxy reads the token from a cookie; make sure it holds the token
+    /// sessionStorage has now. A token stored by a sign-in or a renewal is
+    /// written there already, so this only matters for one that arrived another way.
+    /// </summary>
+    private async Task SyncProxyCookieAsync()
+    {
+        try { await _js.InvokeAsync<bool>("authSyncProxyCookie"); }
+        catch (JSException) { /* stale auth.js: the request 401s and says so */ }
+    }
+
+    /// <summary>
+    /// The player bar's "Sign in again to continue". Runs inside the click, which
+    /// is what lets Google's popup open; with consent already given it closes by
+    /// itself. Then picks up exactly where playback stopped.
+    /// </summary>
+    public async Task SignInToContinueAsync()
+    {
+        var token = await RenewTokenAsync();
+        if (string.IsNullOrEmpty(token))
+        {
+            _errors.Info("Still signed out — playback stays paused",
+                "Google sign-in was closed or blocked. Click \"Sign in again to continue\" to retry.");
+            Changed?.Invoke();
+            return;
+        }
+
+        if (_startAfterSignIn is { } next)
+        {
+            _startAfterSignIn = null;
+            await PlayEntryAsync(next);
+            return;
+        }
+
+        var module = await ModuleAsync();
+        await SyncProxyCookieAsync();
+        _localState = PlaybackState.Loading;
+        Changed?.Invoke();
+        if (!await module.InvokeAsync<bool>("resume") && _localFileId is not null && CurrentUrl is not null)
+            await module.InvokeVoidAsync("play", _localFileId, CurrentUrl, null, null);
+    }
+
+    /// <summary>
     /// Loads a track paused at <paramref name="position"/> without playing it,
     /// always on the local element: a reload brings back the last session's
     /// track, and a TV should not start up on its own. Resume plays it from there.
     /// </summary>
-    public async Task CueAsync(string fileId, string? title, bool isWav, double duration, double position, string token)
+    public async Task CueAsync(string fileId, string? title, bool isWav, double duration, double position)
     {
         if (_localFileId is not null) return;
 
@@ -336,7 +431,7 @@ public class PlayerService : IAsyncDisposable
         CurrentFile = _queue.FirstOrDefault(f => f.DriveFileId == fileId);
         if (CurrentFile is not null) _lastIndex = IndexOf(CurrentFile);
         CurrentTitle = title;
-        CurrentUrl = DriveAudio.UrlFor(fileId, token);
+        CurrentUrl = DriveAudio.UrlFor(fileId);
         CurrentIsWav = isWav;
         _localFileId = fileId;
         _localTime = position;
@@ -345,6 +440,7 @@ public class PlayerService : IAsyncDisposable
 
         var module = await ModuleAsync();
         Changed?.Invoke();
+        await SyncProxyCookieAsync();
         await module.InvokeVoidAsync("cue", fileId, CurrentUrl, position);
     }
 
@@ -362,7 +458,9 @@ public class PlayerService : IAsyncDisposable
     public async Task ResumeAsync()
     {
         if (_cast.IsConnected) { await _cast.PlayOrPauseAsync(); return; }
+        if (NeedsSignIn) { await SignInToContinueAsync(); return; }
         if (_module is null || _localFileId is null || CurrentUrl is null) return;
+        await SyncProxyCookieAsync();
         await _module.InvokeVoidAsync("play", _localFileId, CurrentUrl, null, null);
     }
 
@@ -436,9 +534,10 @@ public class PlayerService : IAsyncDisposable
         switch (state)
         {
             case "unauthorized":
-                if (PreviewActive) StopPreview(); // skipping cannot fix an expired token
-                _errors.Report("Playback failed — Drive rejected the token for this file",
-                    $"fileId {fileId}. The audio proxy returned 401/403, so the token likely expired mid-session.");
+                // player.js already tried one silent renewal and holds the position.
+                // Not an error to skip past, and not a reason to leave preview mode:
+                // the player bar's sign-in button continues from right here.
+                _startAfterSignIn = null;
                 break;
             case "error" when PreviewActive:
                 if (++_consecutiveFailures >= MaxConsecutiveFailures)

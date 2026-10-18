@@ -87,7 +87,27 @@ export function makeWav(seconds = 2, sampleRate = 8000): Buffer {
   return Buffer.concat([header, data]);
 }
 
-export type DriveCall = { kind: 'collection' | 'query' | 'media' | 'folder' | 'meta'; url: string; range?: string };
+export type DriveCall = {
+  kind: 'collection' | 'query' | 'media' | 'folder' | 'meta';
+  url: string;
+  range?: string;
+  /** Media only: the token the request carried (proxy cookie or ?token=), and the status served. */
+  token?: string | null;
+  status?: number;
+};
+
+/** The cookie auth.js keeps for the audio proxy, so media URLs carry no token. */
+export const PROXY_COOKIE = 'drive_token';
+
+/** The Drive token a proxy request carries: the cookie first, else the legacy ?token=. */
+export function proxyToken(url: string, cookieHeader: string | undefined): string | null {
+  const cookie = (cookieHeader ?? '')
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${PROXY_COOKIE}=`));
+  if (cookie) return decodeURIComponent(cookie.slice(PROXY_COOKIE.length + 1));
+  return new URL(url).searchParams.get('token');
+}
 
 /** What Drive hands back when the app searches for collection.nml by name. */
 export const DISCOVERED_COLLECTION_ID = 'drive-collection-discovered';
@@ -106,6 +126,15 @@ export type MockOptions = {
   manyCollections?: boolean;
   /** Fail every media fetch with this status (401 exercises token expiry). */
   mediaStatus?: number;
+  /**
+   * Which tokens Drive still accepts for media; anything else gets a 401. A
+   * function so a test can expire a token mid-playback. Unset = all accepted.
+   */
+  acceptToken?: (token: string | null) => boolean;
+  /** Length of the served WAV. Long enough, and the browser has to come back for more slices. */
+  wavSeconds?: number;
+  /** Cap each 206 at this many bytes, like the real proxy's 8 MiB slices. */
+  maxSliceBytes?: number;
   /** Override the NML body. */
   nml?: string;
   /** RFC3339 modifiedTime reported for the collection file. */
@@ -121,15 +150,25 @@ export type MockOptions = {
 export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<DriveCall[]> {
   const calls: DriveCall[] = [];
   const nml = opts.nml ?? readFileSync(join(here, 'fixtures', 'collection.nml'), 'utf8');
-  const wav = makeWav();
+  const wav = makeWav(opts.wavSeconds);
 
-  const serveMedia = (route: Route, url: string) => {
-    calls.push({ kind: 'media', url, range: route.request().headers()['range'] });
-    if (opts.mediaStatus) return route.fulfill({ status: opts.mediaStatus, body: '' });
+  const serveMedia = async (route: Route, url: string) => {
+    const headers = await route.request().allHeaders();
+    const call: DriveCall = { kind: 'media', url, range: headers['range'], token: proxyToken(url, headers['cookie']) };
+    calls.push(call);
+    if (opts.mediaStatus) {
+      call.status = opts.mediaStatus;
+      return route.fulfill({ status: opts.mediaStatus, body: '' });
+    }
+    if (opts.acceptToken && !opts.acceptToken(call.token ?? null)) {
+      call.status = 401;
+      return route.fulfill({ status: 401, body: '' });
+    }
 
     const range = route.request().headers()['range'];
     const m = range?.match(/bytes=(\d+)-(\d*)/);
     if (!m) {
+      call.status = 200;
       return route.fulfill({
         status: 200,
         headers: {
@@ -141,7 +180,9 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       });
     }
     const start = Number(m[1]);
-    const end = m[2] ? Number(m[2]) : wav.length - 1;
+    let end = m[2] ? Number(m[2]) : wav.length - 1;
+    if (opts.maxSliceBytes) end = Math.min(end, start + opts.maxSliceBytes - 1);
+    call.status = 206;
     const slice = wav.subarray(start, end + 1);
     return route.fulfill({
       status: 206,

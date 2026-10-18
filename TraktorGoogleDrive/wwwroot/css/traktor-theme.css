@@ -557,6 +557,28 @@ h1, h2, h3, h4, h5, h6 {
 
 .player-bar.previewing { border-top-color: #ffd21f; }
 
+/* Token ran out and could not be renewed silently: one click resumes. */
+.player-signin {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #ffd21f;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.player-signin-button {
+    padding: 3px 10px;
+    border-radius: 3px;
+    background: #ff6600;
+    border: 1px solid #ff6600;
+    color: #1a1a1a;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.player-signin-button:hover { background: #ff8533; }
+
 .preview-set-button {
     margin-left: 1rem;
     padding: 4px 12px;

@@ -12,8 +12,8 @@ namespace TraktorGoogleDrive.Services;
 /// </summary>
 /// <remarks>
 /// Stored in localStorage under <c>playback:v1</c>. The access token is never
-/// stored: the media URL embeds it, so the URL is rebuilt from a fresh token on
-/// restore rather than saved. The position is kept current by remember.js
+/// stored: the proxy reads the current one from a cookie, so the saved file id
+/// is all a restore needs. The position is kept current by remember.js
 /// (throttled to 5 s, plus pause, seek, ended and pagehide).
 /// </remarks>
 public sealed class PlaybackMemory : IAsyncDisposable
@@ -154,7 +154,7 @@ public sealed class PlaybackMemory : IAsyncDisposable
             await m.InvokeVoidAsync("rememberPlayback", JsonSerializer.Serialize(snapshot), element, true);
         });
         await _player.CueAsync(snapshot.FileId, snapshot.Title, snapshot.IsWav,
-            snapshot.Duration, snapshot.Position, token);
+            snapshot.Duration, snapshot.Position);
     }
 
     internal static Snapshot? Parse(string? raw)

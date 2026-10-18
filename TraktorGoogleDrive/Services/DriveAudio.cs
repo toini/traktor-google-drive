@@ -3,8 +3,8 @@ namespace TraktorGoogleDrive.Services;
 /// <summary>
 /// The single place that knows how an audio element reaches a Drive file.
 /// Today that is the server proxy, because &lt;audio src&gt; cannot set an
-/// Authorization header. If the app moves to a Service Worker that attaches the
-/// header itself, only this method changes.
+/// Authorization header; the proxy takes the token from a cookie instead (or,
+/// for a Cast device, from the query string).
 /// </summary>
 public static class DriveAudio
 {
@@ -54,13 +54,20 @@ public static class DriveAudio
     public static string DirectUrlFor(string fileId) =>
         $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?alt=media";
 
-    public static string UrlFor(string fileId, string token) =>
-        $"/api/proxy/drive/{Uri.EscapeDataString(fileId)}?token={Uri.EscapeDataString(token)}";
+    /// <summary>
+    /// The proxy URL for this browser's own audio element. No token in it: auth.js
+    /// keeps the current token in a cookie scoped to the proxy path, so each range
+    /// slice goes out with a fresh one and no URL — nor Cloud Run's request log —
+    /// holds a bearer token.
+    /// </summary>
+    public static string UrlFor(string fileId) =>
+        $"/api/proxy/drive/{Uri.EscapeDataString(fileId)}";
 
     /// <summary>
-    /// The same URL, absolute. A Cast device fetches the media itself, from its own
-    /// place on the network, so a relative path means nothing to it.
+    /// The URL a Cast device fetches, absolute because it fetches from its own place
+    /// on the network. The device has no cookie of ours, so the token still rides in
+    /// the query string here, and the sender re-issues the load when it renews.
     /// </summary>
     public static string AbsoluteUrlFor(string baseUri, string fileId, string token) =>
-        new Uri(new Uri(baseUri), UrlFor(fileId, token)).ToString();
+        new Uri(new Uri(baseUri), $"{UrlFor(fileId)}?token={Uri.EscapeDataString(token)}").ToString();
 }
