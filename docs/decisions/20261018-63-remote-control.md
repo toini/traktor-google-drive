@@ -4,12 +4,33 @@ Date: 2026-10-18
 
 ## Status
 
-**Proposed.** Design only; nothing is implemented. Written on
-`toni/docs/remote-control-adr`, cut from `master` at `27a96dd`. The recommendation
-is in §"Decision", and the choices that are Toni's to make are under
-§"Open questions". Nothing here should be built until those are answered,
-especially question 1 (cost of open connections) and question 3 (whether browsing
-on the laptop may stop playback).
+**Accepted 2026-10-18 by Toni**, with the choices recorded under §"Decisions Toni
+made". Written on `toni/docs/remote-control-adr`, cut from `master` at `27a96dd`.
+Increment 0 (the spike) is recorded under §"Spike findings". Increment 1, together
+with its prerequisite (§5.1: the queue moves into the player and browsing never
+stops the music), is implemented on the same branch, in the same PR as this ADR.
+
+## Decisions Toni made
+
+1. **Transport: A, a SignalR hub on the existing Cloud Run service** (§2).
+   Firebase (C) stays the documented fallback.
+2. **Idle-disconnect as proposed:** a player that is paused and hidden drops off
+   the tablet's list after 15 minutes (§2.1, Open question 1).
+3. **Browsing never stops the music.** The queue moves into the player (§5.1, Open
+   question 3).
+4. **The tablet is Android** (Open question 5). F1 (Android's system Cast controls)
+   is therefore worth checking on the device.
+5. **Local token re-arm is out of scope here.** It is being fixed separately on
+   `toni/fix/local-playback-token-refresh`. §5.4 keeps only the remote-facing part:
+   the snapshot reports `auth.needsSignIn`, and the tablet says so.
+
+**Not answered, so the proposals stand as defaults:**
+
+- **No volume control** for now (Open question 6).
+- **No "listen on both":** a device is either the player or a controller (Open
+  question 7).
+- **The allowlist is on** (`REMOTE_ALLOWED_USERS`, §3), since the consent-screen
+  mode is unknown (Open question 4).
 
 ## Context
 
