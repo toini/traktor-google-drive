@@ -537,6 +537,17 @@ h1, h2, h3, h4, h5, h6 {
     vertical-align: middle;
 }
 
+.player-preview-stopped {
+    margin-right: 0.5rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid #ffd21f;
+    color: #ffd21f;
+    font-size: 10.5px;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
 .player-preview-range {
     margin-left: 0.5rem;
     color: #8b949e;

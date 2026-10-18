@@ -47,6 +47,13 @@ public class PlayerService : IAsyncDisposable
     private bool _advancing;
     private int _consecutiveFailures;
     private bool _preferencesLoaded;
+    // Whether the loaded track was started at its preview start (load cue) in
+    // this preview. If not, a resume from before the load cue jumps to it.
+    private bool _previewStartApplied;
+    // The row a PlayEntryAsync is still fetching a token for, and a counter that
+    // lets the newest of several quick picks win.
+    private FileEntry? _requested;
+    private int _playGeneration;
 
     public PlayerService(IJSRuntime js, AppErrors errors, CastService cast)
     {
@@ -181,7 +188,7 @@ public class PlayerService : IAsyncDisposable
     {
         _queue = [];
         _lastIndex = -1;
-        if (PreviewActive) StopPreview();
+        if (PreviewActive) EndPreview("left the playlist");
         Changed?.Invoke();
     }
 
@@ -202,18 +209,70 @@ public class PlayerService : IAsyncDisposable
         catch { /* not worth failing over */ }
     }
 
-    /// <summary>Starts gig preview from the first playable row in table order.</summary>
-    public async Task StartPreviewAsync()
+    /// <summary>
+    /// Where "Preview set" would start: the loaded track when it is one of this
+    /// playlist's rows (playing, paused, or restored after a reload), otherwise
+    /// the first playable row in table order. Null with nothing queued.
+    /// </summary>
+    public FileEntry? PreviewStartEntry => CurrentQueueEntry ?? _queue.FirstOrDefault();
+
+    /// <summary>The queued row for the loaded track, or null when it is not in the queue.</summary>
+    private FileEntry? CurrentQueueEntry
     {
-        if (_queue.Count == 0) return;
-        PreviewActive = true;
-        _consecutiveFailures = 0;
-        Changed?.Invoke();
-        await PlayEntryAsync(_queue[0]);
+        get
+        {
+            if (CurrentFile is null || CurrentFileId != CurrentFile.DriveFileId) return null;
+            var i = IndexOf(CurrentFile);
+            return i >= 0 ? _queue[i] : null;
+        }
     }
 
-    /// <summary>Leaves preview mode; the current track keeps playing, unbounded.</summary>
+    /// <summary>
+    /// Starts gig preview at <see cref="PreviewStartEntry"/>, from its load cue. The
+    /// track already loaded is restarted at its load cue rather than reloaded.
+    /// </summary>
+    public async Task StartPreviewAsync()
+    {
+        if (PreviewStartEntry is not { } start) return;
+        PreviewActive = true;
+        PreviewStoppedReason = null;
+        _consecutiveFailures = 0;
+        Changed?.Invoke();
+        await PlayEntryAsync(start);
+    }
+
+    /// <summary>
+    /// Why gig preview ended when the user did not end it, for a few seconds after,
+    /// so it never just vanishes from the player bar. Null otherwise.
+    /// </summary>
+    public string? PreviewStoppedReason { get; private set; }
+
+    private static readonly TimeSpan StoppedReasonShownFor = TimeSpan.FromSeconds(8);
+    private int _stoppedReasonGeneration;
+
+    /// <summary>Leaves preview mode (the stop button); the current track keeps playing, unbounded.</summary>
     public void StopPreview()
+    {
+        PreviewStoppedReason = null;
+        LeavePreview();
+    }
+
+    /// <summary>Leaves preview mode for a reason the player bar shows briefly.</summary>
+    private void EndPreview(string reason)
+    {
+        Console.WriteLine($"[PlayerService] gig preview stopped: {reason}");
+        PreviewStoppedReason = reason;
+        var generation = ++_stoppedReasonGeneration;
+        LeavePreview();
+        _ = Task.Delay(StoppedReasonShownFor).ContinueWith(_ =>
+        {
+            if (generation != _stoppedReasonGeneration || PreviewStoppedReason is null) return;
+            PreviewStoppedReason = null;
+            Changed?.Invoke();
+        }, TaskScheduler.Default);
+    }
+
+    private void LeavePreview()
     {
         PreviewActive = false;
         CurrentRange = null;
@@ -227,7 +286,8 @@ public class PlayerService : IAsyncDisposable
     private async Task StepAsync(int direction)
     {
         if (_queue.Count == 0) return;
-        var index = CurrentFile is null ? -1 : IndexOf(CurrentFile);
+        var from = _requested ?? CurrentFile;
+        var index = from is null ? -1 : IndexOf(from);
         // The current row left the queue (or was never in it): continue from
         // where it last was rather than jumping back to the top.
         if (index < 0) index = direction > 0 ? _lastIndex : _lastIndex + 1;
@@ -238,7 +298,7 @@ public class PlayerService : IAsyncDisposable
             // End of the list: stop, leaving the last track loaded and paused.
             if (direction > 0 && PreviewActive)
             {
-                StopPreview();
+                EndPreview("end of the playlist");
                 await PauseAsync();
             }
             return;
@@ -293,9 +353,51 @@ public class PlayerService : IAsyncDisposable
             await module.InvokeVoidAsync("pause");
             return;
         }
-        await SyncProxyCookieAsync();
-        await module.InvokeVoidAsync("play", file.DriveFileId, CurrentUrl, null, null);
+        await ResumeLocalAsync(module);
     }
+
+    /// <summary>
+    /// Resumes the loaded track. In gig preview the end bound is passed again, so
+    /// a pause never disarms it; a position before the load cue on a track whose
+    /// preview start was never applied (it was cued, or restored at 0) starts
+    /// from the load cue instead. Once applied, an earlier position can only be a
+    /// deliberate seek, and that is kept, as is a seek past the end (ADR
+    /// 20261018-47 §4).
+    /// </summary>
+    private async Task ResumeLocalAsync(IJSObjectReference module)
+    {
+        if (_localFileId is null || CurrentUrl is null) return;
+        await SyncProxyCookieAsync();
+
+        if (!PreviewActive || CurrentFile is not { } file || file.DriveFileId != _localFileId)
+        {
+            await module.InvokeVoidAsync("play", _localFileId, CurrentUrl, null, null, false);
+            return;
+        }
+
+        var range = CurrentRange ??= GigPreview.RangeFor(file.Track, _localDuration);
+        var position = await LocalPositionAsync(module);
+        double? start = null;
+        if (!_previewStartApplied && position < range.Start) { start = range.Start; position = range.Start; }
+        _previewStartApplied = true;
+        // Already past the end means the user seeked there: let it play on.
+        double? stop = range.End is { } end && position < end ? end : null;
+        Changed?.Invoke();
+        await module.InvokeVoidAsync("play", _localFileId, CurrentUrl, start, stop, true);
+    }
+
+    private async Task<double> LocalPositionAsync(IJSObjectReference module)
+    {
+        try
+        {
+            var p = await module.InvokeAsync<MediaPosition?>("position");
+            return p?.Current ?? _localTime;
+        }
+        catch (Exception) { return _localTime; } // the progress tick is close enough
+    }
+
+    private sealed record MediaPosition(
+        [property: System.Text.Json.Serialization.JsonPropertyName("current")] double Current);
 
     /// <summary>
     /// Loads a row and plays it. In gig preview that means from its load cue, with
@@ -303,13 +405,20 @@ public class PlayerService : IAsyncDisposable
     /// </summary>
     private async Task PlayEntryAsync(FileEntry file)
     {
+        // Until the token arrives this row is where the next Next/Previous steps
+        // from, so quick clicks each move one row instead of several landing on
+        // the same one; and a newer pick that arrives meanwhile wins outright.
+        var generation = ++_playGeneration;
+        _requested = file;
         // Expired between tracks: one silent try before asking the user.
         var token = await CurrentTokenAsync() ?? await RenewTokenAsync();
+        if (generation != _playGeneration) return;
+        _requested = null;
         if (string.IsNullOrEmpty(token) && _cast.IsConnected)
         {
             _errors.Report("Cannot play the next track — the Google session expired",
                 "Sign in again and press play.");
-            if (PreviewActive) StopPreview();
+            if (PreviewActive) EndPreview("the Google session expired");
             return;
         }
 
@@ -326,11 +435,13 @@ public class PlayerService : IAsyncDisposable
         // range responses that can take a while.
         _localDuration = file.Track?.PlaytimeFloat ?? 0;
         CurrentRange = PreviewActive ? GigPreview.RangeFor(file.Track, _localDuration) : null;
+        _previewStartApplied = PreviewActive;
 
         var start = CurrentRange?.Start ?? 0;
 
         if (_cast.IsConnected)
         {
+            // Always a fresh LOAD, even for the file already on the TV.
             await _cast.LoadAsync(file, token!, start);
             return;
         }
@@ -350,11 +461,15 @@ public class PlayerService : IAsyncDisposable
         }
 
         _startAfterSignIn = null;
+        // The same file already loaded (preview starting on the current track, or
+        // a playlist listing a file twice) is restarted in place: no new load, so
+        // no loadstart would ever clear a Loading state.
+        if (_localFileId != fileId) _localState = PlaybackState.Loading;
         _localFileId = fileId;
-        _localState = PlaybackState.Loading;
         Changed?.Invoke();
         await SyncProxyCookieAsync();
-        await module.InvokeVoidAsync("play", fileId, CurrentUrl, start > 0 ? start : null, CurrentRange?.End);
+        if (generation != _playGeneration) return;
+        await module.InvokeVoidAsync("play", fileId, CurrentUrl, start, CurrentRange?.End, true);
     }
 
     private async Task<string?> CurrentTokenAsync()
@@ -437,6 +552,8 @@ public class PlayerService : IAsyncDisposable
         _localTime = position;
         _localDuration = duration;
         _localState = PlaybackState.Paused;
+        _previewStartApplied = false;
+        _requested = null;
 
         var module = await ModuleAsync();
         Changed?.Invoke();
@@ -459,9 +576,8 @@ public class PlayerService : IAsyncDisposable
     {
         if (_cast.IsConnected) { await _cast.PlayOrPauseAsync(); return; }
         if (NeedsSignIn) { await SignInToContinueAsync(); return; }
-        if (_module is null || _localFileId is null || CurrentUrl is null) return;
-        await SyncProxyCookieAsync();
-        await _module.InvokeVoidAsync("play", _localFileId, CurrentUrl, null, null);
+        if (_module is null) return;
+        await ResumeLocalAsync(_module);
     }
 
     public async Task PauseAsync()
@@ -542,7 +658,7 @@ public class PlayerService : IAsyncDisposable
             case "error" when PreviewActive:
                 if (++_consecutiveFailures >= MaxConsecutiveFailures)
                 {
-                    StopPreview();
+                    EndPreview($"{MaxConsecutiveFailures} tracks in a row failed");
                     _errors.Report("Gig preview stopped",
                         $"{MaxConsecutiveFailures} tracks in a row failed to play. Last: {CurrentTitle} (fileId {fileId}).");
                 }

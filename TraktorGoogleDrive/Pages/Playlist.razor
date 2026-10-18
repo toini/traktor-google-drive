@@ -35,10 +35,12 @@
         </span>
         @if (files.Any(f => f.IsPlayable))
         {
-            @* Gig preview walks the table top to bottom in its current sort, each
-               track from its load cue to the end of its last loop (ADR 20261018-47). *@
-            <button class="preview-set-button" data-preview-set
-                    title="Play each track from its load cue to the end of its last loop, then the next"
+            @* Gig preview walks the table down in its current sort, each track from
+               its load cue to the end of its last loop (ADR 20261018-47). It starts
+               at the loaded track when that is one of these rows, else at the top. *@
+            var from = Player.PreviewStartEntry;
+            <button class="preview-set-button" data-preview-set data-preview-from="@from?.PlaylistIndex"
+                    title="@PreviewTitle(from)"
                     @onclick="StartPreview">▶ Preview set</button>
         }
     }
@@ -312,6 +314,14 @@ else
         await Player.StartPreviewAsync();
     }
 
+    string PreviewTitle(FileEntry? from)
+    {
+        const string what = "each track from its load cue to the end of its last loop, then the next";
+        if (from is null) return $"Play {what}";
+        var where = from.DriveFileId == Player.CurrentFileId ? " (the current track)" : "";
+        return $"Preview from #{from.PlaylistIndex}{where}: {what}";
+    }
+
     string Arrow(SortColumn column) =>
         sortColumn != column ? "" : sortAscending ? "▲" : "▼";
 
@@ -572,8 +582,11 @@ else
         // a real switch: on a fresh page the only thing loaded is the track
         // PlaybackMemory restored after a reload, and that must survive.
         if (shownUuid is not null && shownUuid != Uuid) await Player.StopAsync();
+        // Only a different playlist clears the queue (and so ends a gig preview). A
+        // parameter pass for the playlist already shown reloads its rows and pushes
+        // them again, and must not end a preview that is running over them.
+        if (shownUuid != Uuid) Player.ClearQueue();
         shownUuid = Uuid;
-        Player.ClearQueue();
 
         files = null;
         loadError = null;
