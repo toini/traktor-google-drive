@@ -31,11 +31,11 @@ test.describe('playlist column picker', () => {
     await seedToken(page);
   });
 
-  test('hides Folder by default and shows every other column', async ({ page }) => {
+  test('hides Folder and Release by default and shows every other column', async ({ page }) => {
     await openPlaylist(page, PSYTECH_UUID, 4);
 
     await expect(headerIds(page)).resolves.toEqual([
-      'expand', 'play', 'index', 'title', 'artist', 'label', 'comment2', 'comment', 'length', 'added',
+      'expand', 'play', 'index', 'title', 'artist', 'label', 'comment2', 'comment', 'rating', 'length', 'added',
     ]);
     await expect(page.locator('#playlist-table .cell-folder')).toHaveCount(0);
 
@@ -130,7 +130,7 @@ test.describe('playlist column picker', () => {
     await openPlaylist(page, PSYTECH_UUID, 4);
 
     await expect(headerIds(page)).resolves.toEqual([
-      'expand', 'play', 'index', 'title', 'artist', 'folder', 'comment2', 'comment', 'length', 'added',
+      'expand', 'play', 'index', 'title', 'artist', 'folder', 'comment2', 'comment', 'rating', 'length', 'added',
     ]);
   });
 

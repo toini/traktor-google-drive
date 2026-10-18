@@ -12,7 +12,10 @@
 
     INFO attributes as Traktor writes them: RATING is the free-text "Comment 2"
     column (NOT stars, those are RANKING 0-255), and COLOR is the track color,
-    1 red .. 7 magenta. The app reads COLOR itself; the parser does not.
+    1 red .. 7 magenta. RANKING is 51 per star, 0 = unrated; Traktor only writes
+    multiples of 51, so the 60 below is a rounding probe. The release is the
+    ALBUM element's TITLE. The app reads COLOR, RANKING and ALBUM itself; the
+    parser does not.
 
   So DIR="/:Music/:Sets/:" FILE="alpha.wav" -> "Music/Sets/alpha.wav".
 -->
@@ -31,7 +34,7 @@
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Beta Pulse" ARTIST="Test Artist Two">
       <LOCATION DIR="/:Music/:Sets/:" FILE="beta.wav" VOLUME="Macintosh HD"></LOCATION>
-      <ALBUM TITLE="Fixture Album"></ALBUM>
+      <ALBUM TRACK="2" TITLE="Another Release"></ALBUM>
       <INFO BITRATE="1411000" GENRE="Psytech" LABEL="Fixture Label" COMMENT="second track"
             PLAYTIME="312" PLAYTIME_FLOAT="312.0" RATING="build 4:17" RANKING="204" KEY="9A" IMPORT_DATE="2023/10/10" COLOR="5"></INFO>
       <TEMPO BPM="148.000000" BPM_QUALITY="100.000000"></TEMPO>
@@ -39,7 +42,7 @@
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Gamma Echo" ARTIST="Test Artist Three">
       <LOCATION DIR="/:Music/:Sets/:" FILE="gamma.wav" VOLUME="Macintosh HD"></LOCATION>
-      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="180" PLAYTIME_FLOAT="180.25" IMPORT_DATE="2023/11/6"></INFO>
+      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="180" PLAYTIME_FLOAT="180.25" RANKING="0" IMPORT_DATE="2023/11/6"></INFO>
       <TEMPO BPM="142.000000"></TEMPO>
     </ENTRY>
 
@@ -49,7 +52,7 @@
     -->
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift (Archive Cut)" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Archive/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
-      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="250" PLAYTIME_FLOAT="250.0"></INFO>
+      <INFO BITRATE="1411000" GENRE="Psytech" PLAYTIME="250" PLAYTIME_FLOAT="250.0" RANKING="60"></INFO>
       <TEMPO BPM="145.000000"></TEMPO>
     </ENTRY>
 

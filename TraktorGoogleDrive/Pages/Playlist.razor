@@ -104,7 +104,14 @@ else
                             title="@(color is null ? null : $"Color: {ColorNames[color.Value]}")">@file.PlaylistIndex</td>
                         @foreach (var column in VisibleColumns)
                         {
-                            <td @key="column.Id" class="@column.CellClass">@column.Value(file)</td>
+                            @if (column.Render is { } render)
+                            {
+                                <td @key="column.Id" class="@column.CellClass">@render(file)</td>
+                            }
+                            else
+                            {
+                                <td @key="column.Id" class="@column.CellClass">@column.Value(file)</td>
+                            }
                         }
                     </tr>
 
@@ -163,7 +170,7 @@ else
 
     // Comment2 is Traktor's "Comment 2", which the NML stores as INFO RATING
     // (the star rating is RANKING), hence Track.Rating below.
-    enum SortColumn { Index, Title, Artist, Folder, Label, Comment2, Comment, Length, Added }
+    enum SortColumn { Index, Title, Artist, Release, Folder, Label, Comment2, Comment, Rating, Length, Added }
 
     static readonly Dictionary<int, string> ColorNames = new()
     {
@@ -250,6 +257,15 @@ else
                 : byHasLength.ThenByDescending(f => f.Track?.PlaytimeFloat ?? 0);
         }
 
+        if (sortColumn == SortColumn.Rating)
+        {
+            // By stars, not the raw 0-255 value: 60 and 51 are both one star.
+            var byRated = files.OrderBy(f => StarsOf(f.Ranking) == 0);
+            return sortAscending
+                ? byRated.ThenBy(f => StarsOf(f.Ranking))
+                : byRated.ThenByDescending(f => StarsOf(f.Ranking));
+        }
+
         if (sortColumn == SortColumn.Added)
         {
             // Parsed, never lexical: "2023/10/10" sorts before "2023/3/12" as text.
@@ -270,6 +286,7 @@ else
     {
         SortColumn.Title => file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? ""),
         SortColumn.Artist => file.Track?.Artist,
+        SortColumn.Release => file.Release,
         SortColumn.Folder => FolderOf(file.Track?.Path),
         SortColumn.Label => file.Track?.Label,
         SortColumn.Comment2 => file.Track?.Rating,
@@ -312,7 +329,11 @@ else
 
     sealed record DataColumn(
         string Id, string Label, SortColumn Sort, string HeaderClass, string CellClass,
-        bool Locked, bool DefaultVisible, Func<FileEntry, string> Value);
+        bool Locked, bool DefaultVisible, Func<FileEntry, string> Value)
+    {
+        /// <summary>Markup for the cell, when plain text (Value) is not enough.</summary>
+        public Func<FileEntry, RenderFragment>? Render { get; init; }
+    }
 
     const int FixedColumnCount = 3; // expand, play, #
 
@@ -321,17 +342,39 @@ else
         new("title", "Title", SortColumn.Title, "sortable", "cell-title", Locked: true, DefaultVisible: true,
             f => f.Track?.Title ?? Path.GetFileName(f.Track?.Path ?? "")),
         new("artist", "Artist", SortColumn.Artist, "sortable", "cell-artist", false, true, f => f.Track?.Artist ?? ""),
+        // Off by default: the release (ALBUM TITLE) is something to look up,
+        // not something to read down a playlist.
+        new("release", "Release", SortColumn.Release, "sortable", "cell-release", false, false, f => f.Release ?? ""),
         // Off by default: the playlist already says where its tracks belong,
         // and the Drive folder name rarely adds anything to that.
         new("folder", "Folder", SortColumn.Folder, "sortable", "cell-folder", false, false, f => FolderOf(f.Track?.Path)),
         new("label", "Label", SortColumn.Label, "sortable", "cell-label", false, true, f => f.Track?.Label ?? ""),
         new("comment2", "Comment 2", SortColumn.Comment2, "sortable", "cell-comment2", false, true, f => f.Track?.Rating ?? ""),
         new("comment", "Comment", SortColumn.Comment, "sortable", "cell-comment", false, true, f => f.Track?.Comment ?? ""),
+        new("rating", "Rating", SortColumn.Rating, "col-rating sortable", "col-rating", false, true,
+            f => StarsOf(f.Ranking) is var n and > 0 ? $"{n} of 5" : "") { Render = f => RatingStars(f.Ranking) },
         new("length", "Length", SortColumn.Length, "col-time sortable", "col-time", false, true,
             f => TrackTime.Format(f.Track?.PlaytimeFloat)),
         new("added", "Added", SortColumn.Added, "col-added sortable", "col-added", false, true,
             f => TrackDate.Format(f.Track?.ImportDate)),
     ];
+
+    /// <summary>
+    /// RANKING to whole stars. Traktor writes multiples of 51; anything else
+    /// rounds to the nearest star. 0 (or under half a star) is unrated.
+    /// </summary>
+    static int StarsOf(int? ranking) =>
+        ranking is null ? 0 : Math.Clamp((int)Math.Round(ranking.Value / 51.0, MidpointRounding.AwayFromZero), 0, 5);
+
+    // Filled stars in Traktor orange, the rest dim; nothing at all when unrated,
+    // so an unrated track reads as blank rather than as "zero stars".
+    static RenderFragment RatingStars(int? ranking)
+    {
+        var stars = StarsOf(ranking);
+        if (stars == 0) return _ => { };
+        var label = $"{stars} of 5 stars";
+        return @<span class="rating-stars" role="img" aria-label="@label" title="@label" data-stars="@stars"><span class="rating-filled">@(new string('★', stars))</span><span class="rating-empty">@(new string('★', 5 - stars))</span></span>;
+    }
 
     HashSet<string> visibleColumnIds = DefaultVisibleColumnIds();
 
@@ -460,7 +503,13 @@ else
             files = await Drive.ResolveTracksAsync(playlist.Tracks, token);
             // ResolveTracksAsync keeps playlist.Tracks' order, which is the
             // ENTRY order under the NML PLAYLIST node.
-            for (var i = 0; i < files.Count; i++) files[i].PlaylistIndex = i + 1;
+            for (var i = 0; i < files.Count; i++)
+            {
+                files[i].PlaylistIndex = i + 1;
+                // What the parser package does not read, from the same NML.
+                files[i].Ranking = CollectionService.RankingOf(files[i].Track);
+                files[i].Release = CollectionService.AlbumOf(files[i].Track);
+            }
             missingCount = files.Count(f => string.IsNullOrEmpty(f.DriveFileId));
             PushQueue();
 
