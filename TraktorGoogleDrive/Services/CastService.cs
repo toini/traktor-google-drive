@@ -39,6 +39,10 @@ public class CastService : IAsyncDisposable
     private (string FileId, string ContentType, string Title, string Artist)? _current;
     private bool _refreshing;
     private bool _refreshDeclined;
+    // The token inside the URL the device holds. auth.js renews the browser's
+    // token on its own schedule; when that happens the device still has the old
+    // one, so a newer stored token means "re-issue the load".
+    private string? _sentToken;
 
     public CastService(IJSRuntime js, NavigationManager nav, AppErrors errors)
     {
@@ -163,6 +167,7 @@ public class CastService : IAsyncDisposable
     {
         if (_current is not { } c || _module is null) return;
 
+        _sentToken = token;
         await _module.InvokeAsync<bool>("load",
             c.FileId,
             DriveAudio.AbsoluteUrlFor(_nav.BaseUri, c.FileId, token),
@@ -245,6 +250,19 @@ public class CastService : IAsyncDisposable
         // Declined once means declined for this session; retrying every second
         // would bury the page in identical errors.
         if (_refreshing || _refreshDeclined || _current is null) return;
+
+        // Renewed already, by the browser's own schedule or a click: hand the
+        // device the new token rather than asking Google for a third one.
+        string? stored;
+        try { stored = await _js.InvokeAsync<string?>("authGetToken"); }
+        catch (JSException) { stored = null; }
+        if (!string.IsNullOrEmpty(stored) && _sentToken is not null && stored != _sentToken)
+        {
+            _refreshing = true;
+            try { await SendLoadAsync(stored, CurrentTime); }
+            finally { _refreshing = false; }
+            return;
+        }
 
         double? expiresAt;
         try { expiresAt = await _js.InvokeAsync<double?>("authTokenExpiresAt"); }

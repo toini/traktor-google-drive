@@ -70,7 +70,7 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
     outgoing.ContentType = upstream.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
     outgoing.Headers[HeaderNames.AcceptRanges] = "bytes";
 
-    // The URL carries a bearer token; never let a shared cache keep the body.
+    // The request carries a bearer token; never let a shared cache keep the body.
     outgoing.Headers[HeaderNames.CacheControl] = "private, no-store";
 
     if (ranged)
@@ -87,6 +87,9 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
     // Unranged: stream it. Deliberately NO Content-Length — that is what keeps
     // the response chunked and exempt from Cloud Run's 32 MiB limit.
 }
+
+/// Set by auth.js, scoped to /api/proxy/.
+const string ProxyTokenCookie = "drive_token";
 
 /// Where the Cast Default Media Receiver (app id CC1AD845) is served from. A Cast
 /// device fetches the media itself, from that page's origin rather than ours, so
@@ -147,6 +150,13 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
         outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
         return;
     }
+
+    // The browser's own player sends the token as a cookie (auth.js keeps it
+    // current, and it never appears in a URL or the request log). A Cast device
+    // has no cookie of ours, so its URL still carries ?token=. The cookie wins:
+    // it is renewed in place, a URL is fixed when the load is issued.
+    if (incomingRequest.Cookies.TryGetValue(ProxyTokenCookie, out var cookieToken) && !string.IsNullOrWhiteSpace(cookieToken))
+        token = cookieToken;
 
     if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
     {

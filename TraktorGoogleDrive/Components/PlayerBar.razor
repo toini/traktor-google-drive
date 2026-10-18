@@ -64,6 +64,16 @@
             }
         </div>
 
+        @if (Player.NeedsSignIn)
+        {
+            <div class="player-signin" role="alert" data-player-signin>
+                <span>Paused — your Google session expired.</span>
+                <button class="player-signin-button" data-player-signin-button @onclick="Player.SignInToContinueAsync">
+                    Sign in again to continue
+                </button>
+            </div>
+        }
+
         <div class="player-time">
             <span>@TrackTime.Position(Player.CurrentTime)</span>
             <span class="player-time-sep">/</span>

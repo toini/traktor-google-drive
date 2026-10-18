@@ -82,6 +82,11 @@ check "cross-origin Referer is rejected" "403" \
 check "missing token is a 400" "400" \
   "$(status "$BASE/api/proxy/drive/some-file-id")"
 
+# The browser's player sends the token as a cookie, so its URLs carry none.
+# 401 (not 400) means the proxy found the cookie and forwarded it to Google.
+check "token from the drive_token cookie is accepted" "401" \
+  "$(status -H "Referer: $BASE/playlist/abc" --cookie "drive_token=dummy" "$BASE/api/proxy/drive/some-file-id")"
+
 echo "Static assets (the ProjectReference must actually serve the client):"
 check "/ serves the app shell" "200" "$(status "$BASE/")"
 check "auth.js is served" "200" "$(status "$BASE/auth.js")"
