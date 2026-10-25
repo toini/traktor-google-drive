@@ -638,6 +638,47 @@ before it can grade a detector at ±15 s.
 desktop mount. The spike needs the Z19 recording (1.33 GiB) and 51 tracks (39 played,
 12 base-only; 50 FLAC, 1 WAV, 4.1 GiB): **5.51 GiB** in total.
 
+**The audio pipeline, on synthetic mixes** (`synth.py`, `detect.py`, `evaluate.py`,
+`run_synth.py`; librosa in a venv, pinned in `requirements.txt`).
+
+Each mix is built like this:
+- 8 played tracks out of 14 candidates;
+- every track stretched by ±3–8 % with keylock;
+- tracks entered on the bar grid, with bass-swap blends of 16–32 bars;
+- the "hard" variant uses 16–32-bar plays, 32–64-bar blends and added noise.
+
+The detector implements 3a (beat-synchronous chroma and MFCC, matched as
+subsequences in the beat domain), 4a (Viterbi with order priors by list type plus the
+one-run-per-track re-decode) and 4d (greedy) as the baseline. Over 4 seeds:
+
+| Mix | List | Candidates | 4a accuracy | 4d accuracy | Boundary median |
+|---|---|---|---|---|---|
+| easy | `.rec`, base, or shuffled | whole or excerpts | 1.00 | 0.96–0.98 | 2–2.5 s |
+| hard | `.rec` | excerpts (3 × 30 s) | 1.00 | 1.00 | 2.2 s |
+| hard | base / shuffled | excerpts | 0.985 / 0.988 | 0.944 / 0.966 | 2.2 s |
+| hard | base | whole tracks | 0.90 | 0.92 | 5 s |
+| hard, **no keylock** | `.rec` | excerpts | 0.73 | 0.70 | 26 s |
+
+Three lessons carry over to real audio:
+
+- Every candidate scores about 0.8 against every window, because the kick and hats
+  are shared. Identification only works once each score is set against the median
+  over candidates. The detector uses a robust z-score of the score against the other
+  candidates' scores, which also keeps the UNKNOWN level meaningful under noise.
+- Excerpts beat whole tracks. A whole track's drum-only intro and outro match
+  anything. This points to answer (b) "excerpts are enough", but only real tracks can
+  confirm it.
+- Without keylock, accuracy drops by a quarter, because chroma is not searched for
+  pitch shifts. Toni plays with keylock on, so that path is not built.
+
+Synthetic results prove the plumbing and the tuning direction, not the targets: the
+tracks are far more distinct than real Sentimony psytrance. `run_real.py` runs the
+same grid on Z19 once the audio is local. Its signed boundary median also checks the
+anchor. Not built yet:
+- 3d (`AUDIO_ID` envelopes);
+- 3b (`fpcalc` is not installed);
+- 2a (novelty for the no-list case).
+
 ## Open questions for Toni
 
 1. **History files.** Does your Traktor `History/` folder exist (`history_*.nml`),
