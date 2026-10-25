@@ -1,0 +1,148 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import type { Page, Route } from '@playwright/test';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+/** The H16-like collection for Discover (fixtures/discover-collection.nml). */
+export const discoverNml = () => readFileSync(join(here, 'fixtures', 'discover-collection.nml'), 'utf8');
+
+export const H16_UUID = '16161616161616161616161616161616';
+export const CARNIVOR = 'https://carnivorrecords.bandcamp.com';
+
+type Track = { trackId: number; number: number; title: string; artist: string; duration: number };
+
+function release(slug: string, title: string, artist: string, date: string, tracks: Track[]) {
+  const url = `${CARNIVOR}/album/${slug}`;
+  return {
+    source: 'bandcamp', url, type: 'album', id: tracks[0].trackId * 7, title, artist,
+    label: 'Carnivor Records', labelUrl: CARNIVOR, releaseDate: `${date}T00:00:00+00:00`,
+    tags: ['techno', 'peak time techno'],
+    tracks: tracks.map((t) => ({ ...t, trackUrl: `${CARNIVOR}/track/${t.title.toLowerCase().replace(/\W+/g, '-')}`, isrc: null, playable: true })),
+    albumUrl: null, streamingLimit: 3,
+  };
+}
+
+/**
+ * Carnivor Records as the server would describe it, from the recorded pages of
+ * spike S1 (ADR 20261025-54). Grid order is newest first, as on Bandcamp.
+ * "1616 (Original Mix)" is in the fixture collection, so it must never queue.
+ */
+export const RELEASES = {
+  newer: release('feeding-generation-z-ii', 'Feeding Generation Z II', 'Various', '2024-03-01', [
+    { trackId: 501, number: 1, title: 'Hunger', artist: 'Kristonov', duration: 380 },
+    { trackId: 502, number: 2, title: 'Machine Choir', artist: 'Strasse Killer', duration: 402 },
+  ]),
+  internalMotion: release('internal-motion', 'Internal Motion', 'obwigszyh', '2020-08-19', [
+    { trackId: 1402866115, number: 1, title: '1616 (Original Mix)', artist: 'obwigszyh', duration: 358 },
+    { trackId: 776289323, number: 2, title: 'Internal Motion (Original Mix)', artist: 'obwigszyh', duration: 390 },
+    { trackId: 1945791144, number: 3, title: 'Burnt Side (Original Mix)', artist: 'obwigszyh', duration: 390 },
+  ]),
+};
+
+export type DiscoverCalls = {
+  lists: string[];
+  releases: string[];
+  appDataCreates: { name: string; body: string }[];
+  appDataUpdates: { id: string; body: string }[];
+  storeRequests: string[];
+};
+
+export type DiscoverMockOptions = {
+  /** jsonl files already in appDataFolder, by name. */
+  appData?: Record<string, string>;
+  /** Answer appData calls with 403 insufficient scope, as a pre-Discover token gets. */
+  appDataScopeMissing?: boolean;
+};
+
+/**
+ * Mocks the server's /api/discover endpoints and the Drive appDataFolder. Must
+ * run AFTER mockDrive: Playwright tries the most recently added route first.
+ * Any request to a real store fails the test (no live calls in e2e, ADR §12).
+ */
+export async function mockDiscover(page: Page, opts: DiscoverMockOptions = {}): Promise<DiscoverCalls> {
+  const calls: DiscoverCalls = { lists: [], releases: [], appDataCreates: [], appDataUpdates: [], storeRequests: [] };
+  const files = new Map<string, { id: string; body: string }>();
+  for (const [name, body] of Object.entries(opts.appData ?? {})) files.set(name, { id: `app-${name}`, body });
+
+  await page.route(/bandcamp\.com|bcbits\.com|beatport\.com|discogs\.com/, (route) => {
+    calls.storeRequests.push(route.request().url());
+    return route.abort();
+  });
+
+  await page.route('**/api/discover/**', async (route) => {
+    const u = new URL(route.request().url());
+    const target = u.searchParams.get('url') ?? '';
+    const auth = route.request().headers()['authorization'] ?? '';
+    if (!auth.startsWith('Bearer ')) return route.fulfill({ status: 401, body: '' });
+
+    if (u.pathname === '/api/discover/bandcamp/releases') {
+      calls.lists.push(target);
+      if (!target.includes('carnivorrecords')) return route.fulfill({ status: 404, body: '{}' });
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          source: 'bandcamp', page: `${CARNIVOR}/music`,
+          releases: [RELEASES.newer, RELEASES.internalMotion].map((r) => ({ url: r.url, type: 'album', id: r.id, title: r.title, artist: r.artist })),
+        }),
+      });
+    }
+    if (u.pathname === '/api/discover/bandcamp/release') {
+      calls.releases.push(target);
+      const r = Object.values(RELEASES).find((x) => x.url === target);
+      return r
+        ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(r) })
+        : route.fulfill({ status: 404, body: '{}' });
+    }
+    return route.fulfill({ status: 404, body: '' });
+  });
+
+  const scopeError = (route: Route) =>
+    route.fulfill({
+      status: 403, contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 403, status: 'PERMISSION_DENIED', message: 'Request had insufficient authentication scopes.', details: [{ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' }] } }),
+    });
+
+  await page.route(
+    (url) => url.hostname === 'www.googleapis.com'
+      && (url.searchParams.get('spaces') === 'appDataFolder' || url.pathname.startsWith('/upload/drive/v3/files')
+        || [...files.values()].some((f) => url.pathname.endsWith(`/files/${f.id}`))),
+    async (route) => {
+      if (opts.appDataScopeMissing) return scopeError(route);
+      const req = route.request();
+      const u = new URL(req.url());
+
+      if (req.method() === 'GET' && u.searchParams.get('spaces') === 'appDataFolder') {
+        return route.fulfill({
+          status: 200, contentType: 'application/json',
+          body: JSON.stringify({ files: [...files.entries()].map(([name, f]) => ({ id: f.id, name, modifiedTime: '2026-10-25T10:00:00Z' })) }),
+        });
+      }
+      if (req.method() === 'GET') {
+        const f = [...files.values()].find((x) => u.pathname.endsWith(`/files/${x.id}`));
+        return f ? route.fulfill({ status: 200, body: f.body }) : route.fulfill({ status: 404, body: '' });
+      }
+      if (req.method() === 'POST') {
+        // multipart/related: the metadata part names the file, the second part is the jsonl.
+        const raw = req.postData() ?? '';
+        const name = /"name":"([^"]+)"/.exec(raw)?.[1] ?? 'unknown';
+        const body = raw.split(/\r?\n\r?\n/).slice(2).join('\n\n').replace(/\r?\n--[^\n]*--\s*$/, '');
+        const id = `app-${name}`;
+        files.set(name, { id, body });
+        calls.appDataCreates.push({ name, body });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id }) });
+      }
+      if (req.method() === 'PATCH') {
+        const id = u.pathname.split('/').pop() ?? '';
+        const body = req.postData() ?? '';
+        for (const [name, f] of files) if (f.id === id) files.set(name, { id, body });
+        calls.appDataUpdates.push({ id, body });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id }) });
+      }
+      return route.fulfill({ status: 405, body: '' });
+    },
+  );
+
+  return calls;
+}

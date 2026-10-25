@@ -9,6 +9,42 @@ made". Written on `toni/docs/track-discovery`, cut from `master` at `9865fab`.
 Increment 1 is implemented on the same branch, in the same PR as this ADR. Where
 the text below still says "recommended", the decisions list is what settles it.
 
+### Increment 1 as built
+
+- **Server** (`TraktorGoogleDrive.Server/Discover/`): `BandcampUrls` rebuilds every
+  URL from its parts (a label or artist subdomain's `/music`, or `/album|track/<slug>`;
+  nothing else, no other host, no query). `PoliteFetcher` serialises every Bandcamp
+  request, ≥ 2 s apart, 500 a day (both capped in code, so config can only make it
+  stricter), with the honest User-Agent. `BandcampSource` caches `/music` pages 24 h
+  and release pages 7 days, refetching a release only when its stream URLs have
+  under an hour left. `BandcampParser` is pure, tested on the S1 recordings.
+  Endpoints: `GET /api/discover/bandcamp/releases?url=`, `GET /api/discover/bandcamp/release?url=`
+  (track data without stream URLs), and the media URL
+  `GET /api/proxy/discover/bandcamp/{trackId}?release=` (302 to the CDN, `?probe=1`
+  for a status), all for the allowlisted user only (`RemoteAuth`; bearer header, or the
+  `drive_token` cookie for the media URL).
+- **Client**: a Discover entry per genre in the sidebar; `/discover/{genre}` with
+  Listen, Shortlist and Seeds tabs. Seeds: "eti lisää" first, then a playlist's
+  ≥ N★ tracks, the genre's top lists, by hand; Bandcamp URLs prefilled from the
+  collection's "Visit …bandcamp.com" comments, or guessed on a click. A refresh walks
+  the release list newest first, reading release pages until it passes the
+  watermark (or 10 pages; "Load older" continues). Listen queues oldest first, never
+  a heard or owned track; skip/maybe/like move on, 1–5 stars, Buy and a note stay
+  on the card; undo; keyboard. Shortlist: liked tracks to decide, the buy list with
+  Bandcamp links, "Copy links", Bought. "Heard through" is offered per seed when a
+  month is done. The event log lives in `appDataFolder` (`DiscoverStore`), with
+  unsaved events kept in localStorage; a token without the new scope keeps working
+  on the device and shows "Allow saving to Drive".
+- **Not yet**: playback of discovery tracks in the player bar (`PlayableItem` and the
+  `discover:H` queue). It changes `PlayerService`, where PR 17 (prefetch and
+  buffering) is in flight, so it is built after PR 17 merges. Until then a track is
+  heard through "Bandcamp ↗".
+- **Limits of the first cut**: "heard through" is offered only after a refresh has
+  read the seed's whole list down to its watermark in this session, because the walk
+  reads newest first and anything unread is older (a watermark above it would hide it
+  unheard). Owned matching is exact on the normalised title plus one shared artist; near
+  matches are not flagged yet.
+
 ## Decisions Toni made
 
 1. **Bandcamp: B2, fetched only when Toni acts** (§1.2). A label's release list is
@@ -875,7 +911,7 @@ plays of one stream) and 3 from Cloud Run**, no `/search`, no `/api/`.
 
 | Question | Result |
 |---|---|
-| Label page `/music` | **Darker Sounds: 55 releases** (12 rendered in the grid with `/album/…` links and `data-item-id="album-<id>"`, the other 43 in a `data-client-items` JSON attribute with `id`, `title`, `artist`, `page_url`, `type`). **Erebos (`erebosrecordsofficial`): 53** (16 + 37). **Carnivor Records: 10**, all rendered, including Obwigszyh's *Internal Motion*. **The label page has no release dates.** `erebosrecords.bandcamp.com` is an empty stub page: a label's real subdomain must come from a known URL (the collection's comments, Discogs, OneNote), never from guessing |
+| Label page `/music` | **Darker Sounds: 59 releases** (16 rendered in the grid, 12 albums and 4 singles, with `/album/…` or `/track/…` links and `data-item-id="album-<id>"`, the other 43 in a `data-client-items` JSON attribute with `id`, `title`, `artist`, `page_url`, `type`). **Erebos (`erebosrecordsofficial`): 53** (16 + 37). **Carnivor Records: 10**, all rendered, including Obwigszyh's *Internal Motion*. **The label page has no release dates.** `erebosrecords.bandcamp.com` is an empty stub page: a label's real subdomain must come from a known URL (the collection's comments, Discogs, OneNote), never from guessing |
 | Release page | `data-tralbum` is there, with `album_release_date` (`09 Nov 2025 18:21:12 GMT`), `trackinfo[]` (title, duration, `track_id`, `title_link`, `file["mp3-128"]`), and `play_cap_data: {streaming_limits_enabled: true, streaming_limit: 3}`. Tags come from the `ld+json` block's `keywords` (`Hard Techno`, `Dark Hard Techno`, `Dark Techno Industrial`…), not from tag links. `data-band` gives the label name, `data-embed` the embed ids |
 | Track page `/track/<slug>` | The same `data-tralbum` with `album_url` (`/album/shadow-alliance-ep`) and the album's release date, and the track's `isrc` in `current`. **So an imported track URL maps to its release** (§4.3) with one fetch |
 | Stream URL lifetime | `https://t4.bcbits.com/stream/<hash>/mp3-128/<track_id>?p=0&ts=…&t=…&token=<unix expiry>_<sig>`. The expiry is **fetch time + 24 h** (86,400 s, measured on two fetches) |
@@ -905,7 +941,7 @@ one request per 2.6 s, 56 requests; database search answered without a token):
 | Label | Discogs releases | Since 2024 | Newest (date precision) | Bandcamp URL in profile | Bandcamp releases |
 |---|---|---|---|---|---|
 | **Carnivor Records** | **2** | 0 | 2020-04-15 (day) | yes | **10** |
-| Darker Sounds | 9 | 2 | 2026-02-25 (day) | yes | 55 |
+| Darker Sounds | 9 | 2 | 2026-02-25 (day) | yes | 59 |
 | Erebos Records | 13 | 0 | 2021-04-20 | no | 53 |
 | RAW. | wrong match (a 1990s CD label of the same name) | | | | |
 | Valhall Records | 1 | 1 | 2025-08-15 | no | |
@@ -925,7 +961,7 @@ labels), profile links SoundCloud and Facebook only.
 What this says:
 
 - **For these H labels Discogs is far behind Bandcamp** (Carnivor 2 vs 10, Darker
-  Sounds 9 vs 55, Erebos 13 vs 53). Where a label has a Bandcamp page, Bandcamp is the
+  Sounds 9 vs 59, Erebos 13 vs 53). Where a label has a Bandcamp page, Bandcamp is the
   better release list as well as the only audio. Discogs earns its place for labels
   with **no** Bandcamp page (Attack MuZik, Definition Of Hard Techno, Fresh Cut,
   Valhall, Vision Serpent), and as a source of Bandcamp URLs (6 of 13 found).
@@ -992,6 +1028,26 @@ and the first real check is Toni's re-consent on the branch.
 - **Fixture drift**: the record script also diffs new recordings against the
   committed ones, run by hand when Bandcamp seems to have changed. That is the early
   warning for the markup risk.
+
+**As built for increment 1** (the plan above, adjusted):
+
+- `tests/fixtures/discover/bandcamp/`: five pages recorded in S1 (Carnivor's and
+  Darker Sounds' `/music`, *Internal Motion*, *Shadow Alliance EP* and one of its
+  track pages), trimmed to what the parser reads. Fan names, "supported by" and
+  sponsor data are removed and stream signatures replaced with `fixture`. The
+  recording script is not written yet; the trimming was done by hand from the spike.
+- `tests/server-unit` (xUnit, the repo's first): the parser on those pages, the URL
+  allowlist, the polite fetcher and caches with a fake clock and a fake store, the
+  real endpoints in a `WebApplicationFactory` host with recorded pages behind them
+  (allowlist, refused URL shapes, the redirect only to the CDN, `?probe=1`), and the
+  client's pure logic (names, seed finding, the event fold, the queue, the
+  shortlist text). The server shell test (`discover.sh`) was not needed: the
+  endpoint tests cover it in-process.
+- `tests/e2e/discover.spec.ts` with `discover-mock.ts` and
+  `fixtures/discover-collection.nml` (an H16-shaped slice): `/api/discover/**` and
+  the appDataFolder are mocked, and any request to a store host is aborted and
+  recorded, and the tests assert there were none.
+  Playback in the player bar is tested with the increment's player step.
 
 ## Consequences
 

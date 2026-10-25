@@ -5,7 +5,9 @@
 const TOKEN_KEY = 'access_token';
 const EXPIRY_KEY = 'access_token_expires_at';
 const CLIENT_ID = '219145501841-n6pki0jbvkue0u3vusmnguld6m4fugp9.apps.googleusercontent.com';
-const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+// drive.appdata: the app's own hidden folder in Drive, where Discover keeps its
+// event logs (ADR 20261025-54 §8). It cannot see or touch any other file.
+const SCOPE = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
 
 // Treat a token as expired slightly early so a request started now does not
 // land after the real expiry.

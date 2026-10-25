@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
 using TraktorGoogleDrive.Server.Cast;
+using TraktorGoogleDrive.Server.Discover;
 using TraktorGoogleDrive.Server.Remote;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +15,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddRemoteControl();
 // Media tickets for a Cast device, so its URL never carries the Google token.
 builder.Services.AddCastTickets();
+// Track discovery (ADR 20261025-54): Bandcamp, fetched only when Toni acts.
+builder.Services.AddDiscover();
 
 // Cloud Run sits in front as a TLS-terminating proxy, so without this the app
 // sees scheme=http and the load balancer's IP for every request.
@@ -264,6 +267,8 @@ app.MapCastTickets();
 
 app.MapRemoteControl();
 
+app.MapDiscover();
+
 // index.html names the non-fingerprinted scripts, so it must never be served
 // from cache without revalidating either.
 //
@@ -278,3 +283,6 @@ app.MapFallbackToFile("index.html", new StaticFileOptions
 });
 
 app.Run();
+
+/// <summary>Visible to the endpoint tests (WebApplicationFactory).</summary>
+public partial class Program;

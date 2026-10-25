@@ -141,6 +141,15 @@ The harness seeds `sessionStorage.access_token` directly and intercepts every
 fixture in `tests/e2e/fixtures/collection.nml` is shaped to the parser's exact
 path-normalisation rules; the comment at the top of that file explains why.
 
+Unit and endpoint tests (xUnit) cover track discovery: the Bandcamp parser on
+recorded pages in `tests/fixtures/discover/`, the server's URL allowlist, rate
+limit and endpoints, and the client's seed, queue and event-log logic. No test
+calls a store:
+
+```bash
+dotnet test tests/server-unit
+```
+
 `node` is not on `PATH` by default on this machine (nvm is loaded with
 `--no-use`), so prefix commands with:
 

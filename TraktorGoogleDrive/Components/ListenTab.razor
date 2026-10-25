@@ -1,0 +1,203 @@
+@using TraktorGoogleDrive.Discover
+@inject DiscoverService Discover
+@inject IJSRuntime JS
+
+@* Pass 1 (ADR 20261025-54 §5): one track at a time, oldest release first.
+   Skip / Maybe / Like move on; a rating, Buy and a note stay on the track until
+   one of those three. Keys: S skip, M maybe, L like, 1–5 rate, B buy,
+   N note, O open on Bandcamp, Shift+S skip the release, U undo. *@
+<section class="discover-listen" tabindex="0" @ref="root" @onkeydown="OnKey" data-listen>
+    <div class="discover-toolbar">
+        <button class="discover-button" data-refresh-all disabled="@refreshing" @onclick="RefreshAllAsync">
+            @(refreshing ? "Refreshing…" : "Refresh seeds")
+        </button>
+        @foreach (var s in Seeds.Where(s => Discover.ProgressOf(s).Busy))
+        {
+            <span class="discover-hint" data-progress="@s.Name">@s.Name: @Discover.ProgressOf(s).Message</span>
+        }
+        @foreach (var s in Seeds.Where(s => Discover.ProgressOf(s).Error is not null))
+        {
+            <span class="discover-warn" data-seed-error="@s.Name">@s.Name: @Discover.ProgressOf(s).Error</span>
+        }
+    </div>
+
+    @if (Seeds.Count == 0)
+    {
+        <p class="state-message">No seeds in @Genre yet. Add some under <a href="@($"discover/{Genre}/seeds")">Seeds</a>.</p>
+    }
+    else if (Current is null)
+    {
+        <p class="state-message" data-queue-empty>
+            Nothing new to hear. @(Seeds.Any(s => string.IsNullOrWhiteSpace(s.BandcampUrl))
+                ? "Some seeds have no Bandcamp URL yet."
+                : "Refresh the seeds, or load older releases under Seeds.")
+        </p>
+    }
+    else
+    {
+        var item = Current;
+        var judged = Discover.State.Tracks.GetValueOrDefault(item.TrackKey);
+        <article class="discover-card" data-current="@item.TrackKey">
+            <div class="discover-card-release">
+                <span class="discover-label">@item.Release.Label</span>
+                <a class="discover-release-title" href="@item.Release.Url" target="_blank" rel="noopener noreferrer">@item.Release.Title</a>
+                <span class="discover-row-meta">@item.Release.Artist @(item.Release.Date is { } d ? $"· {d:yyyy-MM-dd}" : "")</span>
+                @if (item.Release.Tags.Count > 0)
+                {
+                    <span class="discover-tags">@string.Join(" · ", item.Release.Tags.Take(6))</span>
+                }
+            </div>
+            <div class="discover-card-track">
+                <span class="discover-track-number">@item.Track.Number</span>
+                <span class="discover-track-title" data-track-title>@item.Track.Title</span>
+                <span class="discover-track-artist">@item.Track.Artist</span>
+                <span class="discover-track-length">@Length(item.Track.Duration)</span>
+            </div>
+            @if (PlayControls is not null)
+            {
+                @PlayControls(item)
+            }
+            <div class="discover-verdicts">
+                <button class="discover-verdict skip" data-verdict="skip" title="Skip (S)" @onclick="() => Verdict(Pass1.Skip)">✕ Skip</button>
+                <button class="discover-verdict maybe" data-verdict="maybe" title="Maybe (M)" @onclick="() => Verdict(Pass1.Maybe)">? Maybe</button>
+                <button class="discover-verdict like" data-verdict="like" title="Like (L)" @onclick="() => Verdict(Pass1.Like)">♥ Like</button>
+            </div>
+            <div class="discover-card-extra">
+                <DiscoverStars Value="judged?.Rating" OnRate="Rate" />
+                <button class="discover-button buy @(judged?.Decision == Decision.Buy ? "on" : "")" data-buy title="Buy (B)" @onclick="Buy">Buy</button>
+                <input class="discover-input discover-note" data-note placeholder="Note (N)" value="@(judged?.Note ?? note)"
+                       @ref="noteInput" @onchange="e => SetNote(e.Value?.ToString())" @onkeydown:stopPropagation />
+                <a class="discover-link" data-open href="@(item.Track.TrackUrl ?? item.Release.Url)" target="_blank" rel="noopener noreferrer" title="Open on Bandcamp (O)">Bandcamp ↗</a>
+                <button class="discover-button" data-skip-release title="Skip the whole release (Shift+S)" @onclick="SkipRelease">Skip release</button>
+                @if (lastItem is not null)
+                {
+                    <button class="discover-button" data-undo title="Undo (U)" @onclick="Undo">Undo</button>
+                }
+            </div>
+        </article>
+
+        <h2 class="discover-upnext">Up next <span class="discover-count">@(Queue.Count - (Queue.Contains(item) ? 1 : 0))</span></h2>
+        <ol class="discover-list discover-queue">
+            @foreach (var q in Queue.Where(q => q != item).Take(40))
+            {
+                <li class="discover-row" data-queued="@q.TrackKey" @onclick="() => current = q">
+                    <span class="discover-row-title">@q.Track.Artist – @q.Track.Title</span>
+                    <span class="discover-row-meta">@q.Release.Label · @q.Release.Title @(q.Release.Date is { } qd ? $"({qd:yyyy-MM-dd})" : "")</span>
+                </li>
+            }
+        </ol>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Genre { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<QueueItem> Queue { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<Seed> Seeds { get; set; } = [];
+    /// <summary>Player controls for the current item, when playback is wired in.</summary>
+    [Parameter] public RenderFragment<QueueItem>? PlayControls { get; set; }
+    [Parameter] public EventCallback<QueueItem?> OnCurrentChanged { get; set; }
+
+    QueueItem? current;
+    QueueItem? lastItem;
+    string? note;
+    bool refreshing;
+    ElementReference root;
+    ElementReference noteInput;
+
+    /// <summary>The track on the card: stays put while it is rated, moves on with a verdict.</summary>
+    public QueueItem? Current => current ??= Queue.FirstOrDefault();
+
+    static string Length(double seconds) => seconds <= 0 ? "" : TimeSpan.FromSeconds(seconds).ToString(@"m\:ss");
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The card's track left the queue elsewhere (other device, release skipped): move on.
+        if (current is not null && !Queue.Contains(current) && !Discover.State.Tracks.ContainsKey(current.TrackKey))
+            current = null;
+        await OnCurrentChanged.InvokeAsync(Current);
+    }
+
+    async Task Next()
+    {
+        var at = current is null ? -1 : Queue.ToList().IndexOf(current);
+        current = Queue.Skip(at + 1).FirstOrDefault(q => !Discover.State.Tracks.ContainsKey(q.TrackKey))
+                  ?? Queue.FirstOrDefault(q => !Discover.State.Tracks.ContainsKey(q.TrackKey));
+        note = null;
+        await OnCurrentChanged.InvokeAsync(current);
+    }
+
+    async Task Verdict(Pass1 verdict)
+    {
+        if (Current is not { } item) return;
+        Discover.Judge(item, pass1: verdict);
+        lastItem = item;
+        await Next();
+    }
+
+    void Rate(int stars)
+    {
+        if (Current is not { } item) return;
+        Discover.Judge(item, rating: stars);
+        lastItem = item;
+    }
+
+    void Buy()
+    {
+        if (Current is not { } item) return;
+        var already = Discover.State.Tracks.GetValueOrDefault(item.TrackKey)?.Decision == Decision.Buy;
+        Discover.Judge(item, pass1: Pass1.Like, decision: already ? Decision.Skip : Decision.Buy);
+        lastItem = item;
+    }
+
+    void SetNote(string? text)
+    {
+        if (Current is not { } item) return;
+        note = text;
+        Discover.Judge(item, note: text ?? "");
+        lastItem = item;
+    }
+
+    async Task SkipRelease()
+    {
+        if (Current is not { } item) return;
+        Discover.SkipRelease(item, Queue);
+        lastItem = item;
+        await Next();
+    }
+
+    /// <summary>Clears the last verdict and brings that track back onto the card. It stays "heard".</summary>
+    async Task Undo()
+    {
+        if (lastItem is null) return;
+        Discover.ClearVerdict(lastItem.TrackKey);
+        current = lastItem;
+        lastItem = null;
+        await OnCurrentChanged.InvokeAsync(current);
+    }
+
+    async Task RefreshAllAsync()
+    {
+        refreshing = true;
+        try { await Discover.RefreshGenreAsync(Genre); }
+        finally { refreshing = false; }
+    }
+
+    async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey || e.MetaKey || e.AltKey) return;
+        switch (e.Key)
+        {
+            case "s" or "x": await Verdict(Pass1.Skip); break;
+            case "S" when e.ShiftKey: await SkipRelease(); break;
+            case "m": await Verdict(Pass1.Maybe); break;
+            case "l" or "+": await Verdict(Pass1.Like); break;
+            case "b": Buy(); break;
+            case "u": await Undo(); break;
+            case "n": await noteInput.FocusAsync(); break;
+            case "o" when Current is { } item:
+                await JS.InvokeVoidAsync("open", item.Track.TrackUrl ?? item.Release.Url, "_blank", "noopener");
+                break;
+            case "1" or "2" or "3" or "4" or "5": Rate(e.Key[0] - '0'); break;
+        }
+    }
+}

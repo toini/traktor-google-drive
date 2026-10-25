@@ -286,6 +286,12 @@ public class CollectionService
     /// <summary>The release (album) title, ENTRY/ALBUM TITLE. Null when the track has none.</summary>
     public string? AlbumOf(Track? track) => ExtrasOf(track)?.Album;
 
+    /// <summary>ENTRY/INFO PLAYCOUNT, 0 when absent. Track discovery ranks seeds by it.</summary>
+    public int PlayCountOf(Track? track) => ExtrasOf(track)?.PlayCount ?? 0;
+
+    /// <summary>ENTRY/INFO LAST_PLAYED ("2026/10/11"), raw. Null when never played.</summary>
+    public string? LastPlayedOf(Track? track) => ExtrasOf(track)?.LastPlayed;
+
     private CollectionSnapshot.ExtrasData? ExtrasOf(Track? track) =>
         track is not null && _extrasByPath.TryGetValue(track.Path, out var extras) ? extras : null;
 
@@ -306,13 +312,17 @@ public class CollectionService
             var album = (string?)entry.Element("ALBUM")?.Attribute("TITLE");
             if (string.IsNullOrWhiteSpace(album)) album = null;
 
-            if (color is null && ranking is null && album is null) continue;
+            var plays = int.TryParse((string?)info?.Attribute("PLAYCOUNT"), out var p) && p > 0 ? p : 0;
+            var lastPlayed = (string?)info?.Attribute("LAST_PLAYED");
+            if (string.IsNullOrWhiteSpace(lastPlayed)) lastPlayed = null;
+
+            if (color is null && ranking is null && album is null && plays == 0 && lastPlayed is null) continue;
 
             var location = entry.Element("LOCATION");
             var path = $"{location?.Attribute("DIR")?.Value}{location?.Attribute("FILE")?.Value}"
                 .Replace("Macintosh HD/", "").Replace(":", "").TrimStart('/');
 
-            if (path.Length > 0) extras[path] = new CollectionSnapshot.ExtrasData(color, ranking, album);
+            if (path.Length > 0) extras[path] = new CollectionSnapshot.ExtrasData(color, ranking, album, plays, lastPlayed);
         }
 
         return extras;

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- The projects target net9.0; run on whatever newer runtime is installed. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.21" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\TraktorGoogleDrive.Server\TraktorGoogleDrive.Server.csproj" />
+    <!-- The client's pure Discover logic (seed finding, the event fold, the queue). -->
+    <ProjectReference Include="..\..\TraktorGoogleDrive\TraktorGoogleDrive.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Recorded store pages (ADR 20261025-54 §12): no test ever calls a store. -->
+    <None Include="..\fixtures\discover\**\*" LinkBase="fixtures\discover" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,207 @@
+@page "/discover/{Genre}"
+@page "/discover/{Genre}/{Tab}"
+@implements IDisposable
+@inject DiscoverService Discover
+@inject AuthService Auth
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+@using TraktorGoogleDrive.Discover
+@using TraktorGoogleDrive.Services
+
+<PageTitle>Discover @Genre · Traktor</PageTitle>
+
+@* Track discovery (ADR 20261025-54). Three tabs: Listen (the queue, pass 1),
+   Shortlist (liked tracks to decide, and what to buy), Seeds (the watch list). *@
+<div class="discover" data-discover="@Genre">
+    <header class="discover-header">
+        <div class="discover-heading">
+            <h1 class="discover-title">Discover <span class="discover-genre">@Genre</span></h1>
+            <span class="discover-subtitle">@Genres.Name(Genre)</span>
+        </div>
+        <div class="discover-save" data-save-status="@Discover.Store.Status">
+            @switch (Discover.Store.Status)
+            {
+                case DiscoverStore.SaveStatus.Saved: <span>Saved to Drive</span> break;
+                case DiscoverStore.SaveStatus.Saving: <span>Saving…</span> break;
+                case DiscoverStore.SaveStatus.Pending: <span>Not saved yet</span> break;
+                case DiscoverStore.SaveStatus.Loading: <span>Loading…</span> break;
+                case DiscoverStore.SaveStatus.NeedsConsent:
+                    <span class="discover-warn">Saved on this device only.</span>
+                    <button class="discover-button" data-grant-appdata @onclick="GrantAsync">Allow saving to Drive</button>
+                    break;
+                case DiscoverStore.SaveStatus.Failed:
+                    <span class="discover-warn" title="@Discover.Store.StatusDetail">Could not save to Drive.</span>
+                    <button class="discover-button" @onclick="() => Discover.Store.RetryAsync()">Retry</button>
+                    break;
+            }
+        </div>
+    </header>
+
+    @if (!Genres.IsGenre(Genre))
+    {
+        <p class="state-message">Unknown genre "@Genre". Discover has Z, H, P and C.</p>
+    }
+    else if (loadError is not null)
+    {
+        <p class="state-message error" role="alert">@loadError</p>
+    }
+    else if (!loaded)
+    {
+        <p class="state-message">Loading the collection…</p>
+    }
+    else
+    {
+        var queue = Discover.Queue(Genre);
+        var shortlist = Discover.Shortlist(Genre);
+        var liked = Discover.Liked(Genre);
+        var seeds = Discover.SeedsOf(Genre);
+
+        <nav class="discover-tabs" role="tablist">
+            <a role="tab" class="discover-tab @(TabIs("listen") ? "active" : "")" aria-selected="@(TabIs("listen") ? "true" : "false")"
+               href="@($"discover/{Genre}/listen")" data-tab="listen">Listen <span class="discover-count" data-queue-count="@queue.Count">@queue.Count</span></a>
+            <a role="tab" class="discover-tab @(TabIs("shortlist") ? "active" : "")" aria-selected="@(TabIs("shortlist") ? "true" : "false")"
+               href="@($"discover/{Genre}/shortlist")" data-tab="shortlist">Shortlist <span class="discover-count" data-shortlist-count="@shortlist.Count">@shortlist.Count</span></a>
+            <a role="tab" class="discover-tab @(TabIs("seeds") ? "active" : "")" aria-selected="@(TabIs("seeds") ? "true" : "false")"
+               href="@($"discover/{Genre}/seeds")" data-tab="seeds">Seeds <span class="discover-count" data-seed-count="@seeds.Count">@seeds.Count</span></a>
+        </nav>
+
+        @if (TabIs("listen"))
+        {
+            <ListenTab Genre="@Genre" Queue="queue" Seeds="seeds" />
+        }
+        else if (TabIs("shortlist"))
+        {
+            <section class="discover-section" data-section="to-decide">
+                <h2>Liked and maybe <span class="discover-count">@liked.Count</span></h2>
+                @if (liked.Count == 0)
+                {
+                    <p class="discover-hint">Tracks you like or mark "maybe" in Listen wait here for a rating and a buy-or-skip.</p>
+                }
+                else
+                {
+                    <ul class="discover-list">
+                        @foreach (var t in liked)
+                        {
+                            <li class="discover-row" data-liked="@t.Key">
+                                <div class="discover-row-main">
+                                    <span class="discover-badge">@(t.Pass1 == Pass1.Like ? "♥" : "?")</span>
+                                    <span class="discover-row-title">@t.Artist – @t.Title</span>
+                                    <span class="discover-row-meta">@t.Label · @t.ReleaseTitle @Date(t.ReleaseDate)</span>
+                                </div>
+                                <div class="discover-row-actions">
+                                    <DiscoverStars Value="t.Rating" OnRate="r => Discover.Judge(t, rating: r)" />
+                                    <button class="discover-button buy" data-buy @onclick="() => Discover.Judge(t, decision: Decision.Buy)">Buy</button>
+                                    <button class="discover-button" data-dont-buy @onclick="() => Discover.Judge(t, decision: Decision.Skip)">Don't buy</button>
+                                    @if ((t.TrackUrl ?? t.ReleaseUrl) is { } link)
+                                    {
+                                        <a class="discover-link" href="@link" target="_blank" rel="noopener noreferrer">Bandcamp ↗</a>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+
+            <section class="discover-section" data-section="to-buy">
+                <h2>To buy <span class="discover-count">@shortlist.Count</span></h2>
+                @if (shortlist.Count == 0)
+                {
+                    <p class="discover-hint">Nothing to buy yet in @Genre.</p>
+                }
+                else
+                {
+                    <div class="discover-toolbar">
+                        <button class="discover-button" data-copy-links @onclick="() => CopyAsync(shortlist)">Copy links</button>
+                        @if (copied) { <span class="discover-hint" data-copied>Copied.</span> }
+                    </div>
+                    <ul class="discover-list">
+                        @foreach (var t in shortlist)
+                        {
+                            <li class="discover-row" data-shortlisted="@t.Key">
+                                <div class="discover-row-main">
+                                    <span class="discover-stars-static">@(t.Rating is { } r ? new string('★', r) : "")</span>
+                                    <span class="discover-row-title">@t.Artist – @t.Title</span>
+                                    <span class="discover-row-meta">@t.Label · @t.ReleaseTitle @Date(t.ReleaseDate)@(string.IsNullOrWhiteSpace(t.Note) ? "" : " · " + t.Note)</span>
+                                </div>
+                                <div class="discover-row-actions">
+                                    @if (t.ReleaseUrl is { } url)
+                                    {
+                                        <a class="discover-link" href="@url" target="_blank" rel="noopener noreferrer" data-buy-link>Buy on Bandcamp ↗</a>
+                                    }
+                                    <button class="discover-button" data-bought @onclick="() => Discover.Judge(t, bought: true)">Bought</button>
+                                    <button class="discover-button" data-remove @onclick="() => Discover.Judge(t, decision: Decision.Skip)">Remove</button>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+        else
+        {
+            <SeedsTab Genre="@Genre" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Genre { get; set; } = "H";
+    [Parameter] public string? Tab { get; set; }
+
+    bool loaded;
+    bool copied;
+    string? loadError;
+
+    bool TabIs(string tab) => (Tab ?? DefaultTab) == tab;
+
+    // A genre with no seeds yet opens on Seeds; otherwise on Listen.
+    string DefaultTab => loaded && Discover.SeedsOf(Genre).Count == 0 ? "seeds" : "listen";
+
+    static string Date(DateOnly? d) => d is { } x ? $"({x:yyyy-MM-dd})" : "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Discover.Changed += OnChanged;
+        try
+        {
+            await Discover.EnsureLoadedAsync();
+            loaded = true;
+        }
+        catch (DriveAuthException)
+        {
+            await Auth.HandleExpiredAsync(Navigation.ToBaseRelativePath(Navigation.Uri));
+        }
+        catch (Exception e)
+        {
+            loadError = "Could not load Discover: " + e.Message;
+        }
+    }
+
+    protected override void OnParametersSet() => copied = false;
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    async Task GrantAsync()
+    {
+        // Inside the click, so the consent popup is allowed. A token with the new
+        // scope replaces the old one; then the queued events are saved.
+        if (await Auth.SignInAsync() is not null) await Discover.Store.RetryAsync();
+    }
+
+    async Task CopyAsync(IReadOnlyList<TrackState> tracks)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", DiscoverService.ShortlistText(tracks));
+            copied = true;
+        }
+        catch (JSException)
+        {
+            copied = false;
+        }
+    }
+
+    public void Dispose() => Discover.Changed -= OnChanged;
+}

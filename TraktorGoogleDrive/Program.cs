@@ -28,5 +28,11 @@ builder.Services.AddSingleton<PlayerService>();
 builder.Services.AddSingleton<RemoteBridge>();
 // Scoped only because it reads the token and Drive, which are; WASM has one scope.
 builder.Services.AddScoped<PlaybackMemory>();
+// Track discovery (ADR 20261025-54): seeds, Bandcamp releases via the server,
+// triage, and its event log in the Drive appDataFolder.
+builder.Services.AddScoped<AppDataStore>();
+builder.Services.AddScoped<DiscoverStore>();
+builder.Services.AddScoped<DiscoverApi>();
+builder.Services.AddScoped<DiscoverService>();
 
 await builder.Build().RunAsync();
