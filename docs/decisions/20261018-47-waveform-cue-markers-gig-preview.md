@@ -209,7 +209,10 @@ Options considered:
 - **F spike**: plot `AUDIO_ID` next to real peaks for three WAV tracks. If it
   matches, it becomes the instant placeholder drawn before real peaks arrive, the
   waveform for over-cap sets, and the waveform while casting.
-- **C′**: the follow-up that actually lowers the bill.
+- **C′**: the follow-up that actually lowers the bill. *Built 2026-10-25*
+  (`prefetch.js`): playback starts on the proxy stream and moves to the downloaded
+  file at the same position once it is complete, so it does not wait for the
+  download. The next track is downloaded too, and the waveform reads the same copy.
 - **D**: the fallback if full-detail waveforms for compressed sets are wanted.
 
 How it is built: `waveform.js` `computeCompressedPeaks` makes one direct download

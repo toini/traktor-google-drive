@@ -1,0 +1,44 @@
+/* Whole-file download and network state in the player bar (prefetch.js).
+   Kept apart from the player bar's layout: only the indicators live here. */
+
+/* A hairline under the waveform: how much of the track is on this device. */
+.player-buffer {
+    height: 2px;
+    margin-top: 2px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+.player-buffer-fill {
+    height: 100%;
+    background: #4a5058;
+    transition: width 0.3s linear;
+}
+
+.player-buffer[data-buffer-state="cached"] .player-buffer-fill { background: #3fbf5a; }
+.player-buffer[data-buffer-state="stream"] { visibility: hidden; }
+
+.player-buffer-notes {
+    float: right;
+    display: flex;
+    gap: 0.4rem;
+    margin-left: 0.5rem;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+.player-net {
+    color: #ffd21f;
+    animation: player-net-pulse 1.4s ease-in-out infinite;
+}
+
+.player-next-ready {
+    color: #3fbf5a;
+    opacity: 0.85;
+}
+
+@keyframes player-net-pulse {
+    50% { opacity: 0.45; }
+}

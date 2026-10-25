@@ -166,7 +166,12 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
 
   const serveMedia = async (route: Route, url: string) => {
     const headers = await route.request().allHeaders();
-    const call: DriveCall = { kind: 'media', url, range: headers['range'], token: proxyToken(headers['cookie']) };
+    // A direct googleapis.com download (the player's whole-file cache, the
+    // waveform) carries the token as a header; the proxy, as a cookie.
+    const bearer = headers['authorization']?.match(/^Bearer (.+)$/)?.[1] ?? null;
+    const call: DriveCall = {
+      kind: 'media', url, range: headers['range'], token: bearer ?? proxyToken(headers['cookie']),
+    };
     calls.push(call);
     if (opts.mediaGate) await opts.mediaGate;
     if (opts.mediaStatus) {
@@ -313,6 +318,18 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
 
   return calls;
 }
+
+/**
+ * Turns off the player's whole-file cache (prefetch.js), so playback streams
+ * through the proxy only, as a set too big to cache does. For tests about the
+ * streaming path itself: its slices, its 401 recovery, its waveform reads.
+ */
+export async function noPrefetch(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('player:prefetch', 'off'));
+}
+
+/** True for a direct googleapis.com media download, as opposed to the proxy. */
+export const isDirect = (c: DriveCall) => c.kind === 'media' && c.url.startsWith('https://www.googleapis.com/');
 
 /**
  * Seeds the token the app expects, so tests never touch Google's consent

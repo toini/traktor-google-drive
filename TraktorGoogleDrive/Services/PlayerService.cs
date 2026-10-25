@@ -15,6 +15,18 @@ public enum PlaybackState
 }
 
 /// <summary>
+/// The local track's bytes. <paramref name="State"/> is "stream" (proxy only:
+/// too big for the cache, or caching is off), "downloading" (streaming while the
+/// whole file downloads; <paramref name="Fraction"/> of it is here) or "cached"
+/// (playing from memory, no network needed). <paramref name="Network"/> is ""
+/// normally, "buffering" while starved of data, "reconnecting" after a drop.
+/// </summary>
+public sealed record BufferStatus(string State, double Fraction, bool NextReady, string Network)
+{
+    public static readonly BufferStatus None = new("none", 0, false, "");
+}
+
+/// <summary>
 /// Owns the app's single audio element. Components ask this to play; they never
 /// hold an audio element themselves, so simultaneous playback cannot happen.
 /// While a Cast session is connected it routes to the TV instead, so neither a
@@ -196,6 +208,18 @@ public class PlayerService : IAsyncDisposable
     /// <summary>Gig preview: each track plays from its load cue to its last loop, then the next.</summary>
     public bool PreviewActive => Remote is { } r ? r.PreviewActive : _preview;
 
+    /// <summary>
+    /// How the local track is held: streaming, downloading whole, or cached, and
+    /// whether the next one is ready offline. Null for a remote player or the TV,
+    /// which fetch for themselves.
+    /// </summary>
+    public BufferStatus? Buffer => Remote is null && !_cast.IsConnected && _localFileId is not null ? _buffer : null;
+
+    private BufferStatus _buffer = BufferStatus.None;
+    // Whether this tab is playing for real (not just showing a restored track),
+    // so a queue change re-plans what to download.
+    private bool _prefetching;
+
     /// <summary>The range the current track plays in gig preview; null outside it.</summary>
     public PreviewRange? CurrentRange =>
         Remote is { } r ? r.Preview is { } p ? new PreviewRange(p.Start, p.End, p.Note) : null : _range;
@@ -303,6 +327,56 @@ public class PlayerService : IAsyncDisposable
 
         // A re-sort moves the current row; remember where it now sits.
         if (_file is not null && IndexOf(_file) is var moved and >= 0) _lastIndex = moved;
+        // ...and with it, which track comes next.
+        if (_prefetching) _ = PlanPrefetchAsync();
+        Changed?.Invoke();
+    }
+
+    /* ---------- whole-file download ---------- */
+
+    /// <summary>
+    /// Tells player.js which files to download whole: the loaded track, then the
+    /// one Next (or continuous play, or gig preview) would start. The NML's size
+    /// estimate goes along, so a set too big for the cache is never started.
+    /// </summary>
+    private async Task PlanPrefetchAsync()
+    {
+        if (_module is null || _localFileId is null || _cast.IsConnected) return;
+        _prefetching = true;
+        var current = new PrefetchItem(_localFileId,
+            _file is not null && _file.DriveFileId == _localFileId ? DriveAudio.EstimatedBytes(_file) : null, null, null);
+        // The next track is also primed in a second element, at the place it
+        // will start: its load cue in gig preview, the top otherwise. Same
+        // arithmetic as PlayEntryAsync, so player.js can tell the primed copy fits.
+        var next = NextEntry is { } n
+            ? new PrefetchItem(n.DriveFileId, DriveAudio.EstimatedBytes(n), DriveAudio.UrlFor(n.DriveFileId),
+                _preview ? GigPreview.RangeFor(n.Track, n.Track?.PlaytimeFloat ?? 0).Start : 0)
+            : null;
+        try { await _module.InvokeVoidAsync("plan", current, next); }
+        catch (JSException) { /* playback goes on streaming */ }
+    }
+
+    /// <summary>The queue row after the loaded one, or null at the end (or with no queue).</summary>
+    private FileEntry? NextEntry
+    {
+        get
+        {
+            if (_file is null || _file.DriveFileId != _localFileId) return null;
+            var i = IndexOf(_file);
+            return i >= 0 && i + 1 < _queue.Count ? _queue[i + 1] : null;
+        }
+    }
+
+    private sealed record PrefetchItem(
+        [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id,
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytes")] long? Bytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("start")] double? Start);
+
+    [JSInvokable]
+    public void OnBufferChanged(string state, double fraction, bool nextReady, string? network)
+    {
+        _buffer = new BufferStatus(state, Math.Clamp(fraction, 0, 1), nextReady, network ?? "");
         Changed?.Invoke();
     }
 
@@ -525,6 +599,8 @@ public class PlayerService : IAsyncDisposable
     {
         if (_localFileId is null || CurrentUrl is null) return;
         await SyncProxyCookieAsync();
+        // A restored track starts downloading when it is played, not on page load.
+        await PlanPrefetchAsync();
 
         if (!_preview || _file is not { } file || file.DriveFileId != _localFileId)
         {
@@ -623,6 +699,10 @@ public class PlayerService : IAsyncDisposable
         // no loadstart would ever clear a Loading state.
         if (_localFileId != fileId) _localState = PlaybackState.Loading;
         _localFileId = fileId;
+        // Before play: a file already downloaded then plays from memory, and the
+        // waveform finds the download to share rather than starting its own.
+        await PlanPrefetchAsync();
+        if (generation != _playGeneration) return;
         Changed?.Invoke();
         await SyncProxyCookieAsync();
         if (generation != _playGeneration) return;
@@ -809,7 +889,7 @@ public class PlayerService : IAsyncDisposable
         };
 
         if (state == "ended") _localTime = 0;
-        else if (state == "idle") { _localFileId = null; _localTime = 0; }
+        else if (state == "idle") { _localFileId = null; _localTime = 0; _prefetching = false; }
         else if (fileId is not null) _localFileId = fileId;
 
         if (state == "playing") _consecutiveFailures = 0;

@@ -360,8 +360,14 @@ test.describe('remote control when the laptop\'s Google session runs out', () =>
     let accepted = true;
     const laptop = await device(browser, {
       name: 'Laptop · Chrome',
-      // Small slices, so a far seek needs a fresh request, which then 401s.
-      mock: { maxSliceBytes: 64 * 1024, acceptToken: () => accepted },
+      // Small slices and a long file, so a far seek needs a fresh request, which
+      // then 401s. The player reads ahead (preload="auto"), and from the local
+      // mock it held all of a 2-minute (1.9 MB) file within a second or two, so
+      // the seek never fetched anything. 20 minutes is ~19 MB, far more than
+      // Chrome reads ahead.
+      mock: { wavSeconds: 1200, maxSliceBytes: 64 * 1024, acceptToken: () => accepted },
+      // Streaming only: a track downloaded whole would never meet the 401.
+      init: () => localStorage.setItem('player:prefetch', 'off'),
     });
     const tablet = await device(browser, { name: 'Tablet · Chrome' });
     await playFirstRow(laptop.page);
