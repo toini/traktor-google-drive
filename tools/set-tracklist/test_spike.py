@@ -12,6 +12,7 @@ import warnings
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import compare  # noqa: E402
 import detect  # noqa: E402
 import evaluate  # noqa: E402
 import nml  # noqa: E402
@@ -82,6 +83,30 @@ class SyntheticPipeline(unittest.TestCase):
         cands = [t.name for t in self.played]
         segs = detect.detect(self.rec, {c: self.feats[c] for c in cands}, prior="rec")
         self.assertEqual([s.track for s in segs], cands)
+
+    def test_partial_prior_finds_played_subset_in_order(self):
+        cands = [t.name for t in self.played[:3]] + ["synth-1105"] + [t.name for t in self.played[3:]] + \
+                ["synth-1106", "synth-1107"]
+        segs = detect.detect(self.rec, {c: self.feats[c] for c in cands}, prior="partial")
+        self.assertEqual([s.track for s in segs], [t.name for t in self.played])
+
+    def test_alignment_recovers_tempo_ratio(self):
+        segs = detect.detect(self.rec, {t.name: self.feats[t.name] for t in self.played}, prior="rec")
+        truth = {m.name: m for m in self.mix.segments}
+        for s, t in zip(segs, self.played):
+            al = compare.align(self.rec, s.beat_a, s.beat_b, detect.beat_features(t.audio, synth.SR, t.bpm))
+            self.assertAlmostEqual(al.tempo_ratio, truth[s.track].tempo_ratio, delta=0.01)
+
+    def test_report_writes_pngs_html_and_excerpts(self):
+        import tempfile
+        segs = detect.detect(self.rec, {t.name: self.feats[t.name] for t in self.played}, prior="rec")
+        cands = {t.name: compare.Candidate(t.name, (lambda t=t: t.audio), t.bpm) for t in self.played}
+        with tempfile.TemporaryDirectory() as d:
+            path = compare.Report(d, "test", self.mix.audio, synth.SR, self.rec, cands).build(segs[:2])
+            files = set(os.listdir(d))
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue({"overview.png", "segment-01.png", "segment-02.png", "segment-01-recording.wav",
+                             "segment-01-track.wav", "segment-01-ab.wav"} <= files)
 
 
 if __name__ == "__main__":

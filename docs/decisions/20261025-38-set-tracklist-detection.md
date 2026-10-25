@@ -35,16 +35,26 @@ evidence about Toni's habits, not about every set he has recorded since.
     `Industrial techno/`;
   - together they run about 120 min, against a 55-min recording.
 
-  So the run treats the list as a strong order prior with skips allowed: the ADR's
-  `.rec` case (`--prior rec`).
+  Toni on H15: *"I played shorter parts and omitted the last tracks."* So partial
+  plays are expected, and the tail of the playlist went unplayed. The spike uses a
+  `partial` prior (`detect.py`, the `run_real.py` default):
+  - the order stays strong, as for `.rec`;
+  - skips are three times likelier and decay more slowly;
+  - the path may end on any track, so an unplayed tail costs nothing;
+  - "stay" is slightly weaker, for shorter plays.
 
   There is no ground truth for H15. It is evaluated by:
-  - **(a)** Toni judging the produced tracklist by ear in the app;
+  - **(a)** Toni judging the produced tracklist by ear and by eye, with the waveform
+    comparison report (§6a);
   - **(b)** optionally, a quick tap-marked truth, if he agrees later.
 
   `Z19-2025 Sentimony 2025-02-23.wav` (135 min, 39-track `.rec` list, 51-track base
   list) stays as the later benchmark, because history gives it exact ground truth.
   Open question 4.
+- **A waveform comparison to confirm each match** (Toni, 2026-10-25): *"Build a tool
+  that compares the waveform in the set and in the track so we can confirm the track
+  is correct."* It is built offline in the spike (`compare.py`, §6a). The app version
+  is planned in §6a and not built yet.
 - **History files exist** (open question 1). Toni's Google Drive "Native Instruments"
   folder holds 141 `history_*.nml` files: 50 unique sessions from 2025-02-23 to
   2026-08-17. See §"Spike findings".
@@ -452,6 +462,58 @@ index, so it survives a recompute that shifts the indices.
   the candidate list as today, plus "Tap ▸| while listening to mark track changes,
   or run the tracklist tool".
 
+### 6a. Confirming a match: the waveform comparison
+
+Every automatic segment must be checkable by Toni, by eye and by ear, without
+trusting the confidence number.
+
+**Offline (built in the spike, `tools/set-tracklist/compare.py`).** `run_real.py`
+writes `out/<recording>/` next to the tracklist, local only:
+
+- `overview.png`: the whole set's waveform with one coloured band per segment. The
+  band carries its number and track; its opacity is the confidence; unsure or
+  unknown segments are hatched.
+- `segment-NN.png`, one per segment, with 20 s of context on each side:
+  - the recording's waveform;
+  - under it, the matched track's waveform, mapped onto the recording's time axis
+    through the beat alignment, so intros, breakdowns and drops line up when the
+    match is right;
+  - the runner-up candidate, aligned the same way, so a wrong match stands out;
+  - the beat-by-beat feature similarity along both alignments;
+  - a header with the track, the confidence word, where playback entered the
+    original track, and the tempo ratio.
+- `report.html`: the overview, a summary table, then each segment image with three
+  20 s players. They play the recording, the matched track stretched to the set's
+  tempo, and an A/B stereo file (recording left, track right).
+
+The alignment is one whole-segment diagonal in the beat domain: the candidate offset
+whose diagonal best matches the segment. The tempo ratio is the slope of track beat
+time against recording beat time along it. On synthetic mixes the ratio is within
+0.001 of the truth. The offset is exact, or exactly one repeating phrase off, and the
+report flags that case.
+
+When no breakdown or intro falls inside a segment, a loop-based track fits equally
+well at several phrase shifts. The header then says *"offset ambiguous: fits equally
+at +32 beats"*. That does not affect **which** track it is, only where in it.
+
+**In the app (planned, increment 2).** A "Compare" toggle on a segment row in
+`SetDetail`, and on the segment's band on the waveform, opens a panel under the
+player:
+
+| Part | How | Cost |
+|---|---|---|
+| Two stacked waveforms, recording over track | The recording's peaks already exist (`waveform.js`). The track's peaks come from the same pipeline (range reads for WAV/AIFF, decode for MP3/FLAC under the cap), then are mapped through `trackOffset` and `tempoRatio` from the timeline JSON. They are drawn on the same time axis in a second WaveSurfer instance with interaction off. | One more peaks fetch per opened segment, from googleapis.com directly; cached in IndexedDB like any track |
+| Runner-up row | The CLI writes `runnerUp: {key, trackOffset, tempoRatio}` per segment into the sidecar; drawn the same way, collapsed by default | The same again, only when expanded |
+| Similarity strip | The CLI writes a downsampled similarity curve (1 value per bar) per segment into the sidecar | A few hundred bytes per segment |
+| A/B listening | "Play set here" seeks the main player. "Play track here" plays the track file from `trackOffset` with `playbackRate = tempoRatio` and `preservesPitch = true` (keylock), through a second `<audio>`. An A/B switch mutes one or the other, keeping both in step. | Streams the track like normal playback; no new server work |
+| Verdict | "Correct" / "Wrong track" / "Pick another" buttons write an override (§5): a confirmation raises the segment to *exact*; a rejection opens the candidate picker with the runner-up first | Uses the override store already planned |
+
+The sidecar gains the fields above (`trackOffset`, `tempoRatio` and `confidence` are
+already in §0; `runnerUp` and `similarity` are new). The panel needs no server change,
+and it works the same while casting, since the set keeps playing on the TV and the
+comparison plays locally. Out of scope: rendering spectrograms in the app; the
+offline PNGs cover the deep-dive case.
+
 ### 7. Remote control and Cast
 
 | Option | How | Cost | Gives up | Verdict |
@@ -699,12 +761,15 @@ Three lessons carry over to real audio:
 
 Synthetic results prove the plumbing and the tuning direction, not the targets: the
 tracks are far more distinct than real Sentimony psytrance. `run_real.py` takes any
-recording and playlist, and prints a tracklist Toni can check by ear: start time,
+recording and playlist (default prior `partial`), and prints a tracklist Toni can check by ear: start time,
 confidence word (high / likely / unsure), the list position, and the candidates
 judged "not played". It writes the same as text and as §0-shaped JSON. With
 `--ground-truth` and `--grid`, it scores every prior × decoder × candidate form, as
 for Z19. Its signed boundary median also checks the
-anchor. Not built yet:
+anchor. `compare.py` builds the waveform comparison report for every run (§6a); it was tested
+on synthetic mixes and on stand-in files named like H15's.
+
+Not built yet:
 - 3d (`AUDIO_ID` envelopes);
 - 3b (`fpcalc` is not installed);
 - 2a (novelty for the no-list case).

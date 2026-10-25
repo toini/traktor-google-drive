@@ -13,7 +13,8 @@ by every boundary means the recording's start time is wrong.
 
 Usage:
   run_real.py --recording FILE --playlist "Folder/Name" --audio-dir DIR
-              [--prior rec|base|none] [--method viterbi|greedy] [--candidates excerpts|whole]
+              [--prior partial|rec|base|none] [--method viterbi|greedy] [--candidates excerpts|whole]
+              [--no-compare]
               [--grid] [--ground-truth JSON] [--out DIR] [--ni-root DIR]
 
 Examples:
@@ -37,6 +38,7 @@ import librosa
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import compare  # noqa: E402
 import detect  # noqa: E402
 import evaluate  # noqa: E402
 import nml  # noqa: E402
@@ -89,8 +91,11 @@ def main() -> None:
     ap.add_argument("--recording", required=True, help="path to the recording's audio file")
     ap.add_argument("--playlist", required=True, help='collection playlist, "Folder/Name" (as nml.py prints it)')
     ap.add_argument("--audio-dir", required=True, help="folder holding the playlist's track files (searched recursively)")
-    ap.add_argument("--prior", default="rec", choices=["rec", "base", "none"],
-                    help="how much to trust the playlist order: rec = strong, base = weak, none")
+    ap.add_argument("--prior", default="partial", choices=["partial", "rec", "base", "none"],
+                    help="playlist order trust: partial = strong order, partial plays, skips and an "
+                         "unplayed tail (H15); rec = strong, nearly no skips; base = weak; none")
+    ap.add_argument("--no-compare", action="store_true",
+                    help="skip the waveform comparison report (out/<recording>/report.html)")
     ap.add_argument("--method", default="viterbi", choices=["viterbi", "greedy"])
     ap.add_argument("--candidates", default="excerpts", choices=["excerpts", "whole"])
     ap.add_argument("--grid", action="store_true", help="also run every prior x method x candidates combination")
@@ -163,6 +168,15 @@ def main() -> None:
         }, f, indent=1, ensure_ascii=False)
     print(f"\nwrote {os.path.join(a.out, stem)}.tracklist.txt and .json")
 
+    if not a.no_compare:
+        t0 = time.time()
+        cmp_cands = {b: compare.Candidate(label(cands[b]),
+                                          (lambda b=b: librosa.load(files[b], sr=SR, mono=True)[0]), cands[b].bpm)
+                     for b in order}
+        report = compare.Report(os.path.join(a.out, stem), os.path.basename(a.recording), y, SR, rec, cmp_cands)
+        path = report.build(segs, [b for b in order if b not in {s.track for s in segs}])
+        print(f"comparison report: {path} ({time.time() - t0:.0f}s)")
+
     if not (a.grid or a.ground_truth):
         return
     truth = blends = None
@@ -172,7 +186,7 @@ def main() -> None:
         blends = [(p["track"]["title"], n["track"]["title"], n["deckStart"], p["deckEnd"])
                   for p, n in zip(gt["segments"], gt["segments"][1:])]
     rows = []
-    for prior in (["rec", "base", "none"] if a.grid else [a.prior]):
+    for prior in (["partial", "rec", "base", "none"] if a.grid else [a.prior]):
         for rep in reps:
             for method in (["viterbi", "greedy"] if a.grid else [a.method]):
                 t1 = time.time()

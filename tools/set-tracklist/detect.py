@@ -41,6 +41,9 @@ class Segment:
     track: str           # candidate name or UNKNOWN
     confidence: float
     track_beat: int | None = None  # matched beat inside the candidate at the segment start
+    beat_a: int = 0                # first recording beat of the segment
+    beat_b: int = 0                # one past its last beat
+    runner_up: str | None = None   # best other candidate over the segment
 
 
 def beat_features(y: np.ndarray, sr: int, bpm_hint: float | None = None,
@@ -118,9 +121,13 @@ def window_scores(scores: np.ndarray, window: int) -> np.ndarray:
 
 
 def transition_matrix(k: int, prior: str) -> np.ndarray:
-    """States 0..k-1 are candidates in list order, k is UNKNOWN. prior: rec | base | none."""
+    """States 0..k-1 are candidates in list order, k is UNKNOWN. prior: rec | partial | base | none."""
     p = {
         "rec": dict(stay=0.90, nxt=0.08, skip=0.010, decay=0.3, back=0.0005, unk=0.005),
+        # a .rec-like list where the DJ played shorter parts, skipped some and left the tail
+        # unplayed (Toni on H15): order still strong, skips a few times likelier and slower to decay.
+        # The tail needs no rule: the path may end on any state.
+        "partial": dict(stay=0.88, nxt=0.08, skip=0.030, decay=0.5, back=0.0005, unk=0.005),
         "base": dict(stay=0.90, nxt=0.03, skip=0.020, decay=0.9, back=0.008, unk=0.01),
         "none": dict(stay=0.90, nxt=0.01, skip=0.010, decay=1.0, back=0.010, unk=0.01),
     }[prior]
@@ -175,7 +182,7 @@ def decode(win: np.ndarray, prior: str, beta: float = 3.0, unknown_level: float 
     em = np.vstack([win, np.full((1, n), unknown_level)]) * beta
     logt = transition_matrix(k, prior)
     start = np.full(k + 1, np.log(1.0 / (k + 1)))
-    if prior == "rec":
+    if prior in ("rec", "partial"):
         start[:k] = np.log(0.5 ** np.arange(k) + 1e-6)
     path = viterbi(em, logt, start)
     for _ in range(max_passes):
@@ -222,26 +229,37 @@ def refine(path: np.ndarray, beat: np.ndarray, window: int) -> list[tuple[int, i
     return rs
 
 
-def detect(rec: BeatFeatures, cands: dict[str, BeatFeatures], prior: str = "base", method: str = "viterbi",
-           window: int = 32, run_length: int = 16, unknown_level: float = 0.5) -> list[Segment]:
-    """cands must be in list order (it is the order prior)."""
+def score_matrix(rec: BeatFeatures, cands: dict[str, BeatFeatures], run_length: int = 16
+                 ) -> tuple[list[str], np.ndarray, np.ndarray]:
+    """Raw per-beat similarity (cands, beats) and the matched candidate beat for each."""
     names = list(cands)
     beat = np.zeros((len(names), len(rec.feats)), dtype=np.float32)
     offs = np.zeros((len(names), len(rec.feats)), dtype=np.int32)
     for i, n in enumerate(names):
         beat[i], offs[i] = beat_scores(rec.feats, cands[n].feats, run_length)
-    beat = contrast(beat)
+    return names, beat, offs
+
+
+def detect(rec: BeatFeatures, cands: dict[str, BeatFeatures], prior: str = "base", method: str = "viterbi",
+           window: int = 32, run_length: int = 16, unknown_level: float = 0.5) -> list[Segment]:
+    """cands must be in list order (it is the order prior)."""
+    names, raw, offs = score_matrix(rec, cands, run_length)
+    beat = contrast(raw)
     win = window_scores(beat, window)
     path = decode(win, prior, unknown_level=unknown_level) if method == "viterbi" else greedy(win, unknown_level)
     out = []
     times = np.append(rec.times, rec.times[-1] + (rec.times[-1] - rec.times[-2]))
     for st, a, b in refine(path, beat, window):
         name = names[st] if st < len(names) else UNKNOWN
+        means = beat[:, a:b].mean(axis=1)
         if st < len(names):
             other = np.delete(beat[:, a:b], st, axis=0).max(axis=0) if len(names) > 1 else np.zeros(b - a)
             conf = float(np.clip((beat[st, a:b] - other).mean() / 6, 0, 1))
             tb = int(offs[st, a])
+            means[st] = -np.inf
         else:
             conf, tb = 0.0, None
-        out.append(Segment(float(times[a]), float(times[min(b, len(times) - 1)]), name, round(conf, 3), tb))
+        ru = names[int(np.argmax(means))] if len(names) > 1 or st >= len(names) else None
+        out.append(Segment(float(times[a]), float(times[min(b, len(times) - 1)]), name, round(conf, 3), tb,
+                           beat_a=a, beat_b=b, runner_up=ru))
     return out
