@@ -1,14 +1,31 @@
 /* Playlist header ------------------------------------------------------ */
 
+/* Icon | title over counts | buttons. The middle column takes all the room
+   the buttons leave, so a short title never wraps. */
 .playlist-header {
     display: flex;
-    align-items: baseline;
-    gap: 1rem;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.25rem;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.9rem 1.25rem;
+    margin-bottom: 1rem;
     background: linear-gradient(135deg, #23262b 0%, #2f3339 100%);
     border-left: 4px solid #ff6600;
     border-radius: 8px;
+}
+
+.playlist-icon {
+    flex: 0 0 auto;
+    color: #ff6600;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.playlist-heading {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .playlist-title {
@@ -16,21 +33,52 @@
     color: #ffffff;
     font-size: 22px;
     font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.playlist-icon {
-    color: #ff6600;
-    font-size: 24px;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .track-count {
     color: #8b949e;
-    font-size: 13px;
-    margin-left: auto;
+    font-size: 12px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.playlist-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.playlist-actions .preview-set-button,
+.playlist-actions .column-picker-toggle {
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.column-picker-icon {
+    display: none;
+}
+
+@media (max-width: 999.98px) {
+    .playlist-header {
+        gap: 0.6rem;
+        padding: 0.55rem 0.75rem;
+        margin-bottom: 0.6rem;
+    }
+
+    .playlist-title { font-size: 19px; }
+    .playlist-icon { font-size: 20px; }
+}
+
+/* Phone-narrow: the buttons go icon-only, their names stay in aria-label. */
+@media (max-width: 599.98px) {
+    .playlist-actions .button-label { display: none; }
+    .column-picker-icon { display: inline; }
 }
 
 /* Table ---------------------------------------------------------------- */

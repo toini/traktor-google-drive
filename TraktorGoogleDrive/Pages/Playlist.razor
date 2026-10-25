@@ -15,39 +15,43 @@
 
 <PageTitle>@(Name ?? "Playlist") · Traktor</PageTitle>
 
+@* The title gets the width: one line, cut with a tooltip only when it truly
+   does not fit. Counts sit small underneath, and the buttons never wrap. *@
 <header class="playlist-header">
-    <h1 class="playlist-title">
-        <span class="playlist-icon" aria-hidden="true">♫</span>
-        @(Name ?? "…")
-    </h1>
-    @if (files is not null)
-    {
-        @* Every ENTRY counts, separators and unplayable ones too, so this is
-           the number Traktor shows for the playlist. *@
-        <span class="track-count" data-track-count="@files.Count">
-            @files.Count @(files.Count == 1 ? "track" : "tracks")@if (separatorCount > 0)
-            {
-                <span data-separator-count="@separatorCount"> · @separatorCount @(separatorCount == 1 ? "separator" : "separators")</span>
-            }@if (NotPlayableCount > 0)
-            {
-                <span class="not-playable-count" data-not-playable="@NotPlayableCount" title="@NotPlayableBreakdown"> · @NotPlayableCount not playable</span>
-            }
-        </span>
-        @if (files.Any(f => f.IsPlayable))
+    <span class="playlist-icon" aria-hidden="true">♫</span>
+    <div class="playlist-heading">
+        <h1 class="playlist-title" title="@Name">@(Name ?? "…")</h1>
+        @if (files is not null)
+        {
+            @* Every ENTRY counts, separators and unplayable ones too, so this is
+               the number Traktor shows for the playlist. *@
+            <span class="track-count" data-track-count="@files.Count">
+                @files.Count @(files.Count == 1 ? "track" : "tracks")@if (separatorCount > 0)
+                {
+                    <span data-separator-count="@separatorCount"> · @separatorCount @(separatorCount == 1 ? "separator" : "separators")</span>
+                }@if (NotPlayableCount > 0)
+                {
+                    <span class="not-playable-count" data-not-playable="@NotPlayableCount" title="@NotPlayableBreakdown"> · @NotPlayableCount not playable</span>
+                }
+            </span>
+        }
+    </div>
+    <div class="playlist-actions">
+        @if (files is not null && files.Any(f => f.IsPlayable))
         {
             @* Gig preview walks the table down in its current sort, each track from
                its load cue to the end of its last loop (ADR 20261018-47). It starts
                at the loaded track when that is one of these rows, else at the top. *@
             var from = Player.PreviewStartEntry;
             <button class="preview-set-button" data-preview-set data-preview-from="@from?.PlaylistIndex"
-                    title="@PreviewTitle(from)"
-                    @onclick="StartPreview">▶ Preview set</button>
+                    title="@PreviewTitle(from)" aria-label="Preview set"
+                    @onclick="StartPreview"><span aria-hidden="true">▶</span><span class="button-label"> Preview set</span></button>
         }
-    }
-    @if (files is { Count: > 0 })
-    {
-        <ColumnPicker Columns="@ColumnChoices" OnToggle="ToggleColumnAsync" OnReset="ResetColumnsAsync" />
-    }
+        @if (files is { Count: > 0 })
+        {
+            <ColumnPicker Columns="@ColumnChoices" OnToggle="ToggleColumnAsync" OnReset="ResetColumnsAsync" />
+        }
+    </div>
 </header>
 
 @if (loadError is not null)

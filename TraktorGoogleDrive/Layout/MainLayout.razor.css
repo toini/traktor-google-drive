@@ -3,6 +3,7 @@
     display: flex;
     flex-direction: column;
     background-color: #1a1a1a;
+    min-height: 100vh;
     color: #ffffff;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -14,6 +15,14 @@ main {
        With this, the table scrolls inside its own container instead. */
     min-width: 0;
     background-color: #2a2a2a;
+    /* A column, so a short playlist still has the player bar at the bottom of
+       a tall (portrait tablet) window rather than right under the table. */
+    display: flex;
+    flex-direction: column;
+}
+
+main > article {
+    flex: 1 0 auto;
 }
 
 .sidebar {
@@ -21,20 +30,93 @@ main {
     border-right: 1px solid #30363d;
 }
 
+.sidebar:focus {
+    outline: none;
+}
+
+/* Wordmark and the « button share one row, as tall as the top bar so the two
+   orange rules line up. */
+.sidebar-head {
+    display: flex;
+    align-items: stretch;
+    height: 3.5rem;
+    border-bottom: 2px solid #ff6600;
+    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+}
+
 /* An <a> so the wordmark links home; needs block layout or the two lines
    collapse on top of each other. */
 .traktor-logo {
-    display: block;
-    padding: 1rem;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 0 0 2.25rem;
     text-align: center;
     text-decoration: none;
-    border-bottom: 2px solid #ff6600;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    line-height: 1.15;
 }
 
 .traktor-logo:hover h4 {
     color: #ffaa44;
+}
+
+.traktor-logo h4 {
+    margin: 0;
+    color: #ff6600;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: 2px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.traktor-logo small {
+    color: #e6e6e6;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.sidebar-close,
+.sidebar-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: #8b949e;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.sidebar-close {
+    width: 2.25rem;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.sidebar-toggle {
+    width: 36px;
+    height: 36px;
+    margin-right: 0.6rem;
+    font-size: 18px;
+    color: #e6e6e6;
+    border-color: #30363d;
+}
+
+.sidebar-close:hover,
+.sidebar-toggle:hover {
+    color: #ff6600;
+    border-color: #ff6600;
+}
+
+.sidebar-close:focus-visible,
+.sidebar-toggle:focus-visible {
+    outline: 2px solid #ff6600;
+    outline-offset: 1px;
 }
 
 .link-button {
@@ -52,22 +134,6 @@ main {
     color: #ffaa44;
 }
 
-.traktor-logo h4 {
-    margin: 0;
-    color: #ff6600;
-    font-weight: 700;
-    font-size: 18px;
-    letter-spacing: 2px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-.traktor-logo small {
-    color: #e6e6e6;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
-
 .top-row {
     background: linear-gradient(90deg, #1a1a1a 0%, #2a2a2a 100%);
     border-bottom: 2px solid #ff6600;
@@ -80,14 +146,38 @@ main {
 
 .top-row-brand {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .brand-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: #e6e6e6;
     font-size: 16px;
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 1px;
+}
+
+/* The top bar's own wordmark stands in for the sidebar's while that is hidden. */
+.top-row-brand .top-brand-logo {
+    display: none;
+    margin: 0;
+    color: #ff6600;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-decoration: none;
+}
+
+.top-row-brand .top-brand-logo:hover {
+    color: #ffaa44;
 }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
@@ -124,18 +214,6 @@ main {
         flex-direction: row;
     }
 
-    .sidebar {
-        width: 250px;
-        /* A wide playlist table otherwise squeezes the sidebar to ~120px and
-           wraps every name onto two lines. */
-        flex-shrink: 0;
-        height: 100vh;
-        position: sticky;
-        top: 0;
-        overflow-y: auto;
-        overflow-x: hidden;
-    }
-
     .top-row {
         position: sticky;
         top: 0;
@@ -151,5 +229,96 @@ main {
     .top-row, article {
         padding-left: 2rem !important;
         padding-right: 1.5rem !important;
+    }
+}
+
+/* Wide: the sidebar sits beside the content, or is gone entirely. --------- */
+
+@media (min-width: 1000px) {
+    .sidebar {
+        width: 250px;
+        /* A wide playlist table otherwise squeezes the sidebar to ~120px and
+           wraps every name onto two lines. */
+        flex-shrink: 0;
+        height: 100vh;
+        position: sticky;
+        top: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+    /* The « in the sidebar hides it; ☰ only appears to bring it back. */
+    .page:not(.sidebar-collapsed) .sidebar-toggle {
+        display: none;
+    }
+
+    .sidebar-collapsed .sidebar {
+        display: none;
+    }
+
+    .sidebar-collapsed .top-row-brand .top-brand-logo {
+        display: inline;
+    }
+
+    .sidebar-collapsed .top-row {
+        padding-left: 1rem !important;
+    }
+}
+
+/* Narrow (a tablet in portrait): a drawer over the content. -------------- */
+
+@media (max-width: 999.98px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 60;
+        width: min(300px, 85vw);
+        overflow-y: auto;
+        overflow-x: hidden;
+        overscroll-behavior: contain;
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+        transform: translateX(-100%);
+        /* Hidden, not just off screen, so Tab never wanders into it. */
+        visibility: hidden;
+        transition: transform 0.2s ease, visibility 0s linear 0.2s;
+    }
+
+    .drawer-open .sidebar {
+        transform: none;
+        visibility: visible;
+        transition: transform 0.2s ease;
+    }
+
+    .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 59;
+        background: rgba(0, 0, 0, 0.55);
+    }
+
+    .top-row-brand .top-brand-logo {
+        display: inline;
+    }
+
+    .brand-text {
+        font-size: 12px;
+        color: #8b949e;
+    }
+
+    .top-row, article {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+
+    .top-row ::deep a, .top-row ::deep .btn-link {
+        margin-left: 0.75rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sidebar, .drawer-open .sidebar {
+        transition: none;
     }
 }
