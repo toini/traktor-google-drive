@@ -287,10 +287,8 @@ else
 
     void OnPlayerChanged() => InvokeAsync(StateHasChanged);
 
-    string RowClass(FileEntry file) =>
-        !string.IsNullOrEmpty(file.DriveFileId) && Player.CurrentFileId == file.DriveFileId
-            ? "currently-playing"
-            : "";
+    // The row, not the file: a playlist can list the same track twice.
+    string RowClass(FileEntry file) => Player.IsCurrentRow(file) ? "currently-playing" : "";
 
     static string FolderOf(string? path) =>
         string.IsNullOrEmpty(path) ? "" : Path.GetFileName(Path.GetDirectoryName(path) ?? "");

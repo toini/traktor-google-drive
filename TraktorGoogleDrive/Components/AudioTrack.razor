@@ -30,8 +30,8 @@
     [Parameter] public FileEntry? File { get; set; }
     [Parameter] public string? Token { get; set; }
 
-    bool IsPlaying => File is not null && Player.IsPlaying(File.DriveFileId);
-    bool IsLoading => File is not null && Player.IsLoading(File.DriveFileId);
+    bool IsPlaying => File is not null && Player.IsPlaying(File);
+    bool IsLoading => File is not null && Player.IsLoading(File);
 
     string StateClass => IsLoading ? "loading" : IsPlaying ? "playing" : "idle";
 
