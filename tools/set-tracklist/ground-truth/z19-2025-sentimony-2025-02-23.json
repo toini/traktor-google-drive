@@ -1,0 +1,923 @@
+{
+  "v": 1,
+  "recording": {
+    "name": "Z19-2025 Sentimony 2025-02-23.wav",
+    "duration": 8120.9
+  },
+  "anchor": {
+    "recordingStartLocal": "2025-02-23 13:28:54",
+    "method": "raw-twin",
+    "evidence": "start from Recording_2025-02-23_13h28m54s.wav (same FILESIZE); end check: entry stamped -1 s from name+length at UTC-8",
+    "uncertaintySeconds": 2,
+    "needsAudioConfirmation": true
+  },
+  "generator": {
+    "tool": "set-tracklist/ground_truth.py",
+    "version": "0.1.0",
+    "method": "history"
+  },
+  "segments": [
+    {
+      "index": 1,
+      "start": 0.0,
+      "end": 312.5,
+      "blendIn": null,
+      "blendOut": [
+        309.0,
+        316.0
+      ],
+      "deckStart": -20.0,
+      "deckEnd": 316.0,
+      "playedSeconds": 316.0,
+      "track": {
+        "title": "SILENCE",
+        "artist": "VORG"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 2,
+      "start": 312.5,
+      "end": 579.2,
+      "blendIn": [
+        309.0,
+        316.0
+      ],
+      "blendOut": [
+        553.0,
+        605.5
+      ],
+      "deckStart": 309.0,
+      "deckEnd": 605.5,
+      "playedSeconds": 296.5,
+      "track": {
+        "title": "Respect The Robots",
+        "artist": "VORG"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 3,
+      "start": 579.2,
+      "end": 906.3,
+      "blendIn": [
+        553.0,
+        605.5
+      ],
+      "blendOut": [
+        874.0,
+        938.6
+      ],
+      "deckStart": 553.0,
+      "deckEnd": 938.6,
+      "playedSeconds": 385.6,
+      "track": {
+        "title": "Sylvantron",
+        "artist": "Space Organ & Spektron"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 4,
+      "start": 906.3,
+      "end": 1211.1,
+      "blendIn": [
+        874.0,
+        938.6
+      ],
+      "blendOut": [
+        1190.0,
+        1232.2
+      ],
+      "deckStart": 874.0,
+      "deckEnd": 1232.2,
+      "playedSeconds": 358.2,
+      "track": {
+        "title": "Flat Earthers",
+        "artist": "Overdream"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 5,
+      "start": 1211.1,
+      "end": 1561.2,
+      "blendIn": [
+        1190.0,
+        1232.2
+      ],
+      "blendOut": [
+        1529.0,
+        1593.3
+      ],
+      "deckStart": 1190.0,
+      "deckEnd": 1593.3,
+      "playedSeconds": 403.3,
+      "track": {
+        "title": "You, Reflection And The Shadow",
+        "artist": "eXoLT"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 6,
+      "start": 1561.2,
+      "end": 1725.6,
+      "blendIn": [
+        1529.0,
+        1593.3
+      ],
+      "blendOut": [
+        1697.0,
+        1754.2
+      ],
+      "deckStart": 1529.0,
+      "deckEnd": 1754.2,
+      "playedSeconds": 225.2,
+      "track": {
+        "title": "The Internal Flight",
+        "artist": "VORG"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 7,
+      "start": 1725.6,
+      "end": 1797.8,
+      "blendIn": [
+        1697.0,
+        1754.2
+      ],
+      "blendOut": [
+        1783.0,
+        1812.7
+      ],
+      "deckStart": 1697.0,
+      "deckEnd": 1812.7,
+      "playedSeconds": 115.7,
+      "track": {
+        "title": "Boogyman",
+        "artist": "SpaceCraft"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 8,
+      "start": 1797.8,
+      "end": 1986.7,
+      "blendIn": [
+        1783.0,
+        1812.7
+      ],
+      "blendOut": [
+        1957.0,
+        2016.4
+      ],
+      "deckStart": 1783.0,
+      "deckEnd": 2016.4,
+      "playedSeconds": 233.4,
+      "track": {
+        "title": "Kindom Of False",
+        "artist": "Fracktom"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 9,
+      "start": 1986.7,
+      "end": 2098.4,
+      "blendIn": [
+        1957.0,
+        2016.4
+      ],
+      "blendOut": [
+        2074.0,
+        2122.8
+      ],
+      "deckStart": 1957.0,
+      "deckEnd": 2122.8,
+      "playedSeconds": 165.8,
+      "track": {
+        "title": "Something Is Wrong",
+        "artist": "Egomorph"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 10,
+      "start": 2098.4,
+      "end": 2198.1,
+      "blendIn": [
+        2074.0,
+        2122.8
+      ],
+      "blendOut": [
+        2173.0,
+        2223.1
+      ],
+      "deckStart": 2074.0,
+      "deckEnd": 2223.1,
+      "playedSeconds": 149.1,
+      "track": {
+        "title": "Intruder",
+        "artist": "Psydewise"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 11,
+      "start": 2198.1,
+      "end": 2308.9,
+      "blendIn": [
+        2173.0,
+        2223.1
+      ],
+      "blendOut": [
+        2289.0,
+        2328.8
+      ],
+      "deckStart": 2173.0,
+      "deckEnd": 2328.8,
+      "playedSeconds": 155.8,
+      "track": {
+        "title": "Milkdrop",
+        "artist": "Psydewise"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 12,
+      "start": 2308.9,
+      "end": 2439.7,
+      "blendIn": [
+        2289.0,
+        2328.8
+      ],
+      "blendOut": [
+        2412.0,
+        2467.3
+      ],
+      "deckStart": 2289.0,
+      "deckEnd": 2467.3,
+      "playedSeconds": 178.3,
+      "track": {
+        "title": "Oryx",
+        "artist": "Psydewise"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 13,
+      "start": 2439.7,
+      "end": 2712.1,
+      "blendIn": [
+        2412.0,
+        2467.3
+      ],
+      "blendOut": [
+        2687.0,
+        2737.2
+      ],
+      "deckStart": 2412.0,
+      "deckEnd": 2737.2,
+      "playedSeconds": 325.2,
+      "track": {
+        "title": "Flat Earther (Beautiful Edit)",
+        "artist": "Overdream"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 14,
+      "start": 2712.1,
+      "end": 2964.3,
+      "blendIn": [
+        2687.0,
+        2737.2
+      ],
+      "blendOut": [
+        2932.0,
+        2996.7
+      ],
+      "deckStart": 2687.0,
+      "deckEnd": 2996.7,
+      "playedSeconds": 309.7,
+      "track": {
+        "title": "Visual Cortex",
+        "artist": "Psydewise"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 15,
+      "start": 2964.3,
+      "end": 3091.2,
+      "blendIn": [
+        2932.0,
+        2996.7
+      ],
+      "blendOut": [
+        3069.0,
+        3113.4
+      ],
+      "deckStart": 2932.0,
+      "deckEnd": 3113.4,
+      "playedSeconds": 181.4,
+      "track": {
+        "title": "Fractal Legions",
+        "artist": "Djeriko"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 16,
+      "start": 3091.2,
+      "end": 3222.6,
+      "blendIn": [
+        3069.0,
+        3113.4
+      ],
+      "blendOut": [
+        3196.0,
+        3249.2
+      ],
+      "deckStart": 3069.0,
+      "deckEnd": 3249.2,
+      "playedSeconds": 180.2,
+      "track": {
+        "title": "Ciclo De Viento Y Miradas",
+        "artist": "Djeriko"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 17,
+      "start": 3222.6,
+      "end": 3316.1,
+      "blendIn": [
+        3196.0,
+        3249.2
+      ],
+      "blendOut": [
+        3271.0,
+        3361.1
+      ],
+      "deckStart": 3196.0,
+      "deckEnd": 3361.1,
+      "playedSeconds": 165.1,
+      "track": {
+        "title": "Nature Of Uncertainty (24bit)",
+        "artist": "Tookytooky"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 18,
+      "start": 3316.1,
+      "end": 3624.5,
+      "blendIn": [
+        3271.0,
+        3361.1
+      ],
+      "blendOut": [
+        3589.0,
+        3660.0
+      ],
+      "deckStart": 3271.0,
+      "deckEnd": 3660.0,
+      "playedSeconds": 389.0,
+      "track": {
+        "title": "Inside Your Head",
+        "artist": "Irukanji & EleexR"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 19,
+      "start": 3624.5,
+      "end": 3801.6,
+      "blendIn": [
+        3589.0,
+        3660.0
+      ],
+      "blendOut": [
+        3769.0,
+        3834.1
+      ],
+      "deckStart": 3589.0,
+      "deckEnd": 3834.1,
+      "playedSeconds": 245.1,
+      "track": {
+        "title": "A Darker Shade Of Damaged Distortion (24bit)",
+        "artist": "Gojja"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 20,
+      "start": 3801.6,
+      "end": 4082.9,
+      "blendIn": [
+        3769.0,
+        3834.1
+      ],
+      "blendOut": [
+        4049.0,
+        4116.9
+      ],
+      "deckStart": 3769.0,
+      "deckEnd": 4116.9,
+      "playedSeconds": 347.9,
+      "track": {
+        "title": "Aldebaran Requiem",
+        "artist": "Deuteroz & Chaos Alchemist"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 21,
+      "start": 4082.9,
+      "end": 4300.9,
+      "blendIn": [
+        4049.0,
+        4116.9
+      ],
+      "blendOut": [
+        4273.0,
+        4328.8
+      ],
+      "deckStart": 4049.0,
+      "deckEnd": 4328.8,
+      "playedSeconds": 279.8,
+      "track": {
+        "title": "IC 2177",
+        "artist": "Mushroomslice"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 22,
+      "start": 4300.9,
+      "end": 4519.6,
+      "blendIn": [
+        4273.0,
+        4328.8
+      ],
+      "blendOut": [
+        4497.0,
+        4542.2
+      ],
+      "deckStart": 4273.0,
+      "deckEnd": 4542.2,
+      "playedSeconds": 269.2,
+      "track": {
+        "title": "Wonder Wander",
+        "artist": "Doonz"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 23,
+      "start": 4519.6,
+      "end": 4710.1,
+      "blendIn": [
+        4497.0,
+        4542.2
+      ],
+      "blendOut": [
+        4675.0,
+        4745.2
+      ],
+      "deckStart": 4497.0,
+      "deckEnd": 4745.2,
+      "playedSeconds": 248.2,
+      "track": {
+        "title": "Drop Of Fur",
+        "artist": "eXoLT"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 24,
+      "start": 4710.1,
+      "end": 5039.5,
+      "blendIn": [
+        4675.0,
+        4745.2
+      ],
+      "blendOut": [
+        5007.0,
+        5072.0
+      ],
+      "deckStart": 4675.0,
+      "deckEnd": 5072.0,
+      "playedSeconds": 397.0,
+      "track": {
+        "title": "Free Lance",
+        "artist": "Tystix "
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 25,
+      "start": 5039.5,
+      "end": 5289.9,
+      "blendIn": [
+        5007.0,
+        5072.0
+      ],
+      "blendOut": [
+        5260.0,
+        5319.7
+      ],
+      "deckStart": 5007.0,
+      "deckEnd": 5319.7,
+      "playedSeconds": 312.7,
+      "track": {
+        "title": "The Alpha",
+        "artist": "Sourone"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 26,
+      "start": 5289.9,
+      "end": 5469.1,
+      "blendIn": [
+        5260.0,
+        5319.7
+      ],
+      "blendOut": [
+        5440.0,
+        5498.3
+      ],
+      "deckStart": 5260.0,
+      "deckEnd": 5498.3,
+      "playedSeconds": 238.3,
+      "track": {
+        "title": "Fractal Move",
+        "artist": "Bensaid"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 27,
+      "start": 5469.1,
+      "end": 5743.1,
+      "blendIn": [
+        5440.0,
+        5498.3
+      ],
+      "blendOut": [
+        5714.0,
+        5772.3
+      ],
+      "deckStart": 5440.0,
+      "deckEnd": 5772.3,
+      "playedSeconds": 332.3,
+      "track": {
+        "title": "Bapho",
+        "artist": "Space Organ"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 28,
+      "start": 5743.1,
+      "end": 6074.9,
+      "blendIn": [
+        5714.0,
+        5772.3
+      ],
+      "blendOut": [
+        6032.0,
+        6117.9
+      ],
+      "deckStart": 5714.0,
+      "deckEnd": 6117.9,
+      "playedSeconds": 403.9,
+      "track": {
+        "title": "Metamorphosis",
+        "artist": "SpaceCraft"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 29,
+      "start": 6074.9,
+      "end": 6298.9,
+      "blendIn": [
+        6032.0,
+        6117.9
+      ],
+      "blendOut": [
+        6270.0,
+        6327.8
+      ],
+      "deckStart": 6032.0,
+      "deckEnd": 6327.8,
+      "playedSeconds": 295.8,
+      "track": {
+        "title": "Just A Name",
+        "artist": "Tystix "
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 30,
+      "start": 6298.9,
+      "end": 6441.8,
+      "blendIn": [
+        6270.0,
+        6327.8
+      ],
+      "blendOut": [
+        6412.0,
+        6471.6
+      ],
+      "deckStart": 6270.0,
+      "deckEnd": 6471.6,
+      "playedSeconds": 201.6,
+      "track": {
+        "title": "Couple Trouble",
+        "artist": "Jai"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 31,
+      "start": 6441.8,
+      "end": 6564.8,
+      "blendIn": [
+        6412.0,
+        6471.6
+      ],
+      "blendOut": [
+        6537.0,
+        6592.6
+      ],
+      "deckStart": 6412.0,
+      "deckEnd": 6592.6,
+      "playedSeconds": 180.6,
+      "track": {
+        "title": "Fleeting Moments",
+        "artist": "Psydewise"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 32,
+      "start": 6564.8,
+      "end": 6706.3,
+      "blendIn": [
+        6537.0,
+        6592.6
+      ],
+      "blendOut": [
+        6681.0,
+        6731.6
+      ],
+      "deckStart": 6537.0,
+      "deckEnd": 6731.6,
+      "playedSeconds": 194.6,
+      "track": {
+        "title": "Esfera",
+        "artist": "Bensaid"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 33,
+      "start": 6706.3,
+      "end": 6955.5,
+      "blendIn": [
+        6681.0,
+        6731.6
+      ],
+      "blendOut": [
+        6931.0,
+        6980.0
+      ],
+      "deckStart": 6681.0,
+      "deckEnd": 6980.0,
+      "playedSeconds": 299.0,
+      "track": {
+        "title": "Repetition Compulsion",
+        "artist": "Diffus & Irrbloss"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 34,
+      "start": 6955.5,
+      "end": 7253.4,
+      "blendIn": [
+        6931.0,
+        6980.0
+      ],
+      "blendOut": [
+        7220.0,
+        7286.9
+      ],
+      "deckStart": 6931.0,
+      "deckEnd": 7286.9,
+      "playedSeconds": 355.9,
+      "track": {
+        "title": "I Have Something",
+        "artist": "Irukanji & EleexR"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 35,
+      "start": 7253.4,
+      "end": 7445.3,
+      "blendIn": [
+        7220.0,
+        7286.9
+      ],
+      "blendOut": [
+        7416.0,
+        7474.6
+      ],
+      "deckStart": 7220.0,
+      "deckEnd": 7474.6,
+      "playedSeconds": 254.6,
+      "track": {
+        "title": "Stop Witchcraft",
+        "artist": "Deuteroz"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 36,
+      "start": 7445.3,
+      "end": 7715.9,
+      "blendIn": [
+        7416.0,
+        7474.6
+      ],
+      "blendOut": [
+        7684.0,
+        7747.9
+      ],
+      "deckStart": 7416.0,
+      "deckEnd": 7747.9,
+      "playedSeconds": 331.9,
+      "track": {
+        "title": "Vanguard",
+        "artist": "Ufomatka"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 37,
+      "start": 7715.9,
+      "end": 7844.8,
+      "blendIn": [
+        7684.0,
+        7747.9
+      ],
+      "blendOut": [
+        7814.0,
+        7875.5
+      ],
+      "deckStart": 7684.0,
+      "deckEnd": 7875.5,
+      "playedSeconds": 191.5,
+      "track": {
+        "title": "Clown's Ghost",
+        "artist": "Mindex"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 38,
+      "start": 7844.8,
+      "end": 7976.3,
+      "blendIn": [
+        7814.0,
+        7875.5
+      ],
+      "blendOut": [
+        7949.0,
+        8003.6
+      ],
+      "deckStart": 7814.0,
+      "deckEnd": 8003.6,
+      "playedSeconds": 189.6,
+      "track": {
+        "title": "Caravan Dream",
+        "artist": "U-Wave"
+      },
+      "deck": 1,
+      "confidence": 1.0,
+      "source": "history"
+    },
+    {
+      "index": 39,
+      "start": 7976.3,
+      "end": 8120.9,
+      "blendIn": [
+        7949.0,
+        8003.6
+      ],
+      "blendOut": null,
+      "deckStart": 7949.0,
+      "deckEnd": 8129.7,
+      "playedSeconds": 171.9,
+      "track": {
+        "title": "Human Interaction",
+        "artist": "VORG"
+      },
+      "deck": 0,
+      "confidence": 1.0,
+      "source": "history"
+    }
+  ],
+  "shortPublicPlays": [],
+  "playlistComparison": {
+    "playlist": "Z/Z19-2025 Sentimony 2025-02-23.rec",
+    "playlistEntries": 39,
+    "playlistUniqueTracks": 39,
+    "playedTracks": 39,
+    "playedNotInPlaylist": [],
+    "inPlaylistNotPlayed": [],
+    "playlistDuplicates": [],
+    "longestInOrderRun": 39
+  }
+}

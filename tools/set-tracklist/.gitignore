@@ -1,0 +1,10 @@
+# The venv, run outputs and any audio stay local. Never commit Toni's audio or NML files.
+.venv/
+out/
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.aif
+*.aiff
+*.nml

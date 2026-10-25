@@ -16,6 +16,21 @@ from the parser repo's test collection
 Traktor Pro 4, 1,545 entries, 173 playlists). That file is a 2025 snapshot, so it is
 evidence about Toni's habits, not about every set he has recorded since.
 
+## Decisions (Toni, 2026-10-25)
+
+- **Keylock is on.** Toni plays with Master Tempo on, so pitch stays put when the
+  tempo changes. The matcher does not search pitch shifts (open question 2). The
+  ±2 circular chroma shifts in §3a are only a safety margin.
+- **±15 s is precise enough** for a boundary (open question 5). "Now playing" is the
+  goal, not publishable tracklists, so a blend is shown at its midpoint and the nudge
+  UI stays coarse.
+- **Spike first, on `Z19-2025 Sentimony 2025-02-23.wav`** (135 min, a 39-track `.rec`
+  playlist and a 51-track base playlist; the base playlist has 60 entries, 9 of which
+  are `====` separators). Open question 4.
+- **History files exist** (open question 1). Toni's Google Drive "Native Instruments"
+  folder holds 141 `history_*.nml` files: 50 unique sessions from 2025-02-23 to
+  2026-08-17. See §"Spike findings".
+
 ## Context
 
 Toni: *"Make a plan on how to show the currently playing track in a set, even when
@@ -556,6 +571,72 @@ move to `appDataFolder` (5f), so the tablet sees them too.
 - Per-track metadata on the TV (it needs a custom Cast receiver).
 - Writing the tracklist back into Traktor (cue points in the NML). The app is
   read-only on the collection.
+
+## Spike findings (increment 0)
+
+Tools: `tools/set-tracklist/` (`pair_history.py`, `ground_truth.py`,
+`download_list.py`; standard library only). Measured on 2026-10-25 against the copy of
+Toni's "Native Instruments" folder (`Traktor 4.5.1/collection.nml` plus all history
+files).
+
+**How the history clock works.**
+
+- `STARTTIME` is **local wall-clock time** on the laptop, the same clock that names
+  Traktor's own recordings.
+- A history file's name is when the session was **closed**, not opened. A session
+  that ran for days holds entries dated days before its file name.
+- Traktor copies the history folder per version (4.1.1, 4.2.0, 4.4.1, 4.5.1), so the
+  141 files are 50 sessions. Copies with the same name have the same size.
+
+**Recordings carry an exact anchor.** Toni renames Traktor's raw recording
+(`Recording_2025-02-23_13h28m54s.wav`) into `Setit/` or `Gig preparation/`, and the
+collection keeps both entries with the same `FILESIZE` (or the same length). The raw
+name is the local **start** time. The raw entry's `MODIFIED_DATE/TIME` is stamped in
+**UTC** when the file is closed, so start + length must equal it modulo whole hours.
+It does, to within 1 s, for all four raw twins. That also shows the laptop was on
+UTC−8 on 2025-02-23, UTC+2 in winter, UTC+3 in summer.
+
+**Pairing** (`pair_history.py`). Recordings with no raw twin get a fitted start: a
+window of the recording's length slid over the public plays, scored by coverage,
+activity just outside the window, the dates in the name, and the F1 against the
+recording's own playlist family.
+
+| Recording | Min | Start (local) | How | Public tracks | Own playlist (F1) | Confidence |
+|---|---|---|---|---|---|---|
+| `Z19-2025 Sentimony 2025-02-23.wav` | 135 | 2025-02-23 13:28:54 | raw twin, same `FILESIZE`, end check −1 s | 39 | `Z19-2025 Sentimony 2025-02-23.rec` (0.99) | exact |
+| `…-edit.wav`, `…-edit2.wav` (Z19 trims) | 135 | 2025-02-23 13:28:32 | fitted | 39 | same (0.99) | high |
+| `2025-04-19 Golgatan farssi.prep.wav` | 98 | **2025-04-13** 11:22:47 | fitted; a restart of a 10:57 run, imported on the gig day | 20 | `Golgatan farssi.rec` (0.91) | high |
+| `2025-08-09 Huhuu metsä vol1.prep1-liian lyhyt.wav` | 49 | 2025-08-01 09:16:56 | fitted inside a 5-hour practice session | 15 | `…preparation-1h.rec` (0.89) | medium |
+| `2026-02-14-Ystavien tanssit.prep-2025-12-07.wav` | 95 | 2025-12-07 11:43:44 | raw twin, same length, end check 0 s | 21 | `Ystavien tanssit-2.prep.rec` (0.93) | exact; begins 9 min into the run |
+| `2026-02-14-Ystavien tanssit.prep.3.3-2026-01-11.wav` | 103 | 2026-01-12 00:32:43 | raw twin, same length, end check −1 s | 22 | `Ystavien tanssit-3.3.rec` (0.94) | exact |
+| `C4 2026 Dark Tek Chillout 2026-08-16.wav` | 45 | 2026-08-16 22:29:54 | raw twin, same `FILESIZE`, end check 0 s | 10 | `C4 2026 Dark Tek Chillout` (0.95) | exact; mid-session |
+
+Two earlier guesses were wrong. Golgatan was not recorded on 2025-04-19: that day's
+19:50 and 21:04 sessions are Toni playing the prep recording itself on a deck. And the
+2025-12-07 prep is neither the 03:49 nor the 09:36 run but a third one from 11:34. The
+Huhuu pairing is only medium: an incomplete collection entry,
+`Recording_2025-08-01_10h34m43s.wav` (no length), could be its raw twin, and if so no
+history covers it. One raw recording was never renamed:
+`Recording_2025-02-23_08h43m07s.wav`, 134 min, most likely a Z19 run-through. History
+starts at 10:06 that day, so it covers only 24% of it.
+
+**Z19 ground truth** (`ground-truth/z19-2025-sentimony-2025-02-23.json`). 39 segments.
+The played tracks are **exactly** the 39 tracks of the `.rec` playlist, in the same
+order (in-order run 39 of 39). The base playlist's other 12 tracks were not played.
+The first deck started 20 s before the recording did, and the last deck stopped 9 s
+after it ended. On the history clock, the recording's t = 0 is 13:28:54. That is
+**±2 s from the metadata**, but it rests on two clocks agreeing, so the spike's first
+audio step must confirm it: cross-correlate the opening minute against the first
+track. Deck starts are not audible entries. The segment boundaries are the midpoints
+of the deck overlaps. Every one of the 38 transitions overlaps: median 58 s, range
+7–90 s. So a boundary sits within about ±30 s of the true audible handover. That is
+looser than the ±15 s Toni asked for, so audio has to tighten the ground truth itself
+before it can grade a detector at ±15 s.
+
+**Audio for the spike is not on this laptop.** The NML paths point to
+`/Users/toni/Google Drive/…`, which does not exist here, and there is no Drive for
+desktop mount. The spike needs the Z19 recording (1.33 GiB) and 51 tracks (39 played,
+12 base-only; 50 FLAC, 1 WAV, 4.1 GiB): **5.51 GiB** in total.
 
 ## Open questions for Toni
 
