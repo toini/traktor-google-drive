@@ -12,6 +12,8 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 // Singleton so a failure raised on one page is still visible after navigating.
 builder.Services.AddSingleton<AppErrors>();
 builder.Services.AddScoped<AuthService>();
+// IndexedDB, for what must survive a reload: collection.nml and the Drive file index.
+builder.Services.AddScoped<LocalCache>();
 builder.Services.AddScoped<DriveService>();
 builder.Services.AddScoped<CollectionService>();
 builder.Services.AddScoped<SetMatcher>();

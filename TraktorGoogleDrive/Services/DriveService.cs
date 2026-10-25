@@ -19,16 +19,22 @@ public class DriveRequestException : Exception
     public DriveRequestException(string message) : base(message) { }
 }
 
-public class DriveService
+public partial class DriveService
 {
     // Drive rejects very long `q` strings, and a set can hold hundreds of
     // tracks, so name lookups go out in batches rather than one giant OR chain.
+    // Only the fallback when the file index (DriveService.Index.cs) is unavailable.
     private const int NamesPerQuery = 40;
 
     private readonly HttpClient _http;
+    private readonly LocalCache _cache;
     private readonly Dictionary<string, string?> _folderNames = new();
 
-    public DriveService(HttpClient http) => _http = http;
+    public DriveService(HttpClient http, LocalCache cache)
+    {
+        _http = http;
+        _cache = cache;
+    }
 
     private static HttpRequestMessage Get(string url, string token)
     {
@@ -205,17 +211,20 @@ public class DriveService
                 ? p.EnumerateArray().Select(x => x.GetString()!).FirstOrDefault()
                 : null)).ToList();
 
-        var annotated = new List<NamedFile>(raw.Count);
-        foreach (var r in raw)
+        // A real install holds a collection.nml per Traktor version plus backups,
+        // eleven of them on Toni's Drive: look the folders up all at once, not one
+        // round trip after another, and from the stored index when it knows them.
+        await LoadStoredIndexAsync();
+        var folders = await Task.WhenAll(raw.Select(r =>
+            r.Parent is null ? Task.FromResult<string?>(null) : FolderNameAsync(r.Parent, token)));
+        SaveLearnedFolderNames();
+
+        var annotated = raw.Select((r, i) => new NamedFile(r.Id, r.Name, r.Modified)
         {
-            var folder = r.Parent is null ? null : await FolderNameAsync(r.Parent, token);
-            annotated.Add(new NamedFile(r.Id, r.Name, r.Modified)
-            {
-                FolderName = folder,
-                TraktorVersion = ParseTraktorVersion(folder),
-                IsBackup = LooksLikeBackup(folder),
-            });
-        }
+            FolderName = folders[i],
+            TraktorVersion = ParseTraktorVersion(folders[i]),
+            IsBackup = LooksLikeBackup(folders[i]),
+        }).ToList();
 
         return annotated
             .OrderBy(f => f.IsBackup)
@@ -232,6 +241,7 @@ public class DriveService
             var json = await SendAsync(
                 $"https://www.googleapis.com/drive/v3/files/{folderId}?fields=name", token);
             var name = json.TryGetProperty("name", out var n) ? n.GetString() : null;
+            _folderNamesDirty |= name is not null;
             return _folderNames[folderId] = name;
         }
         catch (DriveAuthException)
@@ -251,17 +261,30 @@ public class DriveService
     /// </summary>
     public async Task<List<FileEntry>> ResolveTracksAsync(IReadOnlyList<Track> tracks, string token)
     {
-        // Drive's name = '...' is an exact match, and a file synced from macOS
-        // can be stored NFD while Traktor wrote the name NFC (or the other way
-        // round), so ask for both spellings and compare them as one.
-        var names = tracks
-            .Select(t => Path.GetFileName(t.Path))
-            .Where(n => !string.IsNullOrEmpty(n))
-            .SelectMany(n => new[] { n, Normalized(n, System.Text.NormalizationForm.FormC), Normalized(n, System.Text.NormalizationForm.FormD) });
+        var resolveWatch = System.Diagnostics.Stopwatch.StartNew();
+        Dictionary<string, List<DriveFile>> byName;
 
-        var driveFiles = await FindByNamesAsync(names, token);
-        var byName = driveFiles.GroupBy(f => Nfc(f.Name), StringComparer.OrdinalIgnoreCase)
+        if (await EnsureIndexAsync(token))
+        {
+            // Every name answered from memory; the index is keyed by NFC already.
+            byName = _audioByName;
+            Perf.Log("resolve.lookup", resolveWatch, $"{tracks.Count} tracks, from the index");
+        }
+        else
+        {
+            // Drive's name = '...' is an exact match, and a file synced from macOS
+            // can be stored NFD while Traktor wrote the name NFC (or the other way
+            // round), so ask for both spellings and compare them as one.
+            var names = tracks
+                .Select(t => Path.GetFileName(t.Path))
+                .Where(n => !string.IsNullOrEmpty(n))
+                .SelectMany(n => new[] { n, Normalized(n, System.Text.NormalizationForm.FormC), Normalized(n, System.Text.NormalizationForm.FormD) });
+
+            var driveFiles = await FindByNamesAsync(names, token);
+            byName = driveFiles.GroupBy(f => Nfc(f.Name), StringComparer.OrdinalIgnoreCase)
                                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+            Perf.Log("resolve.lookup", resolveWatch, $"{tracks.Count} tracks, by name from Drive");
+        }
 
         var result = new List<FileEntry>(tracks.Count);
 
@@ -287,6 +310,7 @@ public class DriveService
             result.Add(entry);
         }
 
+        SaveLearnedFolderNames();
         return result;
     }
 

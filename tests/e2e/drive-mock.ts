@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Page, Route } from '@playwright/test';
+import type { DriveFileFixture } from './large-fixture';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -105,7 +106,11 @@ export function makeWav(seconds = 2, sampleRate = 8000): Buffer {
 }
 
 export type DriveCall = {
-  kind: 'collection' | 'query' | 'media' | 'folder' | 'meta';
+  /**
+   * query: a files.list by name. list: a files.list with no name in it, i.e.
+   * walking the whole library. changes / about: the incremental index refresh.
+   */
+  kind: 'collection' | 'query' | 'list' | 'media' | 'folder' | 'meta' | 'changes' | 'about';
   url: string;
   range?: string;
   /** Media only: the token the request carried (the proxy cookie), and the status served. */
@@ -161,9 +166,32 @@ export type MockOptions = {
   mediaGate?: Promise<unknown>;
   /** Override the NML body. */
   nml?: string;
-  /** RFC3339 modifiedTime reported for the collection file. */
+  /**
+   * RFC3339 modifiedTime reported for the collection file, by both discovery
+   * and the metadata call. '' reports none. Read on every request, so a test
+   * can change it between page loads to model Traktor syncing a new file.
+   */
   collectionModifiedTime?: string;
+  /** Replace the audio files Drive holds (the large fixture). */
+  driveFiles?: DriveFileFixture[];
+  /** Replace the folder id -> name map. */
+  driveFolders?: Record<string, string>;
+  /**
+   * Delay every googleapis.com answer by this much, so a timing reflects how
+   * many round trips a step makes. Media is not delayed.
+   */
+  latencyMs?: number;
+  /**
+   * Drive's change log, for changes.list. A test pushes to it (after the
+   * first load) to model a file added or removed in Drive since.
+   */
+  changes?: DriveChange[];
 };
+
+export type DriveChange = { fileId: string; removed?: boolean; file?: DriveFileFixture & { trashed?: boolean } };
+
+/** The account the mock's `about` reports, so the app can key its caches by user. */
+export const FIXTURE_PERMISSION_ID = 'perm-fixture-user';
 
 /**
  * Intercepts every outbound call the app makes: the two googleapis.com
@@ -173,7 +201,8 @@ export type MockOptions = {
  */
 export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<DriveCall[]> {
   const calls: DriveCall[] = [];
-  const nml = opts.nml ?? readFileSync(join(here, 'fixtures', 'collection.nml'), 'utf8');
+  // opts.nml is read per request (a test may swap it between loads); this is the default.
+  const fixtureNml = readFileSync(join(here, 'fixtures', 'collection.nml'), 'utf8');
   const defaultWav = makeWav(opts.wavSeconds);
   const longWavs = new Map<string, Buffer>();
   const wavFor = (url: string) => {
@@ -239,7 +268,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       url.hostname === 'www.googleapis.com' ||
       url.hostname === 'www.gstatic.com' ||
       url.pathname.startsWith('/api/proxy/drive/'),
-    (route) => {
+    async (route) => {
       const url = route.request().url();
       const u = new URL(url);
 
@@ -250,10 +279,54 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       // Same-origin audio proxy.
       if (u.pathname.startsWith('/api/proxy/drive/')) return serveMedia(route, url);
 
+      // Drive API calls only: a direct audio download (alt=media on a track) is
+      // media, which latencyMs leaves alone like the proxy.
+      const fileId = u.pathname.replace('/drive/v3/files/', '');
+      const isCollectionId = fileId === COLLECTION_FILE_ID || fileId === DISCOVERED_COLLECTION_ID
+        || COLLECTION_CANDIDATES.some((c) => c.id === fileId);
+      const isTrackMedia = u.searchParams.get('alt') === 'media' && !isCollectionId;
+      if (opts.latencyMs && !isTrackMedia) await new Promise((r) => setTimeout(r, opts.latencyMs));
+
+      const driveFiles = opts.driveFiles ?? DRIVE_FILES;
+      const json = (body: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+
+      // Drive: who is signed in. The app keys its file index by it.
+      if (u.pathname === '/drive/v3/about') {
+        calls.push({ kind: 'about', url });
+        return json({ user: { permissionId: FIXTURE_PERMISSION_ID } });
+      }
+
+      // Drive: changes since a page token. The token is an index into the log.
+      if (u.pathname === '/drive/v3/changes/startPageToken') {
+        calls.push({ kind: 'changes', url });
+        return json({ startPageToken: String((opts.changes ?? []).length) });
+      }
+      if (u.pathname === '/drive/v3/changes') {
+        calls.push({ kind: 'changes', url });
+        const log = opts.changes ?? [];
+        const from = Number(u.searchParams.get('pageToken') ?? '0') || 0;
+        return json({ changes: log.slice(from), newStartPageToken: String(log.length) });
+      }
+
       // Drive: list files matching a name query.
       if (u.pathname === '/drive/v3/files') {
-        calls.push({ kind: 'query', url });
         const q = u.searchParams.get('q') ?? '';
+
+        // No name in it: the app walking every audio file once, page by page.
+        if (!q.includes('name =') && !q.includes("'collection.nml'")) {
+          calls.push({ kind: 'list', url });
+          const all: { id: string; name: string }[] = q.includes('application/vnd.google-apps.folder')
+            ? Object.entries(opts.driveFolders ?? DRIVE_FOLDERS).map(([id, name]) => ({ id, name }))
+            : driveFiles;
+          const pageSize = Number(u.searchParams.get('pageSize') ?? '100');
+          const from = Number(u.searchParams.get('pageToken') ?? '0') || 0;
+          const page = all.slice(from, from + pageSize);
+          const next = from + pageSize < all.length ? String(from + pageSize) : undefined;
+          return json({ files: page, ...(next ? { nextPageToken: next } : {}) });
+        }
+
+        calls.push({ kind: 'query', url });
 
         // Discovery: the app searching for collection.nml by name.
         if (q.includes("'collection.nml'")) {
@@ -270,7 +343,9 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
                   {
                     id: DISCOVERED_COLLECTION_ID,
                     name: 'collection.nml',
-                    modifiedTime: '2026-08-16T10:00:00.000Z',
+                    ...(opts.collectionModifiedTime === ''
+                      ? {}
+                      : { modifiedTime: opts.collectionModifiedTime ?? '2026-08-16T10:00:00.000Z' }),
                   },
                 ];
           return route.fulfill({
@@ -280,7 +355,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
           });
         }
 
-        const files = DRIVE_FILES.filter((f) => q.includes(`'${f.name}'`));
+        const files = driveFiles.filter((f) => q.includes(`'${f.name}'`));
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -307,7 +382,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
       // Drive: folder metadata lookup (used to disambiguate same-named files).
       if (u.searchParams.get('fields') === 'name') {
         calls.push({ kind: 'folder', url });
-        const name = DRIVE_FOLDERS[id];
+        const name = (opts.driveFolders ?? DRIVE_FOLDERS)[id];
         return name
           ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ name }) })
           : route.fulfill({ status: 404, body: '' });
@@ -330,7 +405,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
             }),
           });
         }
-        return route.fulfill({ status: 200, contentType: 'text/xml', body: nml });
+        return route.fulfill({ status: 200, contentType: 'text/xml', body: opts.nml ?? fixtureNml });
       }
       return serveMedia(route, url);
     },

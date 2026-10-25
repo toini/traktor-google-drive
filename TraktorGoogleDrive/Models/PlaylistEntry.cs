@@ -49,7 +49,22 @@ public static class PlaylistEntries
     private static readonly Regex SeparatorLead = new(@"^\s*[=\-_#*]{3,}(\s|$)");
 
     public static bool IsSeparatorText(string? text) =>
-        !string.IsNullOrWhiteSpace(text) && (SeparatorOnly.IsMatch(text) || SeparatorLead.IsMatch(text));
+        !string.IsNullOrWhiteSpace(text) && HasRuleRun(text)
+        && (SeparatorOnly.IsMatch(text) || SeparatorLead.IsMatch(text));
+
+    // Both patterns need three rule characters in a row. Checked by hand first:
+    // this runs three times for each of ~9,000 playlist entries on every load,
+    // and a regex in WebAssembly's interpreter is the slow way to say "no".
+    private static bool HasRuleRun(string text)
+    {
+        var run = 0;
+        foreach (var c in text)
+        {
+            run = c is '=' or '-' or '_' or '#' or '*' ? run + 1 : 0;
+            if (run >= 3) return true;
+        }
+        return false;
+    }
 
     /// <summary>The words of a separator, without its rule characters: "==== Part 2" is "Part 2".</summary>
     public static string SeparatorLabel(string? title) =>
@@ -63,7 +78,19 @@ public static class PlaylistEntries
         foreach (var t in parsedTracks) parsedByPath.TryAdd(t.Path, t);
 
         var exact = new Dictionary<string, Track>(StringComparer.Ordinal);
-        var loose = new Dictionary<string, Track>(StringComparer.Ordinal);
+        // Built only when an exact key misses: normalising every path up front
+        // cost more than the few misses a collection has.
+        var looseSource = new List<(string DirAndFile, Track Track)>();
+        Dictionary<string, Track>? loose = null;
+        Track? Loose(string dirAndFile)
+        {
+            if (loose is null)
+            {
+                loose = new Dictionary<string, Track>(StringComparer.Ordinal);
+                foreach (var (d, t) in looseSource) loose.TryAdd(LooseKey(d), t);
+            }
+            return loose.GetValueOrDefault(LooseKey(dirAndFile));
+        }
 
         foreach (var entry in doc.Root?.Element("COLLECTION")?.Elements("ENTRY") ?? [])
         {
@@ -73,29 +100,40 @@ public static class PlaylistEntries
             var volume = (string?)location?.Attribute("VOLUME") ?? "";
             var web = (string?)location?.Attribute("WEBADDRESS");
 
+            // The parser already read nearly every entry; find its Track by the
+            // path it would compute (DIR + FILE, normalised as Track.FromXml does)
+            // instead of parsing each ENTRY a second time, which was a third of
+            // the whole load. Only the entries it left out are parsed here.
+            var path = (location is null ? "" : dir + file)
+                .Replace("Macintosh HD/", "").Replace(":", "").TrimStart('/');
+
             Track track;
-            try
+            if (!parsedByPath.TryGetValue(path, out track!))
             {
-                var fromXml = Track.FromXml(entry);
-                track = parsedByPath.TryGetValue(fromXml.Path, out var parsed) ? parsed : fromXml;
-            }
-            catch (Exception)
-            {
-                continue; // an entry the parser cannot read (e.g. a cue without HOTCUE)
+                try
+                {
+                    track = Track.FromXml(entry);
+                }
+                catch (Exception)
+                {
+                    continue; // an entry the parser cannot read (e.g. a cue without HOTCUE)
+                }
             }
 
             if (file.Length > 0)
             {
                 // Traktor's PRIMARYKEY is VOLUME + DIR + FILE, verbatim.
                 exact.TryAdd(volume + dir + file, track);
-                loose.TryAdd(LooseKey(dir + file), track);
+                looseSource.Add((dir + file, track));
             }
             if (!string.IsNullOrEmpty(web)) exact.TryAdd(web, track);
         }
 
         var result = new Dictionary<string, List<PlaylistEntry>>(StringComparer.Ordinal);
 
-        foreach (var list in doc.Descendants("PLAYLIST"))
+        // Only the PLAYLISTS subtree: the whole document is mostly COLLECTION entries.
+        var playlists = (XContainer?)doc.Root?.Element("PLAYLISTS") ?? doc;
+        foreach (var list in playlists.Descendants("PLAYLIST"))
         {
             var uuid = (string?)list.Attribute("UUID");
             if (string.IsNullOrEmpty(uuid)) continue;
@@ -110,7 +148,7 @@ public static class PlaylistEntries
                 var type = (string?)primary?.Attribute("TYPE") ?? "";
 
                 var track = key.Length == 0 ? null
-                          : exact.GetValueOrDefault(key) ?? loose.GetValueOrDefault(LooseKey(VolumeLess(key)));
+                          : exact.GetValueOrDefault(key) ?? Loose(VolumeLess(key));
 
                 entries.Add(Classify(position, key, type, track));
             }

@@ -37,7 +37,16 @@
 
     protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
 
-    void OnPlayerChanged() => InvokeAsync(StateHasChanged);
+    // Changed fires every second while anything plays (the progress), and a
+    // playlist has a button per row: re-render only the ones whose own state moved.
+    string? renderedState;
+
+    void OnPlayerChanged()
+    {
+        if (StateClass != renderedState) InvokeAsync(StateHasChanged);
+    }
+
+    protected override void OnAfterRender(bool firstRender) => renderedState = StateClass;
 
     async Task Toggle()
     {

@@ -103,7 +103,8 @@ test.describe('playlist', () => {
     // Guard against a vacuous pass if the attribute ever disappears.
     expect(ids.length).toBe(4);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(calls.filter((c) => c.kind === 'query').length).toBeGreaterThan(0);
+    // From the Drive file index (one listing of every audio file), not by name.
+    expect(calls.filter((c) => c.kind === 'list').length).toBeGreaterThan(0);
 
     // The two alpha.wav tracks must resolve to different Drive files, chosen by
     // their parent folder rather than by filename alone.
