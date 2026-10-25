@@ -218,6 +218,35 @@ function takePrimed(fileId, start) {
     return true;
 }
 
+/** Tells the waveform sampler which file is loaded, so it can drop work for another. */
+function announceTrack() {
+    dispatchEvent(new CustomEvent('player:track', { detail: currentId }));
+}
+
+/**
+ * Resolves once the loaded track can play (or right away when nothing is
+ * loading), so work that competes for the network waits for the audio to start.
+ * Rejects with an AbortError when `signal` aborts first.
+ */
+export function whenPlayable(signal) {
+    return new Promise((resolve, reject) => {
+        if (!audio || !currentId || audio.readyState >= 3) { resolve(); return; }
+        if (signal?.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+        const el = audio;
+        const cleanup = () => {
+            el.removeEventListener('canplay', done);
+            removeEventListener('player:track', done);
+            signal?.removeEventListener('abort', aborted);
+        };
+        const done = () => { cleanup(); resolve(); };
+        const aborted = () => { cleanup(); reject(new DOMException('aborted', 'AbortError')); };
+        el.addEventListener('canplay', done);
+        // A different track (or a swap) settles it: the caller re-checks.
+        addEventListener('player:track', done);
+        signal?.addEventListener('abort', aborted);
+    });
+}
+
 /** What is primed, for tests and diagnostics. */
 export function primedState() {
     return primed ? { id: primed.id, start: primed.start, source: primed.source, ready: primed.ready } : null;
@@ -469,6 +498,7 @@ export async function play(fileId, url, startAt, stopAt, rebound) {
         endAt = stopAt ?? null;
         currentUrl = url;
         currentId = fileId;
+        announceTrack();
         stalled = null;
         retriedAuth = false;
         swapping = false;
@@ -529,6 +559,7 @@ export function cue(fileId, url, position) {
     endAt = null;
     pendingStart = position > 0 ? position : null;
     currentId = fileId;
+    announceTrack();
     currentUrl = url;
     stalled = null;
     retriedAuth = false;
@@ -561,6 +592,7 @@ export function stop() {
     audio.removeAttribute('src');
     audio.load();
     currentId = null;
+    announceTrack();
     currentUrl = null;
     stalled = null;
     wantPlaying = false;

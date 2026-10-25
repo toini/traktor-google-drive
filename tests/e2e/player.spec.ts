@@ -90,14 +90,14 @@ test.describe('player bar', () => {
 
 test.describe('waveform', () => {
   test('samples a real waveform for an uncompressed recording', async ({ page }) => {
-    const calls = await mockDrive(page);
+    const calls = await mockDrive(page, { wavSeconds: 60 });
     await seedToken(page);
     await page.goto(`/playlist/${RECORDED}`);
 
     await page.locator('#playlist-table tbody tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button').click();
     await expect(page.locator('.waveform-canvas')).toBeVisible();
 
-    // Peaks come from many small range reads, not one huge download.
+    // Over the cache cap (a 90-minute WAV): peaks come from range reads, not a download.
     await expect
       .poll(() => calls.filter((c) => c.url.includes('drive-c4-2026')).length, { timeout: 30_000 })
       .toBeGreaterThan(5);
@@ -121,28 +121,28 @@ test.describe('waveform', () => {
   });
 
   test('reuses cached peaks instead of re-sampling', async ({ page }) => {
-    const calls = await mockDrive(page);
+    const calls = await mockDrive(page, { wavSeconds: 60 });
     await seedToken(page);
     await page.goto(`/playlist/${RECORDED}`);
 
     const play = () =>
       page.locator('#playlist-table tbody tr', { hasText: 'C4 2026-08-16' }).first().locator('.play-button');
 
-    // Sampling reads are exactly WINDOW_BYTES wide; playback reads are not, so
+    // Network sampling reads are exactly NET_WINDOW_BYTES wide; playback reads are not, so
     // counting only those separates cache hits from ordinary streaming.
     const samplingReads = () =>
       calls.filter((c) => c.url.includes('drive-c4-2026') && /bytes=\d+-\d+$/.test(c.range ?? '')
-        && Number(c.range!.split('-')[1]) - Number(c.range!.split('=')[1].split('-')[0]) === 2047).length;
+        && Number(c.range!.split('-')[1]) - Number(c.range!.split('=')[1].split('-')[0]) === 32 * 1024 - 1).length;
 
     await play().click();
     // Sampling must FINISH before reloading, or the peaks were never cached.
-    await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
+    await expect(page.locator('.waveform')).toHaveAttribute('data-waveform-state', 'ready', { timeout: 60_000 });
     expect(samplingReads()).toBeGreaterThan(5);
 
     const afterFirst = samplingReads();
     await page.reload();
     await play().click();
-    await expect.poll(() => waveformMounted(page), { timeout: 60_000 }).toBe(true);
+    await expect(page.locator('.waveform')).toHaveAttribute('data-waveform-state', 'ready', { timeout: 60_000 });
 
     // Cached: no further window reads at all.
     expect(samplingReads() - afterFirst).toBe(0);

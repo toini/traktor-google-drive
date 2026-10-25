@@ -83,6 +83,13 @@
         self ??= DotNetObjectReference.Create(this);
 
         var duration = Player.Duration > 0 ? Player.Duration : file.Track?.PlaytimeFloat ?? 0;
+
+        // A WAV's peaks can arrive slowly, read by read over the network, so its
+        // markers go up at once on a flat line and the picture fills in as the
+        // reads land (waveform.js draws them live).
+        var progressive = !Casting && DriveAudio.IsUncompressed(file);
+        if (progressive && !await MountAsync(file, Flat, duration)) { StateHasChanged(); return; }
+
         double[]? peaks;
         try
         {
@@ -90,6 +97,9 @@
         }
         catch (Exception ex)
         {
+            // The track changed meanwhile, which also aborts its sampling: nothing
+            // failed that anyone is looking at.
+            if (key != LoadKey) return;
             // A missing waveform must never stop playback, so this is a notice, and
             // the markers still get drawn on a flat line below.
             failed = true;
@@ -103,6 +113,25 @@
         // old track's picture under the new one's cursor.
         if (key != LoadKey) return;
 
+        if (progressive)
+        {
+            if (peaks is not null)
+            {
+                try { await module.InvokeVoidAsync("setPeaks", peaks, file.DriveFileId); }
+                catch (JSException ex) { Errors.Info("Could not draw the waveform", ex.Message); }
+            }
+            mounted = true;
+        }
+        else
+        {
+            mounted = await MountAsync(file, peaks ?? Flat, duration);
+        }
+        StateHasChanged();
+    }
+
+    /// <summary>Draws <paramref name="peaks"/> with the cue markers; false (and a notice) if it could not.</summary>
+    async Task<bool> MountAsync(FileEntry file, double[] peaks, double duration)
+    {
         try
         {
             media = Casting ? null : await Player.MediaElementAsync();
@@ -114,17 +143,17 @@
             var range = Range is null ? null : new { start = Range.Start, end = Range.End };
 
             // Flat peaks keep the markers and click-to-seek even with no picture.
-            await module.InvokeVoidAsync("mount", container, media, peaks ?? Flat, duration, markers, range, self);
-            mounted = true;
-            if (Casting) await module.InvokeVoidAsync("setTime", Player.CurrentTime);
+            await module!.InvokeVoidAsync("mount", container, media, peaks, duration, markers, range, self, file.DriveFileId);
+            if (Casting) await module!.InvokeVoidAsync("setTime", Player.CurrentTime);
+            return true;
         }
         catch (Exception ex)
         {
             failed = true;
             notice = "Waveform unavailable";
             Errors.Info("Could not draw the waveform", ex.Message);
+            return false;
         }
-        StateHasChanged();
     }
 
     static readonly double[] Flat = Enumerable.Repeat(0.0, 400).ToArray();
@@ -183,6 +212,7 @@
         {
             try
             {
+                await module.InvokeVoidAsync("cancelSampling");
                 await module.InvokeVoidAsync("destroy");
                 await module.DisposeAsync();
             }
