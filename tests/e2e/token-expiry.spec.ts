@@ -76,11 +76,17 @@ const seek = (page: Page, seconds: number) =>
 
 const media = (calls: DriveCall[]) => calls.filter((c) => c.kind === 'media');
 
-/** Plays the long Alpha track until it is audibly running. */
+/**
+ * Plays the long Alpha track until it is audibly running and its waveform is
+ * drawn. The waveform samples the file with a burst of range reads; a test that
+ * swaps the accepted token while that burst is still running is racing it, and
+ * whether the picture fails then depends on timing, not on the code under test.
+ */
 async function startAlpha(page: Page) {
   await page.goto(`/playlist/${PSYTECH_UUID}`);
   await playButton(page, ALPHA).click();
   await expect.poll(async () => (await audio(page)).current).toBeGreaterThan(0.3);
+  await expect(page.locator('.waveform')).toHaveAttribute('data-waveform-state', 'ready');
 }
 
 /**
@@ -182,6 +188,29 @@ test.describe('token expiry during local playback', () => {
     expect(after.some((c) => c.status === 206 && c.token === RENEWED)).toBe(true);
     await expect(signIn(page)).toHaveCount(0);
     await expect(page.locator('.error-banner')).toHaveCount(0);
+  });
+
+  test('waveform reads that Drive refuses renew once and still draw', async ({ page }) => {
+    let valid = new Set([FAKE_TOKEN]);
+    const calls = await mockDrive(page, { ...LONG, acceptToken: (t) => t !== null && valid.has(t) });
+    await fakeGis(page, RENEWED, true);
+    await seedToken(page);
+    await startAlpha(page);
+    const gisBefore = await page.evaluate(() => (window as any).__gis.calls.length as number);
+
+    // Drive stops taking the token while a waveform is being sampled: the same
+    // event the player recovers from, here on the sampler's burst of range reads.
+    valid = new Set([RENEWED]);
+    const before = calls.length;
+    const peaks = await page.evaluate(async () =>
+      (await import('/waveform.js')).computePeaks('/api/proxy/drive/drive-beta', 'uncached-beta', null));
+    expect(peaks.length).toBeGreaterThan(0);
+
+    const reads = media(calls.slice(before));
+    expect(reads.some((c) => c.status === 401 && c.token === FAKE_TOKEN)).toBe(true);
+    expect(reads.some((c) => c.status === 206 && c.token === RENEWED)).toBe(true);
+    // One renewal, not one per refused read.
+    expect(await page.evaluate(() => (window as any).__gis.calls.length as number)).toBe(gisBefore + 1);
   });
 
   test('when renewal needs the user, it pauses with a sign-in that resumes at the same position', async ({ page }) => {
