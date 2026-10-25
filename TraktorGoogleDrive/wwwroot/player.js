@@ -1,10 +1,16 @@
-// One audio element for the whole app. Two tracks playing at once used to be
-// possible because every AudioTrack owned its own Audio(); with a single
-// element it is unrepresentable.
+// One audio element plays for the whole app. Two tracks playing at once used
+// to be possible because every AudioTrack owned its own Audio(); with a single
+// active element it is unrepresentable.
+//
+// A second, hidden element holds the next track loaded and decoded at its start
+// point ("primed"), so advancing swaps elements and plays at once instead of
+// loading a new source. Only the active element's events count: the spare's are
+// ignored until it becomes the active one, and it never plays while spare.
 
 import * as cache from './prefetch.js';
 
-let audio = null;
+let audio = null;   // the active element
+let spare = null;   // the other one: empty, or primed with the next track
 let dotnet = null;
 let currentId = null;
 
@@ -72,48 +78,149 @@ const reportProgress = (force) => {
 
 export function init(dotNetRef) {
     dotnet = dotNetRef;
-    audio = new Audio();
+    audio = wire(new Audio());
+    spare = wire(new Audio());
+
+    cache.subscribe(onCacheChanged);
+    addEventListener('online', () => { if (reconnect) fireReconnect(); });
+}
+
+/** Gives an element the player's listeners, which act only while it is the active one. */
+function wire(el) {
     // Read ahead as far as the browser will; prefetch.js does the rest.
-    audio.preload = 'auto';
+    el.preload = 'auto';
+    const on = (type, fn) => el.addEventListener(type, (e) => { if (el === audio) fn(e); });
 
     // A swap to the cached copy is the same track at the same place: no spinner.
-    audio.addEventListener('loadstart', () => { switching = false; if (!swapping) report('loading'); });
-    audio.addEventListener('loadedmetadata', () => { swapping = false; });
-    audio.addEventListener('canplay', () => {
+    on('loadstart', () => { switching = false; if (!swapping) report('loading'); });
+    on('loadedmetadata', () => { swapping = false; });
+    on('canplay', () => {
         report('ready');
         reportProgress(true);
         if (!wantPlaying) settleNetwork();
     });
-    audio.addEventListener('waiting', () => { if (wantPlaying) startWaiting(); });
-    audio.addEventListener('timeupdate', () => {
+    on('waiting', () => { if (wantPlaying) startWaiting(); });
+    on('timeupdate', () => {
         if (waitingSince != null && !audio.paused && audio.readyState >= 3) settleNetwork();
         if (endAt != null && audio.currentTime >= endAt) {
             endAt = null; // once per track
+            markAdvance();
             report('previewEnd');
         }
         reportProgress(false);
+        primeIfDue();
     });
     // Seeking past the end is a deliberate "let me hear this bit": the seek wins
     // and the track plays on, rather than jumping straight to the next one.
-    audio.addEventListener('seeking', () => {
+    on('seeking', () => {
         if (endAt != null && audio.currentTime > endAt) endAt = null;
     });
-    audio.addEventListener('loadedmetadata', () => {
+    on('loadedmetadata', () => {
         if (pendingStart != null) {
             audio.currentTime = pendingStart;
             pendingStart = null;
         }
     });
-    audio.addEventListener('durationchange', () => reportProgress(true));
-    audio.addEventListener('seeked', () => reportProgress(true));
-    audio.addEventListener('playing', () => { retriedAuth = false; settleNetwork(); report('playing'); });
+    on('durationchange', () => reportProgress(true));
+    on('seeked', () => reportProgress(true));
+    on('playing', () => { retriedAuth = false; settleNetwork(); markPlaying(); report('playing'); });
     // Switching tracks pauses the old one on the way; that is not the user pausing.
-    audio.addEventListener('pause', () => { if (!switching) report('paused'); });
-    audio.addEventListener('ended', () => report('ended'));
-    audio.addEventListener('error', () => { onError(); });
+    on('pause', () => { if (!switching) report('paused'); });
+    on('ended', () => { markAdvance(); report('ended'); });
+    on('error', () => { onError(); });
+    return el;
+}
 
-    cache.subscribe(onCacheChanged);
-    addEventListener('online', () => { if (reconnect) fireReconnect(); });
+/* ---------- the primed next track ---------- */
+
+// What to prime (from plan): { id, url, start }. And what is primed in `spare`:
+// { id, start, source, ready }. Primed as soon as the next track's download is
+// complete; a track that streams is primed PRIME_LEAD_S before this one ends,
+// so the spare does not fetch through the proxy any earlier than it must.
+let primeTarget = null;
+let primed = null;
+let plannedCurrent = null;
+let startedPrimed = null; // the loaded track came from the primed element (diagnostics)
+const PRIME_LEAD_S = 30;
+
+// 'off' turns priming off: every advance loads a new source, as before. For
+// measuring the difference, and a manual escape hatch.
+function primingEnabled() {
+    try { return localStorage.getItem('player:prime') !== 'off'; } catch { return true; }
+}
+
+function discardPrimed() {
+    if (!primed) return;
+    primed = null;
+    spare.removeAttribute('src');
+    spare.load();
+}
+
+/** Primes the next track when it is ready to be (see above), unless it already is. */
+function primeIfDue() {
+    const t = primeTarget;
+    if (!t || !audio || t.id === currentId || !primingEnabled()) return;
+    if (primed?.id === t.id && primed.start === t.start) return;
+    // Primed for the track that is about to start: play() takes it.
+    if (primed && primed.id === plannedCurrent && primed.id !== currentId) return;
+    const local = cacheFailed.has(t.id) ? null : cache.objectUrl(t.id);
+    if (!local) {
+        // Still downloading, or too big to: stream it, but only near the end.
+        const end = endAt ?? audio.duration;
+        if (!isFinite(end) || end - audio.currentTime > PRIME_LEAD_S) return;
+        const s = cache.status(t.id);
+        if (s && s.state !== 'skipped' && s.state !== 'failed' && end - audio.currentTime > 5) return;
+    }
+    discardPrimed();
+    const p = { id: t.id, start: t.start, source: local ? 'cache' : 'stream', ready: false };
+    primed = p;
+    const ready = () => { if (primed === p) p.ready = true; };
+    spare.addEventListener('loadedmetadata', () => {
+        if (primed !== p) return;
+        if (p.start > 0) {
+            spare.addEventListener('seeked', ready, { once: true });
+            spare.currentTime = p.start;
+        } else {
+            if (spare.readyState >= 3) ready();
+            else spare.addEventListener('canplay', ready, { once: true });
+        }
+    }, { once: true });
+    spare.addEventListener('error', () => { if (primed === p) discardPrimed(); }, { once: true });
+    spare.src = local ?? t.url;
+}
+
+/**
+ * Makes the primed spare the active element for `fileId`, if it holds exactly
+ * that file at `start` and is ready. The old element is emptied. Returns false
+ * when the normal load has to happen instead.
+ */
+function takePrimed(fileId, start) {
+    const p = primed;
+    if (!p || p.id !== fileId || !p.ready || Math.abs(p.start - start) > 0.25 || spare.error) {
+        discardPrimed();
+        startedPrimed = null;
+        return false;
+    }
+    primed = null;
+    startedPrimed = fileId;
+    const old = audio;
+    audio = spare;
+    spare = old;
+    generation++;           // whatever the old element still raises is stale
+    switching = false;
+    source = p.source;
+    old.pause();
+    old.removeAttribute('src');
+    old.load();
+    lastWholeSecond = -1;
+    // WaveSurfer follows the element that plays.
+    dispatchEvent(new CustomEvent('player:element', { detail: audio }));
+    return true;
+}
+
+/** What is primed, for tests and diagnostics. */
+export function primedState() {
+    return primed ? { id: primed.id, start: primed.start, source: primed.source, ready: primed.ready } : null;
 }
 
 /* ---------- whole-file cache ---------- */
@@ -128,11 +235,20 @@ function sourceFor(fileId, streamUrl) {
 /**
  * The current and next track to have downloaded, from PlayerService:
  * `{ id, bytes }` each, or null. `bytes` is the NML's estimate, so a set too
- * big for the cache is never started.
+ * big for the cache is never started. `next` also carries `url` (its stream)
+ * and `start` (0, or its load cue in gig preview), to prime it with.
  */
 export function plan(current, next) {
     nextId = next?.id ?? null;
-    cache.setPlan([current, next].filter(Boolean));
+    plannedCurrent = current?.id ?? null;
+    cache.setPlan([current, next].filter(Boolean).map(({ id, bytes }) => ({ id, bytes })));
+    primeTarget = next?.id && next.url ? { id: next.id, url: next.url, start: next.start ?? 0 } : null;
+    // PlayerService plans before it plays: the primed track may be the one
+    // about to start, which play() then takes.
+    const keep = primed && (primed.id === plannedCurrent
+        || (primed.id === primeTarget?.id && primed.start === primeTarget?.start));
+    if (!keep) discardPrimed();
+    primeIfDue();
     reportBuffer(true);
 }
 
@@ -161,6 +277,7 @@ function swapToCache() {
 
 function onCacheChanged(id) {
     if (currentId && source === 'stream' && cache.blob(currentId)) swapToCache();
+    if (id && id === primeTarget?.id) primeIfDue();
     reportBuffer(false);
 }
 
@@ -347,7 +464,8 @@ export function resume() {
 export async function play(fileId, url, startAt, stopAt, rebound) {
     if (!audio) return;
     if (currentId !== fileId) {
-        pendingStart = startAt > 0 ? startAt : null;
+        const primedNow = takePrimed(fileId, startAt > 0 ? startAt : 0);
+        pendingStart = primedNow || !(startAt > 0) ? null : startAt;
         endAt = stopAt ?? null;
         currentUrl = url;
         currentId = fileId;
@@ -355,7 +473,8 @@ export async function play(fileId, url, startAt, stopAt, rebound) {
         retriedAuth = false;
         swapping = false;
         settleNetwork();
-        load(sourceFor(fileId, url));
+        if (primedNow) reportProgress(true);
+        else load(sourceFor(fileId, url));
         reportBuffer(true);
     } else if (stalled) {
         resume();
@@ -416,6 +535,7 @@ export function cue(fileId, url, position) {
     wantPlaying = false;
     swapping = false;
     settleNetwork();
+    discardPrimed();
     load(sourceFor(fileId, url));
     reportBuffer(true);
     // Registered after init's listener, so the pending seek has been applied.
@@ -449,6 +569,8 @@ export function stop() {
     swapping = false;
     source = 'stream';
     nextId = null;
+    primeTarget = null;
+    discardPrimed();
     settleNetwork();
     // Downloads stop; finished files stay, for a quick replay.
     cache.stopAll();
@@ -478,5 +600,32 @@ export function position() {
 export function dispose() {
     stop();
     audio = null;
+    spare = null;
     dotnet = null;
+}
+
+/* ---------- transition timing (tests and diagnostics) ---------- */
+
+// The gap between one track ending (or reaching its preview end) and the next
+// one playing: what a listener hears as silence between tracks.
+const transitions = [];
+let advanceFrom = null; // { id, at }
+
+function markAdvance() {
+    advanceFrom = { id: currentId, at: performance.now() };
+}
+
+function markPlaying() {
+    if (!advanceFrom || advanceFrom.id === currentId) return;
+    transitions.push({
+        from: advanceFrom.id, to: currentId, gapMs: performance.now() - advanceFrom.at,
+        primed: startedPrimed === currentId, at: audio.currentTime,
+    });
+    if (transitions.length > 20) transitions.shift();
+    advanceFrom = null;
+}
+
+/** The last few track-to-track gaps, newest last. */
+export function gaps() {
+    return transitions.slice();
 }

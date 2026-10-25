@@ -344,8 +344,14 @@ public class PlayerService : IAsyncDisposable
         if (_module is null || _localFileId is null || _cast.IsConnected) return;
         _prefetching = true;
         var current = new PrefetchItem(_localFileId,
-            _file is not null && _file.DriveFileId == _localFileId ? DriveAudio.EstimatedBytes(_file) : null);
-        var next = NextEntry is { } n ? new PrefetchItem(n.DriveFileId, DriveAudio.EstimatedBytes(n)) : null;
+            _file is not null && _file.DriveFileId == _localFileId ? DriveAudio.EstimatedBytes(_file) : null, null, null);
+        // The next track is also primed in a second element, at the place it
+        // will start: its load cue in gig preview, the top otherwise. Same
+        // arithmetic as PlayEntryAsync, so player.js can tell the primed copy fits.
+        var next = NextEntry is { } n
+            ? new PrefetchItem(n.DriveFileId, DriveAudio.EstimatedBytes(n), DriveAudio.UrlFor(n.DriveFileId),
+                _preview ? GigPreview.RangeFor(n.Track, n.Track?.PlaytimeFloat ?? 0).Start : 0)
+            : null;
         try { await _module.InvokeVoidAsync("plan", current, next); }
         catch (JSException) { /* playback goes on streaming */ }
     }
@@ -363,7 +369,9 @@ public class PlayerService : IAsyncDisposable
 
     private sealed record PrefetchItem(
         [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id,
-        [property: System.Text.Json.Serialization.JsonPropertyName("bytes")] long? Bytes);
+        [property: System.Text.Json.Serialization.JsonPropertyName("bytes")] long? Bytes,
+        [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
+        [property: System.Text.Json.Serialization.JsonPropertyName("start")] double? Start);
 
     [JSInvokable]
     public void OnBufferChanged(string state, double fraction, bool nextReady, string? network)

@@ -323,6 +323,14 @@ const COLORS = {
 
 let ws = null;
 let regions = null;
+let followsPlayer = false; // mounted on the player's element, not a picture for the TV
+
+// The player swaps to a second, primed element when it advances (player.js).
+// The cursor and click-to-seek move with it.
+addEventListener('player:element', (e) => {
+    if (!ws || !followsPlayer || !e.detail) return;
+    try { ws.setMediaElement(e.detail); } catch { /* torn down meanwhile */ }
+});
 
 function labelElement(marker, index) {
     const el = document.createElement('span');
@@ -400,6 +408,10 @@ export async function mount(container, mediaElement, peaks, duration, markers, r
     if (mediaElement) options.media = mediaElement;
 
     ws = WaveSurfer.create(options);
+    followsPlayer = !!mediaElement;
+    // Mounted on an element the player swapped away from while this was loading.
+    const active = mediaElement ? (await import('./player.js')).element() : null;
+    if (active && active !== mediaElement) ws.setMediaElement(active);
 
     regions.on('region-clicked', (region, e) => {
         // A marker is a place to jump to; without this the click would also
