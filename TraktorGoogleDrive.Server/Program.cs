@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
+using TraktorGoogleDrive.Server.Cast;
 using TraktorGoogleDrive.Server.Remote;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient();
 // Remote control from a second device (ADR 20261018-63).
 builder.Services.AddRemoteControl();
+// Media tickets for a Cast device, so its URL never carries the Google token.
+builder.Services.AddCastTickets();
 
 // Cloud Run sits in front as a TLS-terminating proxy, so without this the app
 // sees scheme=http and the load balancer's IP for every request.
@@ -95,6 +98,9 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
 /// Set by auth.js, scoped to /api/proxy/.
 const string ProxyTokenCookie = "drive_token";
 
+/// What a Cast device fetches: /api/proxy/cast/{fileId}?ticket=…
+const string CastProxyPath = "/api/proxy/cast/";
+
 /// Where the Cast Default Media Receiver (app id CC1AD845) is served from. A Cast
 /// device fetches the media itself, from that page's origin rather than ours, so
 /// without this the same-origin check below 403s every cast.
@@ -125,49 +131,23 @@ static bool IsAllowedCaller(HttpRequest request)
         return HostAllowed(referer.ToString(), expectedHost);
 
     // Neither header: a direct navigation, curl, or a Cast device — every captured
-    // Chromecast progressive fetch sends neither. Allowed: it is the caller's own
-    // token, and it is not a cross-site embed either.
+    // Chromecast progressive fetch sends neither. Allowed: the credential (cookie
+    // or ticket) is the caller's own, and it is not a cross-site embed either.
     return true;
 }
 
-app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
+/// Relays one (ranged) read of a Drive file with the given token. Shared by the
+/// browser's proxy, which takes the token from a cookie, and the Cast proxy,
+/// which looks it up behind a ticket.
+static async Task RelayAsync(
     HttpRequest incomingRequest,
     HttpResponse outgoingResponse,
     string fileId,
-    [FromQuery] string? token,
+    string token,
     IHttpClientFactory httpClientFactory,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
+    ILogger logger,
+    CancellationToken cancellationToken)
 {
-    var logger = loggerFactory.CreateLogger("DriveProxy");
-
-    // Checked before anything else, so a rejection never depends on the rest of
-    // the request being well formed.
-    if (!IsAllowedCaller(incomingRequest))
-    {
-        // All three headers, because who a Cast device claims to be is only
-        // knowable from a real device's first attempt.
-        logger.LogWarning("Rejected proxy request. Origin={Origin} Referer={Referer} UserAgent={UserAgent}",
-            incomingRequest.Headers[HeaderNames.Origin].ToString(),
-            incomingRequest.Headers[HeaderNames.Referer].ToString(),
-            incomingRequest.Headers[HeaderNames.UserAgent].ToString());
-        outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
-        return;
-    }
-
-    // The browser's own player sends the token as a cookie (auth.js keeps it
-    // current, and it never appears in a URL or the request log). A Cast device
-    // has no cookie of ours, so its URL still carries ?token=. The cookie wins:
-    // it is renewed in place, a URL is fixed when the load is issued.
-    if (incomingRequest.Cookies.TryGetValue(ProxyTokenCookie, out var cookieToken) && !string.IsNullOrWhiteSpace(cookieToken))
-        token = cookieToken;
-
-    if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
-    {
-        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
-        return;
-    }
-
     var client = httpClientFactory.CreateClient();
     var method = HttpMethods.IsHead(incomingRequest.Method) ? HttpMethod.Head : HttpMethod.Get;
     var request = new HttpRequestMessage(method,
@@ -197,7 +177,90 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
 
     await using var stream = await upstream.Content.ReadAsStreamAsync(cancellationToken);
     await stream.CopyToAsync(outgoingResponse.Body, cancellationToken);
+}
+
+/// True (and the response already written) when the same-origin check fails.
+static bool RejectCaller(HttpRequest incomingRequest, HttpResponse outgoingResponse, ILogger logger)
+{
+    if (IsAllowedCaller(incomingRequest)) return false;
+
+    // All three headers, because who a Cast device claims to be is only
+    // knowable from a real device's first attempt.
+    logger.LogWarning("Rejected proxy request. Origin={Origin} Referer={Referer} UserAgent={UserAgent}",
+        incomingRequest.Headers[HeaderNames.Origin].ToString(),
+        incomingRequest.Headers[HeaderNames.Referer].ToString(),
+        incomingRequest.Headers[HeaderNames.UserAgent].ToString());
+    outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
+    return true;
+}
+
+// The browser's own player. The token comes only from the cookie auth.js keeps
+// current, so it never appears in a URL or the request log. There is no ?token=
+// fallback any more: Cast, its only user, has its own route below.
+app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
+    HttpRequest incomingRequest,
+    HttpResponse outgoingResponse,
+    string fileId,
+    IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("DriveProxy");
+    // Checked before anything else, so a rejection never depends on the rest of
+    // the request being well formed.
+    if (RejectCaller(incomingRequest, outgoingResponse, logger)) return;
+
+    if (!incomingRequest.Cookies.TryGetValue(ProxyTokenCookie, out var token)
+        || string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
+    {
+        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    await RelayAsync(incomingRequest, outgoingResponse, fileId, token, httpClientFactory, logger, cancellationToken);
 });
+
+// A Cast device. It has no cookie of ours, so its URL carries a ticket: signed,
+// scoped to this one file, with a hard expiry. The Google token stays in memory
+// behind it and the sender renews it there, so this URL outlives the token.
+// Cookies are deliberately ignored: the ticket is the only credential here.
+app.MapMethods(CastProxyPath + "{fileId}", ["GET", "HEAD"], async (
+    HttpRequest incomingRequest,
+    HttpResponse outgoingResponse,
+    string fileId,
+    [FromQuery] string? ticket,
+    CastTickets tickets,
+    IHttpClientFactory httpClientFactory,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("CastProxy");
+    if (RejectCaller(incomingRequest, outgoingResponse, logger)) return;
+
+    var check = tickets.Validate(ticket, fileId);
+    if (check.Verdict != CastTickets.Verdict.Ok)
+    {
+        // Never the ticket itself: the request log already has it, and the
+        // verdict is what tells a forged one from an old one.
+        logger.LogInformation("Refused Cast ticket for {FileId}: {Verdict}", fileId, check.Verdict);
+        outgoingResponse.StatusCode = StatusCodes.Status403Forbidden;
+        return;
+    }
+
+    if (tickets.TokenFor(check.GrantId) is not { } token)
+    {
+        // A genuine ticket with no token behind it: revoked, lapsed, or lost in a
+        // restart. The sender's next renewal or heartbeat puts it back.
+        logger.LogInformation("Cast ticket for {FileId} has no token behind it", fileId);
+        outgoingResponse.Headers["X-Cast-Ticket"] = "no-token";
+        outgoingResponse.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
+    await RelayAsync(incomingRequest, outgoingResponse, fileId, token, httpClientFactory, logger, cancellationToken);
+});
+
+app.MapCastTickets();
 
 app.MapRemoteControl();
 

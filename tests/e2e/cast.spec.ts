@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { mockDrive, seedToken, FAKE_TOKEN } from './drive-mock';
 import { CAST_DEVICE_NAME, castLoads, castState, mockCastSdk } from './cast-mock';
+import type { TicketServer } from './cast-mock';
 
 const PSYTECH_UUID = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a';
 
@@ -39,8 +40,11 @@ async function expireTokenSoon(page: Page, refreshed: string | null): Promise<vo
 }
 
 test.describe('cast sender', () => {
+  /** The stand-in for /api/cast/tickets. Tests change its answers through `options`. */
+  let server: TicketServer;
+
   test.beforeEach(async ({ page }) => {
-    await mockCastSdk(page);
+    server = await mockCastSdk(page);
     await seedToken(page);
   });
 
@@ -77,9 +81,10 @@ test.describe('cast sender', () => {
     await expect.poll(async () => (await castLoads(page)).length).toBe(1);
 
     const [load] = await castLoads(page);
-    // A relative path means nothing on the far side of the network.
-    expect(load.url).toMatch(/^http:\/\/localhost:\d+\/api\/proxy\/drive\//);
-    expect(load.url).toContain(FAKE_TOKEN);
+    // A relative path means nothing on the far side of the network. The device
+    // gets a ticket for this one file, never the Google token.
+    expect(load.url).toMatch(/^http:\/\/localhost:\d+\/api\/proxy\/cast\/drive-alpha-sets\?ticket=/);
+    expect(load.url).not.toContain(FAKE_TOKEN);
     expect(load.contentType).toBe('audio/wav');
     expect(load.streamType).toBe('BUFFERED');
     expect(load.currentTime).toBe(0);
@@ -165,22 +170,139 @@ test.describe('cast sender', () => {
     await expect(page.locator('.error-summary').first()).toContainText(/casting failed/i);
   });
 
-  test('replaces an expiring token mid-set and resumes at the same position', async ({ page }) => {
+  test('keeps playing across a token renewal: the server gets the new token, the TV keeps its URL', async ({ page }) => {
+    await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await connect(page);
+    await playButton(page, ALPHA_IN_SETS).click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+    const [mint] = server.calls.filter((c) => c.kind === 'mint');
+
+    // A set outlives the ~1h token. The token lives on the server behind the
+    // ticket, so renewing it is a call to the server, not a new LOAD on the TV.
+    await expireTokenSoon(page, 'refreshed-token');
+    await page.evaluate(() => window.__castTest.tick(1800));
+
+    await expect.poll(() => server.calls.filter((c) => c.kind === 'renew').length).toBeGreaterThan(0);
+    const renew = server.calls.find((c) => c.kind === 'renew')!;
+    expect(renew.token).toBe('refreshed-token');
+    expect(renew.ticket).toBe(mint.ticket);
+    expect(renew.renewKey).toBe(mint.renewKey);
+
+    // No rebuffer: still the one load, still playing, from where it was.
+    await page.evaluate(() => window.__castTest.tick(1801));
+    expect(await castLoads(page)).toHaveLength(1);
+    const state = await castState(page);
+    expect(state.playerState).toBe('PLAYING');
+    expect(state.currentTime).toBe(1801);
+  });
+
+  test('a token renewed elsewhere reaches the server without reloading the TV', async ({ page }) => {
     await mockDrive(page);
     await page.goto(`/playlist/${PSYTECH_UUID}`);
     await connect(page);
     await playButton(page, ALPHA_IN_SETS).click();
     await expect.poll(async () => (await castLoads(page)).length).toBe(1);
 
-    // The device holds the token inside its media URL, so a set longer than the
-    // ~1h token has to be re-issued while it is still playing.
-    await expireTokenSoon(page, 'refreshed-token');
-    await page.evaluate(() => window.__castTest.tick(1800));
+    // auth.js renewed on its own schedule (or inside a click).
+    await page.evaluate(() => sessionStorage.setItem('access_token', 'renewed-elsewhere'));
+    await page.evaluate(() => window.__castTest.tick(60));
+
+    await expect.poll(() => server.calls.find((c) => c.kind === 'renew')?.token).toBe('renewed-elsewhere');
+    expect(await castLoads(page)).toHaveLength(1);
+  });
+
+  test('a ticket that reaches its cap mid-track is replaced, at the same position', async ({ page }) => {
+    // The first ticket starts just outside the five-minute lead, and is inside
+    // it a couple of seconds later, by when the set has moved on.
+    server.options.ticketLifetimeMs = (n) => (n === 1 ? 5 * 60_000 + 2_000 : 4 * 3600_000);
+    await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await connect(page);
+    await playButton(page, ALPHA_IN_SETS).click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+
+    await page.evaluate(() => window.__castTest.tick(899));
+    expect(await castLoads(page)).toHaveLength(1);
+    await page.waitForTimeout(2_500);
+    await page.evaluate(() => window.__castTest.tick(900));
 
     await expect.poll(async () => (await castLoads(page)).length).toBe(2);
     const loads = await castLoads(page);
-    expect(loads[1].url).toContain('refreshed-token');
-    expect(loads[1].currentTime).toBe(1800);
+    expect(loads[1].currentTime).toBe(900);
+    expect(loads[1].url).toContain('ticket=ticket-2-drive-alpha-sets');
+    // The old ticket is revoked, and nothing loops: one more tick, no third load.
+    await expect.poll(() => server.calls.some((c) => c.kind === 'revoke' && c.ticket === 'ticket-1-drive-alpha-sets')).toBe(true);
+    await page.evaluate(() => window.__castTest.tick(901));
+    expect(await castLoads(page)).toHaveLength(2);
+  });
+
+  test('a renewal the server refuses as expired re-issues the load with a fresh ticket', async ({ page }) => {
+    await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await connect(page);
+    await playButton(page, ALPHA_IN_SETS).click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+
+    // The server says this ticket is past its cap (410) once; the new one is fine.
+    let refused = false;
+    server.options.renewStatus = () => (refused ? 204 : ((refused = true), 410));
+    await page.evaluate(() => sessionStorage.setItem('access_token', 'renewed-elsewhere'));
+    await page.evaluate(() => window.__castTest.tick(1200));
+
+    await expect.poll(async () => (await castLoads(page)).length).toBe(2);
+    const loads = await castLoads(page);
+    expect(loads[1].currentTime).toBe(1200);
+    const mints = server.calls.filter((c) => c.kind === 'mint');
+    expect(mints[1].token).toBe('renewed-elsewhere');
+  });
+
+  test('no Cast load URL ever contains the Google token', async ({ page }) => {
+    // The second track's ticket is already inside the renewal lead.
+    server.options.ticketLifetimeMs = (n) => (n === 2 ? 120_000 : 4 * 3600_000);
+    await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await connect(page);
+
+    // First load, a renewal, a second track, and that track's ticket running out.
+    await playButton(page, ALPHA_IN_SETS).click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+    await expireTokenSoon(page, 'refreshed-token');
+    await page.evaluate(() => window.__castTest.tick(30));
+    await expect.poll(() => server.calls.some((c) => c.kind === 'renew')).toBe(true);
+
+    // Beta's ticket is inside the lead from the start, so its first PLAYING tick
+    // already replaces it: two loads for Beta, three in all.
+    await playButton(page, 'drive-beta').first().click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(3);
+    expect((await castLoads(page)).slice(1).every((l) => l.url.includes('/drive-beta?'))).toBe(true);
+
+    for (const load of await castLoads(page)) {
+      expect(load.url).not.toContain(FAKE_TOKEN);
+      expect(load.url).not.toContain('refreshed-token');
+      expect(load.url).not.toMatch(/[?&](access_)?token=/);
+      expect(load.url).toContain('ticket=');
+    }
+    // The token itself went to the server in a header, on calls whose URLs carry nothing.
+    const sent = server.calls.filter((c) => c.kind !== 'revoke');
+    expect(sent.map((c) => c.token)).toEqual(expect.arrayContaining([FAKE_TOKEN, 'refreshed-token']));
+    for (const call of server.calls) {
+      expect(call.url).not.toContain(FAKE_TOKEN);
+      expect(call.url).not.toContain('refreshed-token');
+      expect(new URL(call.url).search).toBe('');
+    }
+  });
+
+  test('stopping the cast revokes its ticket', async ({ page }) => {
+    await mockDrive(page);
+    await page.goto(`/playlist/${PSYTECH_UUID}`);
+    await connect(page);
+    await playButton(page, ALPHA_IN_SETS).click();
+    await expect.poll(async () => (await castLoads(page)).length).toBe(1);
+
+    await castButton(page).click();
+    await expect.poll(() => server.calls.filter((c) => c.kind === 'revoke').map((c) => c.ticket))
+      .toContain('ticket-1-drive-alpha-sets');
   });
 
   test('reports a refused refresh once, not every second', async ({ page }) => {

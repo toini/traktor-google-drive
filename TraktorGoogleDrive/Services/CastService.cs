@@ -16,6 +16,9 @@ public record CastSnapshot(
     double Duration,
     string? IdleReason = null);
 
+/// <summary>What cast.js reports after asking the server for a media ticket.</summary>
+public record CastTicketResponse(int Status, string? Ticket, string? RenewKey, double ExpiresAt);
+
 /// <summary>
 /// Playback on a Cast device. Deliberately shaped like <see cref="PlayerService"/>
 /// so components can ask the same questions of either — the difference that matters
@@ -23,8 +26,18 @@ public record CastSnapshot(
 /// </summary>
 public class CastService : IAsyncDisposable
 {
-    /// <summary>A token this close to expiry is replaced before the device notices.</summary>
+    /// <summary>A token (or ticket) this close to expiry is replaced before the device notices.</summary>
     private static readonly TimeSpan RefreshLead = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How often the current token is pushed to the server even when nothing
+    /// changed. The server holds tokens in memory only; after a restart this puts
+    /// the device's token back before its buffer runs out.
+    /// </summary>
+    private static readonly TimeSpan Heartbeat = TimeSpan.FromSeconds(60);
+
+    /// <summary>After a renewal the server could not take, wait this long before the next try.</summary>
+    private static readonly TimeSpan RetryAfter = TimeSpan.FromSeconds(10);
 
     private readonly IJSRuntime _js;
     private readonly NavigationManager _nav;
@@ -34,15 +47,19 @@ public class CastService : IAsyncDisposable
     private DotNetObjectReference<CastService>? _self;
     private Task<IJSObjectReference>? _init;
 
-    // What is on the device right now, so a token refresh can re-issue the same
-    // request with a fresh URL.
+    // What is on the device right now, so a ticket that runs out can re-issue the
+    // same request with a fresh URL.
     private (string FileId, string ContentType, string Title, string Artist)? _current;
     private bool _refreshing;
     private bool _refreshDeclined;
-    // The token inside the URL the device holds. auth.js renews the browser's
-    // token on its own schedule; when that happens the device still has the old
-    // one, so a newer stored token means "re-issue the load".
+    // The ticket in the URL the device holds. The Google token stays on the
+    // server behind it, so a renewal is a call to the server, not a new LOAD.
+    private (string Value, string RenewKey, DateTimeOffset ExpiresAt)? _ticket;
+    // The token the server holds for that ticket. auth.js renews the browser's
+    // token on its own schedule; a newer stored token means "push it".
     private string? _sentToken;
+    private DateTimeOffset _lastPushed;
+    private DateTimeOffset _nextAttempt;
 
     public CastService(IJSRuntime js, NavigationManager nav, AppErrors errors)
     {
@@ -99,6 +116,7 @@ public class CastService : IAsyncDisposable
     {
         if (_module is null) return;
         _current = null;
+        await RevokeTicketAsync();
         await _module.InvokeVoidAsync("disconnect");
     }
 
@@ -154,6 +172,7 @@ public class CastService : IAsyncDisposable
     {
         if (_module is null) return;
         _current = null;
+        await RevokeTicketAsync();
         await _module.InvokeVoidAsync("stop");
     }
 
@@ -163,18 +182,49 @@ public class CastService : IAsyncDisposable
         await _module.InvokeVoidAsync("seek", seconds);
     }
 
+    /// <summary>
+    /// Trades the token for a ticket scoped to this file, then hands the device a
+    /// URL with only the ticket in it. The one previous ticket is revoked.
+    /// </summary>
     private async Task SendLoadAsync(string token, double startTime)
     {
         if (_current is not { } c || _module is null) return;
 
+        await RevokeTicketAsync();
+        var minted = await _module.InvokeAsync<CastTicketResponse>("mintTicket",
+            c.FileId, token, await TokenExpiresAtAsync());
+        if (minted.Ticket is not { Length: > 0 } ticket || minted.RenewKey is not { Length: > 0 } renewKey)
+        {
+            OnCastFailed(minted.Status == 0
+                ? "The server could not be reached for a Cast ticket"
+                : $"The server refused a Cast ticket (HTTP {minted.Status})");
+            return;
+        }
+
+        _ticket = (ticket, renewKey, DateTimeOffset.FromUnixTimeMilliseconds((long)minted.ExpiresAt));
         _sentToken = token;
+        _lastPushed = DateTimeOffset.UtcNow;
         await _module.InvokeAsync<bool>("load",
             c.FileId,
-            DriveAudio.AbsoluteUrlFor(_nav.BaseUri, c.FileId, token),
+            DriveAudio.CastUrlFor(_nav.BaseUri, c.FileId, ticket),
             c.ContentType,
             c.Title,
             c.Artist,
             startTime);
+    }
+
+    private async Task RevokeTicketAsync()
+    {
+        if (_ticket is not { } t || _module is null) return;
+        _ticket = null;
+        try { await _module.InvokeVoidAsync("revokeTicket", t.Value, t.RenewKey); }
+        catch (JSException) { /* best effort: it dies with its token anyway */ }
+    }
+
+    private async Task<double?> TokenExpiresAtAsync()
+    {
+        try { return await _js.InvokeAsync<double?>("authTokenExpiresAt"); }
+        catch (JSException) { return null; }
     }
 
     /// Cast needs a content type in MediaInfo and Drive already reports the real
@@ -216,10 +266,14 @@ public class CastService : IAsyncDisposable
                     && snapshot.CurrentTime >= snapshot.Duration - 1.5));
 
         // Idle means nothing is on the device, so the casting bar must stop showing
-        // the track that just finished.
-        if (State == PlaybackState.Idle) _current = null;
+        // the track that just finished, and its ticket has nothing left to fetch.
+        if (State == PlaybackState.Idle)
+        {
+            _current = null;
+            _ = RevokeTicketAsync();
+        }
 
-        if (IsConnected && State == PlaybackState.Playing) _ = RefreshTokenIfExpiringAsync();
+        if (IsConnected && State == PlaybackState.Playing) _ = KeepTicketAliveAsync();
 
         // Everything except the position is a state change; the position alone is a
         // tick, and only the casting bar cares about those.
@@ -241,51 +295,84 @@ public class CastService : IAsyncDisposable
     }
 
     /// <summary>
-    /// The device holds the access token inside its media URL, and a recorded set
-    /// outlives the ~1h token. Re-issue the load with a fresh token at the current
-    /// position rather than letting the device hit a 401 mid-set.
+    /// The device's URL carries a ticket; the Google token behind it is on the
+    /// server and lives ~1h, while a recorded set can run for hours. Keep the
+    /// server's copy current so the device never notices:
+    /// <list type="bullet">
+    /// <item>a token renewed elsewhere (auth.js's own schedule, a click) is pushed;</item>
+    /// <item>a token about to expire is renewed here, then pushed;</item>
+    /// <item>otherwise the current token is pushed once a <see cref="Heartbeat"/>,
+    ///   which restores the grant if the server restarted.</item>
+    /// </list>
+    /// None of these touch the device. Only a ticket at its hard cap, or one the
+    /// server no longer accepts, needs a new URL: then the load is re-issued at the
+    /// current position, which costs one rebuffer.
     /// </summary>
-    private async Task RefreshTokenIfExpiringAsync()
+    private async Task KeepTicketAliveAsync()
     {
-        // Declined once means declined for this session; retrying every second
-        // would bury the page in identical errors.
-        if (_refreshing || _refreshDeclined || _current is null) return;
-
-        // Renewed already, by the browser's own schedule or a click: hand the
-        // device the new token rather than asking Google for a third one.
-        string? stored;
-        try { stored = await _js.InvokeAsync<string?>("authGetToken"); }
-        catch (JSException) { stored = null; }
-        if (!string.IsNullOrEmpty(stored) && _sentToken is not null && stored != _sentToken)
-        {
-            _refreshing = true;
-            try { await SendLoadAsync(stored, CurrentTime); }
-            finally { _refreshing = false; }
-            return;
-        }
-
-        double? expiresAt;
-        try { expiresAt = await _js.InvokeAsync<double?>("authTokenExpiresAt"); }
-        catch (JSException) { return; }
-
-        if (expiresAt is null or 0) return;
-
-        var remaining = DateTimeOffset.FromUnixTimeMilliseconds((long)expiresAt.Value) - DateTimeOffset.UtcNow;
-        if (remaining > RefreshLead) return;
+        if (_refreshing || _current is null || _ticket is null || _module is null) return;
+        var now = DateTimeOffset.UtcNow;
+        if (now < _nextAttempt) return;
 
         _refreshing = true;
-        var resumeAt = CurrentTime;
         try
         {
-            var token = await _js.InvokeAsync<string?>("authRefreshToken");
-            if (string.IsNullOrEmpty(token))
+            string? stored;
+            try { stored = await _js.InvokeAsync<string?>("authGetToken"); }
+            catch (JSException) { stored = null; }
+
+            if (_ticket is { } t && t.ExpiresAt - now < RefreshLead)
             {
-                _refreshDeclined = true;
-                _errors.Report("Casting will stop when the Google token expires",
-                    "Silent token refresh was refused. Sign in again to keep playing on the TV.");
+                await ReloadWithNewTicketAsync(stored ?? _sentToken);
                 return;
             }
-            await SendLoadAsync(token, resumeAt);
+
+            string? push = null;
+            if (!string.IsNullOrEmpty(stored) && stored != _sentToken)
+            {
+                // Renewed already: hand the server the new token rather than
+                // asking Google for a third one.
+                push = stored;
+            }
+            else if (await ExpiresWithinLeadAsync() && !_refreshDeclined)
+            {
+                var renewed = await _js.InvokeAsync<string?>("authRefreshToken");
+                if (string.IsNullOrEmpty(renewed))
+                {
+                    // Declined once means declined for this session; retrying every
+                    // second would bury the page in identical errors.
+                    _refreshDeclined = true;
+                    _errors.Report("Casting will stop when the Google token expires",
+                        "Silent token refresh was refused. Sign in again to keep playing on the TV.");
+                }
+                else
+                {
+                    push = renewed;
+                }
+            }
+
+            if (push is null && now - _lastPushed >= Heartbeat) push = stored ?? _sentToken;
+            if (push is null || _ticket is not { } current) return;
+
+            var status = await _module.InvokeAsync<int>("renewTicket",
+                current.Value, current.RenewKey, push, await TokenExpiresAtAsync());
+            switch (status)
+            {
+                case StatusCodes.NoContent:
+                    _sentToken = push;
+                    _lastPushed = DateTimeOffset.UtcNow;
+                    break;
+                case StatusCodes.Gone or StatusCodes.Forbidden:
+                    // Past its cap, or signed with a key the server no longer has:
+                    // the device's URL is dead, so give it a new one.
+                    await ReloadWithNewTicketAsync(push);
+                    break;
+                default:
+                    // Unreachable or failing: the device still has its buffer, and
+                    // the token on the server may still be good. Try again shortly.
+                    _nextAttempt = DateTimeOffset.UtcNow.Add(RetryAfter);
+                    break;
+            }
         }
         catch (JSException ex)
         {
@@ -295,6 +382,28 @@ public class CastService : IAsyncDisposable
         {
             _refreshing = false;
         }
+    }
+
+    private async Task<bool> ExpiresWithinLeadAsync()
+    {
+        var expiresAt = await TokenExpiresAtAsync();
+        if (expiresAt is null or 0) return false;
+        var remaining = DateTimeOffset.FromUnixTimeMilliseconds((long)expiresAt.Value) - DateTimeOffset.UtcNow;
+        return remaining <= RefreshLead;
+    }
+
+    private async Task ReloadWithNewTicketAsync(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return;
+        await SendLoadAsync(token, CurrentTime);
+    }
+
+    /// <summary>The few HTTP statuses the ticket endpoints answer with.</summary>
+    private static class StatusCodes
+    {
+        public const int NoContent = 204;
+        public const int Forbidden = 403;
+        public const int Gone = 410;
     }
 
     public async ValueTask DisposeAsync()

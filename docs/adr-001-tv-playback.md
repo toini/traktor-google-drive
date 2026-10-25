@@ -393,6 +393,12 @@ already carries what Drive itself reports, so that is what gets sent —
 
 ### 4. Re-arm the token rather than let the set die at the hour
 
+> **Superseded 2026-10-25** by
+> [Cast media tickets](decisions/20261025-71-cast-media-tickets.md): the TV's URL
+> now carries a ticket, not the token, and a renewal updates the token on the
+> server without a new `LOAD`. The silent refresh below still runs; only what it
+> does with the new token changed.
+
 `CastService` watches the position ticks it already receives. Five minutes before
 the stored expiry it asks `authRefreshToken()` — a new silent
 `requestAccessToken({ prompt: '' })` in `auth.js` — for a fresh token, then
