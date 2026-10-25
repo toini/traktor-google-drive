@@ -83,38 +83,61 @@
 
         let startX = 0;
         let startWidth = 0;
+        let pointerId = null;
 
         const doDrag = (e) => {
-            const newWidth = startWidth + e.pageX - startX;
+            if (e.pointerId !== pointerId) return;
+            const newWidth = startWidth + e.clientX - startX;
             if (newWidth > 50) header.style.width = `${newWidth}px`;
         };
 
-        const stopDrag = () => {
-            document.removeEventListener('mousemove', doDrag);
-            document.removeEventListener('mouseup', stopDrag);
+        const stopDrag = (e) => {
+            if (e.pointerId !== pointerId) return;
+            pointerId = null;
+            resizer.removeEventListener('pointermove', doDrag);
+            resizer.removeEventListener('pointerup', stopDrag);
+            resizer.removeEventListener('pointercancel', stopDrag);
+            resizer.removeEventListener('lostpointercapture', stopDrag);
+            if (resizer.hasPointerCapture(e.pointerId)) resizer.releasePointerCapture(e.pointerId);
             const widths = readWidths(tableId);
             widths[header.dataset.col] = parseInt(header.style.width || header.offsetWidth, 10);
             writeWidths(tableId, widths);
+            // The click this press produces comes after pointerup: right away
+            // for a mouse, a moment later for a tap. Swallow it if it comes.
+            suppressClickUntil = performance.now() + CLICK_AFTER_DRAG_MS;
         };
 
-        resizer.addEventListener('mousedown', (e) => {
-            startX = e.pageX;
+        resizer.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 || pointerId !== null) return;
+            pointerId = e.pointerId;
+            startX = e.clientX;
             startWidth = parseInt(window.getComputedStyle(header).width, 10);
-            document.addEventListener('mousemove', doDrag);
-            document.addEventListener('mouseup', stopDrag);
-
-            // A drag's mouseup (or even a stray click on the resizer strip)
-            // fires a click that bubbles into the header's sort handler.
-            // Swallow the very next click in the capture phase, before it
-            // can reach Blazor's delegated listener.
-            const swallowClick = (ev) => ev.stopPropagation();
-            document.addEventListener('click', swallowClick, { capture: true, once: true });
-            setTimeout(() => document.removeEventListener('click', swallowClick, { capture: true }), 0);
-
-            e.preventDefault();
-            e.stopPropagation();
+            // Capture keeps the drag going when the pointer leaves the 6px
+            // strip, and routes every move and the release to the handle.
+            resizer.setPointerCapture(e.pointerId);
+            resizer.addEventListener('pointermove', doDrag);
+            resizer.addEventListener('pointerup', stopDrag);
+            resizer.addEventListener('pointercancel', stopDrag);
+            resizer.addEventListener('lostpointercapture', stopDrag);
+            suppressClickUntil = Infinity; // until the press ends
+            e.preventDefault(); // no text selection while dragging
         });
     }
+
+    // A press on the handle ends in a click on the header (the common ancestor
+    // of where it started and ended), which is the header's sort. Blazor's own
+    // listener cannot be told apart from a real sort click, so the click is
+    // stopped in the capture phase, before it reaches Blazor. It used to be a
+    // one-shot listener removed by setTimeout(0) from mousedown, which ran
+    // long before the mouseup, so every real drag still sorted.
+    const CLICK_AFTER_DRAG_MS = 400;
+    let suppressClickUntil = 0;
+    document.addEventListener('click', (e) => {
+        if (performance.now() > suppressClickUntil) return;
+        suppressClickUntil = 0; // one click per press
+        e.stopPropagation();
+        e.preventDefault();
+    }, { capture: true });
 
     // Idempotent, and cheap enough to call after every render: it only wires
     // headers it has not seen. A column shown again is a new <th> element, so

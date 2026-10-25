@@ -215,14 +215,12 @@ test.describe('column widths', () => {
     await openPlaylist(page, PSYTECH_UUID, 4);
     await expect(header(page, 'artist').locator('.column-resizer')).toHaveCount(1);
 
-    await page.evaluate(() => {
-      const resizer = document.querySelector('#playlist-table th[data-col="artist"] .column-resizer') as HTMLElement;
-      const rect = resizer.getBoundingClientRect();
-      const opts = { bubbles: true, cancelable: true, clientX: rect.x + 2, clientY: rect.y + 2 };
-      resizer.dispatchEvent(new MouseEvent('mousedown', opts));
-      document.dispatchEvent(new MouseEvent('mousemove', { ...opts, clientX: rect.x + 60 }));
-      document.dispatchEvent(new MouseEvent('mouseup', { ...opts, clientX: rect.x + 60 }));
-    });
+    // Real input: synthetic events in one evaluate hid a drag that sorted.
+    const box = (await header(page, 'artist').locator('.column-resizer').boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
 
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('table-widths:v2:playlist-table') ?? '{}'));
     expect(Object.keys(saved)).toEqual(['artist']);

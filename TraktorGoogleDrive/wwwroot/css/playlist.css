@@ -373,6 +373,8 @@
     cursor: col-resize;
     background: transparent;
     z-index: 10;
+    /* A finger drag on the handle resizes instead of scrolling the table. */
+    touch-action: none;
 }
 
 .column-resizer:hover {
