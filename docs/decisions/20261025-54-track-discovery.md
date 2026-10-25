@@ -212,7 +212,7 @@ dominated by 2017–2019 labels (Industrial Philharmonics' newest dated track is
 1. **Server-side source adapters** behind one interface, each declaring what it
    can do (release lists, dates, audio, tags, purchase links). Bandcamp, Discogs and
    link-out stores first. Beatport only if Beatport grants partner API access.
-   Spotify is rejected.
+   YouTube and Spotify are out, by Toni's decision (§1.5).
 2. **Bandcamp is fetched only at Toni's pace, never crawled in the background.** A
    label's release list is fetched when he opens or refreshes that seed, and a
    release page when its track comes up to play. It is slow, cached and
@@ -223,8 +223,8 @@ dominated by 2017–2019 labels (Industrial Philharmonics' newest dated track is
    `/api/discover/audio/{source}/{trackId}`, which our server answers with a 302 to
    the source's current stream URL. Bytes go from the CDN to the browser, not through
    Cloud Run. Next/previous, continuous play, keyboard and remote control all keep
-   working. YouTube and SoundCloud go through their scriptable iframe APIs. The
-   Bandcamp iframe is only a fallback.
+   working. The Bandcamp iframe is only a fallback. A release with no playable
+   audio (some Discogs finds) is link-out only.
 4. **Seeds are (entity, genre) pairs**, not entities with one genre. Auto-created
    when an artist or label has ≥ 2 tracks, or ≥ 1 track rated ≥ 4★, in that genre's
    playlists. **Releases are routed to a genre by their own tags**, and only fall back
@@ -252,19 +252,17 @@ dominated by 2017–2019 labels (Industrial Philharmonics' newest dated track is
 |---|---|---|---|---|---|---|
 | **Bandcamp** | Yes: `<label>.bandcamp.com/music` (HTML) | Yes, on the release page (`album_release_date`) | **Full tracks** (MP3 128k) for most releases, via expiring stream URLs in the release page's data | Free-form tags (`dark psytrance`, `hard techno`, `psytech`…) | Yes | No API. HTML pages only (§1.2) |
 | **Beatport** | Yes (API v4 `/catalog/labels/{id}/releases`) | Yes, day-accurate | **2-minute sample MP3s** | Genre and sub-genre (Hard Techno, Psy-Trance…) | Yes | Partner API, by application only (§1.3) |
-| **Discogs** | Yes (`/labels/{id}/releases`, `/artists/{id}/releases`) | Year, sometimes full date | **None.** Release pages often list YouTube videos | Styles (Psy-Trance, Hard Techno, Industrial…) | Marketplace for vinyl, otherwise none | Real API, personal token, 60 requests/min |
+| **Discogs** | Yes (`/labels/{id}/releases`, `/artists/{id}/releases`) | Year, sometimes full date | **None** (§1.4 says what its releases fall back to) | Styles (Psy-Trance, Hard Techno, Industrial…) | Marketplace for vinyl, otherwise none | Real API, personal token, 60 requests/min |
 | **MusicBrainz** | Yes (label → releases) | Yes | None | Folksonomy tags, sparse | None | Open API, 1 request/s, needs a real User-Agent |
-| **YouTube** | Search only, or videos linked from Discogs | Upload date | Full tracks, **iframe only** (IFrame Player API) | None | None | Data API quota 10,000 units/day, a search costs 100 |
 | **SoundCloud** | Per account | Upload date | Full or preview, **iframe only** (Widget API, scriptable) | Free-form | Often a "buy" link | New API registrations effectively closed. Widget needs no key |
-| **Spotify** | `search?q=label:"X"` for albums | Yes | **None any more** (§1.3) | Artist genres | None | Dev mode requires Premium, 5 users |
 | **Juno, Traxsource** | Web pages | Yes | Samples on their pages | Genre | Yes | No public API. Link out only |
 
 **Coverage, from the collection:** Z and P labels (Padang, Another Psyde, Sentimony,
 Zenon, Parasomnia, Erebos) are Bandcamp-first. H labels (Industrial Philharmonics,
 Darker Sounds, Klangrecords, Endzeit, Wicked Waves) mostly sell on Beatport, and some
 also on Bandcamp. The `GENRE` tags in the NML are Beatport's. Spike S3 (§11)
-measures how many of the top 20 per genre have a Bandcamp page, a Discogs entry
-with dates, and Discogs videos.
+measures how many of the top 20 per genre have a Bandcamp page and a Discogs entry
+with dates.
 
 ### 1.2 Bandcamp: the options
 
@@ -327,10 +325,8 @@ so the fetch must be server-side, from Cloud Run. The audio is the exception: an
 |---|---|---|---|
 | **Beatport partner API** | An application through Beatport's [partner portal](https://partnerportal.beatport.com/hc/en-us/categories/13076449714580-Developers). OAuth client credentials in Secret Manager. No self-serve keys, and Beatport can refuse or revoke. The default grant covers non-commercial informational use | The best H source: label/artist releases with exact dates, genres, 2-min sample MP3s, ISRCs, buy links | **Apply now (spike S2), build when granted.** Using the public client id lifted from Beatport's docs page, as many hobby tools do, is against its API terms. Not that |
 | Scraping beatport.com pages (`__NEXT_DATA__` JSON) | A parser | The same data without access | Against Beatport's terms, and it breaks with their frontend. **Rejected** |
-| **Discogs API** | A personal access token (Secret Manager), 60 requests/min | Release lists with year or date, styles, label profile URLs (incl. Bandcamp), **YouTube links per release** | **Recommended** as the H release-list source and for resolving seeds to URLs. No audio of its own. Coverage of digital-only techno is the open question (S3) |
-| **YouTube** | IFrame Player API (no key). Data API key only for search, at 100 units of 10,000 per day | Audio for many techno releases (label channels, premieres) | **Recommended for playback** of videos already linked from Discogs (`videos.list` costs 1 unit). Search on demand only, and capped |
+| **Discogs API** | A personal access token (Secret Manager), 60 requests/min | Release lists with year or date, styles, label profile URLs (incl. Bandcamp) | **Recommended** as the H release-list source and for resolving seeds to URLs. No audio of its own (fallbacks in §1.4). Coverage of digital-only techno is the open question (S3) |
 | **SoundCloud** Widget API | None | Premieres, often a buy link | Optional, later: paste-a-URL only, since no discovery API |
-| **Spotify Web API** | Since **2024-11-27** new apps get no `preview_url`, recommendations, related artists or audio features. Since **February 2026** development mode requires the developer to have **Premium**, allows 5 users, and caps search at 10 results ([TechCrunch](https://techcrunch.com/2026/02/06/spotify-changes-developer-mode-api-to-require-premium-accounts-limits-test-users/)). Playback only through the Web Playback SDK, for Premium users, not through `<audio>` | `label:"X"` album search with dates | **Rejected**: no audio, and the only thing it adds (a label release list) Discogs and Beatport also give. Revisit only if Toni has Premium and S3 shows a coverage gap |
 | **MusicBrainz** | A User-Agent with contact, 1 request/s | Open ids, ISRCs for some releases | Optional, for dedupe (§6). Underground digital coverage is thin |
 | **Juno, Traxsource** | URL templates | A search page per track | **Link out only** ("search on Juno" for a track found elsewhere) |
 
@@ -355,7 +351,7 @@ interface IReleaseSource
 
 abstract record PreviewTarget;
 record DirectAudio(Uri Url, DateTimeOffset ExpiresAt, bool CorsReadable) : PreviewTarget; // <audio>
-record Embed(string Kind, string Id) : PreviewTarget;                                      // "youtube" | "soundcloud" | "bandcamp"
+record Embed(string Kind, string Id) : PreviewTarget;                                      // "bandcamp" | "soundcloud"
 record ExternalOnly(Uri Url) : PreviewTarget;                                              // link out
 ```
 
@@ -363,6 +359,27 @@ Each adapter gets its own named `HttpClient` with the outbound rate limiter and
 cache in front of it (`System.Threading.RateLimiting` token buckets, keyed by host).
 Parsing is a pure function from a recorded response to records, which is what the
 tests exercise (§12).
+
+**Audio for releases found on Discogs.** Discogs has release lists and dates but no
+audio. When a release comes from Discogs, `ResolvePreviewAsync` tries, in order:
+
+1. **A Bandcamp URL** for the release or its label, from the Discogs release or label
+   profile (`urls`), or from a Bandcamp seed already known for that label. The
+   Bandcamp adapter then resolves it as in §2 (one release-page fetch, at Toni's
+   pace).
+2. **A Beatport preview**, if Beatport access is granted: match the release by label,
+   catalogue number, and artist and title, then play its `sample_url`.
+3. **Link out only**: a "search on Beatport / Juno / Traxsource" link built from the
+   artist and title. The item stays in the queue as **not playable**: continuous
+   play skips it, and Toni can still judge it after listening in the store's page.
+
+### 1.5 Rejected sources
+
+- **YouTube and Spotify: out, by Toni's decision ("No need for youtube or
+  spotify").** YouTube would only have played through its own iframe, with a small
+  search quota. Spotify's development mode has needed Premium since February 2026
+  and gives new apps no 30-second previews (since November 2024), so it would add only
+  release lists, which Discogs and Beatport already give.
 
 ## 2. Playing the found tracks in the app's player
 
@@ -375,22 +392,22 @@ next/previous, continuous play, and keyboard and remote control.
 |---|---|---|---|
 | Bandcamp | The `mp3-128` stream URL from the release page | **Yes**, via the redirect endpoint | URLs are signed and expire (lifetime unknown: S1). Whether `bcbits.com` checks `Referer` is unknown: S1. Full-length tracks. Bandcamp may limit repeated full plays of an unbought track (unverified, S1); triage plays each track once or twice |
 | Beatport (if granted) | `sample_url`, a 2-minute MP3 | **Yes** | Samples start mid-track, which already skips the intro |
-| YouTube | IFrame Player API | **No** | Scriptable: play, pause, `seekTo`, state events. The terms require a visible player (≥ 200×200), so it renders in the triage card. Audio-only extraction is not allowed |
-| SoundCloud | Widget API iframe | **No** | Scriptable (play, pause, `seekTo`, `FINISH` event) |
+| SoundCloud (optional, later) | Widget API iframe | **No** | Scriptable (play, pause, `seekTo`, `FINISH` event) |
 | Bandcamp fallback | EmbeddedPlayer iframe | **No** | **Not scriptable**: no auto-advance, no skim, no remote control |
-| Discogs, MusicBrainz, Juno, Traxsource | nothing | — | Their releases play through a linked YouTube video, or not at all |
+| Discogs, MusicBrainz | nothing of their own | — | Via a Bandcamp URL or a Beatport preview when one is found, else link-out only (§1.4) |
+| Juno, Traxsource | nothing | — | Link out only |
 
 ### 2.2 Options for direct audio
 
 | Option | What it costs | What it gives | What it gives up |
 |---|---|---|---|
 | **P1. Embeds for everything** | Little | Each source's sanctioned player | Bandcamp's iframe is not scriptable, so no queue behaviour for the most important source. **Rejected as the main path** |
-| **P2. Redirect resolver** (recommended): `<audio src="/api/discover/audio/bandcamp/{trackId}">`. The server resolves the current stream URL (cached until 5 min before it expires) and answers **302** to it | One endpoint. The same `<audio>`, so the player bar, queue, next/previous, continuous play, keyboard, Media Session keys and remote control all work unchanged | The browser fetches the bytes from the CDN directly: **no Cloud Run egress**, and we never re-serve anyone's audio. A seek after expiry re-requests our URL and gets a fresh redirect | **No waveform**: the bytes are not CORS-readable (unless S1 finds the CDN sends CORS headers). Cast needs more work (§2.5) |
+| **P2. Redirect resolver** (recommended): `<audio src="/api/discover/audio/bandcamp/{trackId}">`. The server resolves the current stream URL (cached until 5 min before it expires) and answers **302** to it | One endpoint. The same `<audio>`, so the player bar, queue, next/previous, continuous play, keyboard, Media Session keys and remote control all work unchanged. The browser fetches the bytes from the CDN directly: **no Cloud Run egress**, and we never re-serve anyone's audio. A seek after expiry re-requests our URL and gets a fresh redirect | **No waveform**: the bytes are not CORS-readable (unless S1 finds the CDN sends CORS headers). Cast needs more work (§2.5) |
 | P3. Byte proxy through Cloud Run | Egress: a 7-minute 128k track is ~6.7 MB, and a triage session of 100 tracks is ~0.7 GB | Waveforms, Cast with the existing ticket scheme, full control over `Range` | Re-serving Bandcamp's audio from our server is the worst ToS position of all, and computing peaks from it brushes against the "no fingerprints" clause. **Rejected** |
 | P4. Download to Drive and play from there | Writes to Drive, storage | Offline, waveforms | It is acquiring the audio without buying it. **Rejected** |
 
-**Recommendation: P2 for direct audio (Bandcamp, Beatport samples), the iframe
-APIs for YouTube and SoundCloud, and the Bandcamp iframe only as a fallback.**
+**Recommendation: P2 for direct audio (Bandcamp, Beatport samples), and the
+Bandcamp iframe only as a fallback.**
 
 ### 2.3 One player bar, two kinds of queue
 
@@ -408,7 +425,7 @@ APIs for YouTube and SoundCloud, and the Bandcamp iframe only as a fallback.**
   - **Recommended: Q2**, introduced in increment 1. The capability flags are what
     the player bar renders from, so a discovery item hides the waveform and the
     Cast button greys out for it, instead of failing.
-- **The player bar** shows the source (a small "Bandcamp" or "YouTube" badge), the
+- **The player bar** shows the source (a small "Bandcamp" or "Beatport" badge), the
   release and label, and the triage buttons (§5) when the current item is a
   discovery item.
 - **`PlaybackMemory`** remembers the source ref, never the stream URL (it carries a
@@ -418,12 +435,11 @@ APIs for YouTube and SoundCloud, and the Bandcamp iframe only as a fallback.**
   learn the status. For a redirect it would follow to the CDN and fail on CORS. The
   endpoint therefore also answers `?probe=1` with the status itself (200, 404 gone,
   410 expired and not refreshable, 429 rate-limited) instead of a redirect.
-- **Embeds** become a fourth route next to local, Cast and remote:
-  `PlayerService` sends play, pause, seek and next to an `EmbedRoute` that drives
-  the YouTube or SoundCloud API, and listens for their progress and ended events, as
-  it does for Cast's ~1 Hz ticks. Continuous play works through them. The Bandcamp
-  iframe is a dead end for that route: the bar says "playing in the Bandcamp player",
-  and advancing is manual.
+- **The Bandcamp iframe fallback** is not driven by the player bar: the bar says
+  "playing in the Bandcamp player", and advancing is manual. A scriptable embed
+  route (SoundCloud's Widget API) is possible later, but no increment needs it.
+- **Link-out-only items** (§1.4) sit in the queue marked "not playable", and
+  continuous play skips them.
 
 ### 2.4 Waveforms, gig preview and "jump to the drop"
 
@@ -642,7 +658,7 @@ landscape. Increment 2 tests this on the Android tablet.
 **A tolerant parser**, line by line, every line classified and shown in a preview
 table before anything is saved:
 
-- **URLs**: Bandcamp, Beatport, SoundCloud, YouTube, Discogs → a track, release or
+- **URLs**: Bandcamp, Beatport, SoundCloud, Discogs → a track, release or
   seed ref, depending on the URL's shape.
 - **Date marks**: `2025-06`, `6/2025`, `06.2025`, `kesä 2025` (Finnish month names),
   `-> 2025-06`, `asti 2025-06` → the watermark of the label on that line or the
@@ -717,7 +733,7 @@ IndexedDB, so it survives a reload without asking the server.
   adapter's CDN hosts (`*.bcbits.com`, Beatport's sample host).
 - **Outbound rate limits**, enforced in the server, per host: Bandcamp 1 request per
   2 s, burst 3, 500 per day; Discogs 50 per minute; MusicBrainz 1 per second, as its
-  policy requires; YouTube Data API capped at 50 searches per day. Hitting a cap
+  policy requires. Hitting a cap
   returns 429 to the app, which says so, rather than queueing silently.
 - **User-Agent**: `traktor-google-drive/1.0 (+https://github.com/toini/traktor-google-drive)`,
   with no personal email in it.
@@ -736,7 +752,7 @@ IndexedDB, so it survives a reload without asking the server.
 | **0** | **Spikes S1–S5** (§11). No app code | Each one can change a recommendation above |
 | **1** | **Seeds**: from a playlist (H16) and genre top lists, manual URL add, the stop list. **Bandcamp adapter** (B2): label/artist `/music`, release pages, tags. **Playback**: `PlayableItem`, the redirect endpoint, a discovery queue in the player bar, continuous play. **Listen tab** with skip / maybe / like / rate / buy, undo. **Watermarks.** **Owned detection.** **Shortlist** with "copy links". **Storage S-A** with the `drive.appdata` scope | The smallest thing that replaces the OneNote loop for psy, where Bandcamp is the source. The playlist seed keeps the first queue small and current |
 | **2** | **Decide tab** (pass 2), notes, **skim mode** and drop offsets, learned offsets, tablet swipe layout, remote-control `triage`/`rate` commands | Polishes the loop once its basic shape is proven on real listening |
-| **3** | **Discogs adapter** (H release lists, label URLs), **YouTube embed route**, Juno/Traxsource link-outs; **Beatport adapter** if access is granted | Techno coverage. Depends on S2 and S3 |
+| **3** | **Techno**: the **Discogs adapter** for release lists and dates (and label URLs), plus the **Beatport adapter** if access is granted. Discogs finds play through a Bandcamp URL when Discogs has one, else a Beatport preview, else they are link-out only (Juno/Traxsource search links, §1.4) | Techno coverage. Depends on S2 and S3 |
 | **4** | **Imports**: OneNote paste parser, Bandcamp wishlist import; the **Bandcamp release-email feed** (B3) if S4 works | Needs Toni's samples. B3 then takes the "what's new" load off B2 |
 | **5** | **Suggestions**: label mates, remixers, compilation artists, Bandcamp's "you may also like", with "add as seed" and "never suggest" | Most valuable once there is triage history to rank them with |
 
@@ -746,8 +762,8 @@ IndexedDB, so it survives a reload without asking the server.
 |---|---|---|---|
 | **Bandcamp page data** | Is `data-tralbum` still on release pages with `mp3-128` URLs? How long does a stream URL live? Does `bcbits.com` check `Referer`, and does it send CORS headers? Does Chrome (desktop and Android) play a 302 from our origin to it? | **S1**: by hand from a laptop (not Cloud Run): fetch 3 label pages and 5 release pages for H16 and Z labels (Darker Sounds, Erebos, Padang), at most 20 requests. Play a stream URL in `<audio>` with no referrer, after 1 h, 6 h and 24 h. Serve a 302 from a local ASP.NET stub | A one-page note: page fields found, URL lifetime, Referer and CORS behaviour, playback result on both devices |
 | **Bandcamp from Cloud Run** | Does Bandcamp answer requests from Google Cloud egress IPs, or challenge them? | **S1b**: one deploy of a tiny Cloud Run job in `traktor-toni-2025` fetching 3 pages, then deleted | Status codes and any challenge page |
-| **Beatport access** | Will Beatport grant partner API access to an individual for personal non-commercial use? How long does it take? | **S2**: submit the application now, describing the use honestly. Also check whether sample URLs play cross-origin in `<audio>` | Granted, refused, or no answer in 4 weeks (then techno relies on Discogs + YouTube) |
-| **Discogs coverage of digital techno and psy** | Are H labels' digital releases on Discogs with dates? Do they link YouTube videos? Do label profiles list the Bandcamp URL? | **S3**: for the top 20 labels per genre and the 14 H16 labels, query Discogs (authenticated, ≤ 60/min) and count releases since 2024, date precision, videos, Bandcamp URLs | A coverage table per genre. If H coverage is poor and Beatport is refused, Bandcamp is the H source too |
+| **Beatport access** | Will Beatport grant partner API access to an individual for personal non-commercial use? How long does it take? | **S2**: submit the application now, describing the use honestly. Also check whether sample URLs play cross-origin in `<audio>` | Granted, refused, or no answer in 4 weeks (then techno relies on Discogs, with Bandcamp audio where it exists and link-outs elsewhere) |
+| **Discogs coverage of digital techno and psy** | Are H labels' digital releases on Discogs with dates? Do label and release profiles list a Bandcamp URL, which is their only playable fallback without Beatport? | **S3**: for the top 20 labels per genre and the 14 H16 labels, query Discogs (authenticated, ≤ 60/min) and count releases since 2024, date precision, and Bandcamp URLs | A coverage table per genre. If H coverage is poor and Beatport is refused, Bandcamp is the H source too |
 | **Bandcamp release emails** | Do follows of labels and artists produce emails with release URLs, and can they be filtered reliably? | **S4**: Toni follows 3 labels on Bandcamp. Inspect the next emails' structure | A sample email and a parse rule. Decide Apps Script vs Gmail API |
 | **`drive.appdata` from WASM** | Writing and listing `appDataFolder` from the browser with the GIS token flow, and how re-consent looks | **S5**: a branch-only page that writes and reads a log file. Shared with the set-tracklist ADR | Works on laptop and tablet after one consent |
 
@@ -803,8 +819,8 @@ IndexedDB, so it survives a reload without asking the server.
 - **Techno coverage depends on others' decisions** (Beatport's grant) and on
   Discogs' coverage. Without them, H discovery is weaker than psy.
 - **A new OAuth scope** (`drive.appdata`): one re-consent.
-- **`PlayerService` grows a fourth route** (embeds) and an item abstraction. That
-  is the largest change to existing code, and it touches the code other branches
+- **`PlayerService` gets an item abstraction** (`PlayableItem`). That is the
+  largest change to existing code, and it touches the code other branches
   (prefetch and buffering) are working on, so it should land after them.
 - **No waveforms for discovery items.**
 
@@ -820,8 +836,8 @@ IndexedDB, so it survives a reload without asking the server.
    them be a Discover genre, or count towards one?
 4. **Your Bandcamp fan name**: is it `toini`? Is the wishlist public? Import it
    once into pass 2?
-5. **Beatport**: OK to apply for partner API access in your name? Do you have
-   Spotify Premium (the only case in which Spotify is worth a look)?
+5. **Beatport**: OK to apply for partner API access in your name? Without it,
+   Discogs-found techno with no Bandcamp page is link-out only.
 6. **Storage**: OK to add `drive.appdata` (the same re-consent as the set-tracklist
    ADR), or would you rather have Firestore and a nightly refresh, accepting new
    infrastructure?
