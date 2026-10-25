@@ -96,7 +96,7 @@ export type DriveCall = {
   kind: 'collection' | 'query' | 'media' | 'folder' | 'meta';
   url: string;
   range?: string;
-  /** Media only: the token the request carried (proxy cookie or ?token=), and the status served. */
+  /** Media only: the token the request carried (the proxy cookie), and the status served. */
   token?: string | null;
   status?: number;
 };
@@ -104,14 +104,16 @@ export type DriveCall = {
 /** The cookie auth.js keeps for the audio proxy, so media URLs carry no token. */
 export const PROXY_COOKIE = 'drive_token';
 
-/** The Drive token a proxy request carries: the cookie first, else the legacy ?token=. */
-export function proxyToken(url: string, cookieHeader: string | undefined): string | null {
+/**
+ * The Drive token a proxy request carries. Only the cookie, like the real proxy:
+ * its ?token= fallback is gone (Cast has its own ticket route).
+ */
+export function proxyToken(cookieHeader: string | undefined): string | null {
   const cookie = (cookieHeader ?? '')
     .split(';')
     .map((c) => c.trim())
     .find((c) => c.startsWith(`${PROXY_COOKIE}=`));
-  if (cookie) return decodeURIComponent(cookie.slice(PROXY_COOKIE.length + 1));
-  return new URL(url).searchParams.get('token');
+  return cookie ? decodeURIComponent(cookie.slice(PROXY_COOKIE.length + 1)) : null;
 }
 
 /** What Drive hands back when the app searches for collection.nml by name. */
@@ -164,7 +166,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
 
   const serveMedia = async (route: Route, url: string) => {
     const headers = await route.request().allHeaders();
-    const call: DriveCall = { kind: 'media', url, range: headers['range'], token: proxyToken(url, headers['cookie']) };
+    const call: DriveCall = { kind: 'media', url, range: headers['range'], token: proxyToken(headers['cookie']) };
     calls.push(call);
     if (opts.mediaGate) await opts.mediaGate;
     if (opts.mediaStatus) {

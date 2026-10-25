@@ -696,7 +696,9 @@ settings menu) until increment 3 has been used for real.
 - Increments 2–5. This PR is increment 1 plus §5.1's queue move, which Toni's
   decision 3 pulled forward from increment 3.
 - Fixing the audio proxy's tokens in Cloud Run request logs (noted in §3; it is an
-  existing issue and deserves its own change).
+  existing issue and deserves its own change). *Done since:* PR 6 moved the local
+  token to a cookie, and [Cast media tickets](20261025-71-cast-media-tickets.md)
+  took it out of the Cast URL.
 - Volume (Open question 6), merging Cast into the picker (increment 5), and
   "resume on another device" through `appDataFolder` (option D's better use).
 

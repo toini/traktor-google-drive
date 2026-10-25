@@ -8,7 +8,8 @@
 @inject AuthService Auth
 @inject AppErrors Errors
 
-<div class="waveform @(failed ? "failed" : "")" data-waveform-source="@source">
+<div class="waveform @(failed ? "failed" : "")" data-waveform-source="@source"
+     data-waveform-state="@(failed ? "failed" : mounted ? "ready" : "loading")">
     <div @ref="container" class="waveform-canvas"></div>
 
     @if (progress is { } p && !mounted && !failed)

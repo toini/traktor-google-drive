@@ -1,5 +1,6 @@
 // Cast Web Sender. The Cast device fetches the media URL itself, so it needs the
-// absolute proxy URL — a relative one only works for <audio> in this page.
+// absolute proxy URL — a relative one only works for <audio> in this page. That
+// URL carries a ticket from the server, never the Google token (see below).
 
 const SENDER_SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';
 
@@ -129,6 +130,47 @@ export async function load(fileId, url, contentType, title, artist, startTime) {
         push();
         return false;
     }
+}
+
+// Cast media tickets. The device's URL carries a ticket, never the Google token:
+// the token goes to the server in the Authorization header, the ticket and its
+// renew key in the body, so none of them lands in a URL or a request log.
+const TICKETS = '/api/cast/tickets';
+
+async function ticketCall(path, token, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return fetch(path, { method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store' });
+}
+
+/** { status, ticket, renewKey, expiresAt } — status 0 when the server was unreachable. */
+export async function mintTicket(fileId, token, tokenExpiresAt) {
+    try {
+        const r = await ticketCall(TICKETS, token, { fileId, tokenExpiresAt: tokenExpiresAt || null });
+        if (!r.ok) return { status: r.status, ticket: null, renewKey: null, expiresAt: 0 };
+        const body = await r.json();
+        return { status: r.status, ticket: body.ticket, renewKey: body.renewKey, expiresAt: body.expiresAt };
+    } catch (e) {
+        console.error('cast: minting a ticket failed', e);
+        return { status: 0, ticket: null, renewKey: null, expiresAt: 0 };
+    }
+}
+
+/** HTTP status: 204 renewed, 410 ticket past its cap, 403 refused, 0 unreachable. */
+export async function renewTicket(ticket, renewKey, token, tokenExpiresAt) {
+    try {
+        const r = await ticketCall(`${TICKETS}/renew`, token, { ticket, renewKey, tokenExpiresAt: tokenExpiresAt || null });
+        return r.status;
+    } catch (e) {
+        console.error('cast: renewing the ticket failed', e);
+        return 0;
+    }
+}
+
+/** Best effort: an unrevoked ticket still dies with its token. */
+export function revokeTicket(ticket, renewKey) {
+    ticketCall(`${TICKETS}/revoke`, null, { ticket, renewKey })
+        .catch((e) => console.warn('cast: revoking the ticket failed', e));
 }
 
 export function playOrPause() {

@@ -4,7 +4,7 @@ namespace TraktorGoogleDrive.Services;
 /// The single place that knows how an audio element reaches a Drive file.
 /// Today that is the server proxy, because &lt;audio src&gt; cannot set an
 /// Authorization header; the proxy takes the token from a cookie instead (or,
-/// for a Cast device, from the query string).
+/// for a Cast device, from a server-held grant named by a ticket).
 /// </summary>
 public static class DriveAudio
 {
@@ -65,9 +65,11 @@ public static class DriveAudio
 
     /// <summary>
     /// The URL a Cast device fetches, absolute because it fetches from its own place
-    /// on the network. The device has no cookie of ours, so the token still rides in
-    /// the query string here, and the sender re-issues the load when it renews.
+    /// on the network. The device has no cookie of ours, so the URL carries a ticket
+    /// from <c>/api/cast/tickets</c>: scoped to this file, and standing for a token the
+    /// server holds and the sender renews. The Google token is never in it.
     /// </summary>
-    public static string AbsoluteUrlFor(string baseUri, string fileId, string token) =>
-        new Uri(new Uri(baseUri), $"{UrlFor(fileId)}?token={Uri.EscapeDataString(token)}").ToString();
+    public static string CastUrlFor(string baseUri, string fileId, string ticket) =>
+        new Uri(new Uri(baseUri),
+            $"/api/proxy/cast/{Uri.EscapeDataString(fileId)}?ticket={Uri.EscapeDataString(ticket)}").ToString();
 }

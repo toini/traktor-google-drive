@@ -68,8 +68,30 @@ export async function cachedPeaks(fileId) {
 
 /* ---------- WAV parsing ---------- */
 
+/**
+ * A token to retry with after Drive refused `usedToken` (401/403), or null.
+ * The same recovery the player does on a mid-set 401: if the browser already
+ * holds a newer token, use it; otherwise renew once. auth.js runs one renewal at
+ * a time, so a burst of refused reads shares a single renewal, and it rewrites
+ * the proxy cookie when it lands.
+ */
+async function tokenAfterRefusal(usedToken) {
+    const current = window.authGetToken?.() ?? null;
+    if (current && current !== usedToken) return current;
+    return (await (window.authRefreshToken?.() ?? Promise.resolve(null))) || null;
+}
+
+const refused = (status) => status === 401 || status === 403;
+
 async function readRange(url, start, end) {
-    const res = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } });
+    const headers = { Range: `bytes=${start}-${end}` };
+    // The proxy takes the token from the cookie; note which one this read used.
+    const used = window.authGetToken?.() ?? null;
+    let res = await fetch(url, { headers });
+    if (refused(res.status) && await tokenAfterRefusal(used)) {
+        window.authSyncProxyCookie?.();
+        res = await fetch(url, { headers });
+    }
     if (!res.ok) throw new Error(`range ${start}-${end}: HTTP ${res.status}`);
     return new DataView(await res.arrayBuffer());
 }
@@ -212,7 +234,11 @@ export async function computeCompressedPeaks(directUrl, token, fileId, dotNetRef
     const cached = await cachedPeaks(fileId);
     if (cached) return cached;
 
-    const res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
+    let res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (refused(res.status)) {
+        const renewed = await tokenAfterRefusal(token);
+        if (renewed) res = await fetch(directUrl, { headers: { Authorization: `Bearer ${renewed}` } });
+    }
     if (!res.ok) throw new Error(`download for waveform: HTTP ${res.status}`);
 
     // Download is the slow half; report it as the first 90%.

@@ -3,7 +3,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import * as signalR from '@microsoft/signalr';
 import { mockDrive, seedToken, FAKE_TOKEN } from './drive-mock';
 import type { MockOptions } from './drive-mock';
-import { CAST_DEVICE_NAME, castState, mockCastSdk } from './cast-mock';
+import { CAST_DEVICE_NAME, castLoads, castState, mockCastSdk } from './cast-mock';
 import { PORT } from './playwright.remote.config';
 
 // Remote control, increment 1 (ADR 20261018-63 §6): a second device sees what
@@ -42,7 +42,8 @@ async function device(browser: Browser, opts: DeviceOptions): Promise<Device> {
   // Two minutes, not the suite's usual 2 s: a remote has to catch the track
   // while it is still playing.
   await mockDrive(page, { wavSeconds: 120, ...opts.mock });
-  if (opts.cast) await mockCastSdk(page);
+  // The real server mints the Cast tickets here, so leave its endpoints alone.
+  if (opts.cast) await mockCastSdk(page, CAST_DEVICE_NAME, { realServer: true });
   await seedToken(page, opts.token ?? FAKE_TOKEN);
   await page.addInitScript((name) => {
     localStorage.setItem('remote:enabled', '1');
@@ -278,6 +279,32 @@ test.describe('remote control', () => {
 
     await tablet.page.locator('.player-toggle').click();
     await expect.poll(async () => (await castState(laptop.page)).playerState).toBe('PAUSED');
+  });
+
+  test('the real server hands the TV a ticket that works only for its own file', async ({ browser, request }) => {
+    const laptop = await device(browser, { name: 'Laptop · Chrome', cast: true });
+    await laptop.page.goto(`/playlist/${PSYTECH}`);
+    await laptop.page.locator('.cast-button').click();
+    await expect(laptop.page.locator('.cast-button')).toHaveAttribute('data-cast-state', 'connected');
+    await laptop.page.locator('#playlist-table tbody tr').first().locator('.play-button').click();
+    await expect.poll(async () => (await castLoads(laptop.page)).length).toBe(1);
+
+    const url = new URL((await castLoads(laptop.page))[0].url);
+    expect(url.toString()).not.toContain(FAKE_TOKEN);
+    expect(url.pathname).toMatch(/^\/api\/proxy\/cast\/[\w-]+$/);
+    const ticket = url.searchParams.get('ticket');
+    expect(ticket).toBeTruthy();
+
+    // As the TV fetches: no Origin, no Referer, no cookie. Its own file gets past
+    // the ticket check (Google then judges the fixture token, so only "not
+    // refused by us" is asserted); any other file is refused outright.
+    const own = await request.get(url.toString(), { headers: { Range: 'bytes=0-' } });
+    expect(own.status()).not.toBe(403);
+    expect(own.headers()['x-cast-ticket']).toBeUndefined();
+
+    const other = new URL(url);
+    other.pathname = '/api/proxy/cast/some-other-file';
+    expect((await request.get(other.toString())).status()).toBe(403);
   });
 
   test('a controller does not restore its own last track over the device that is playing', async ({ browser }) => {

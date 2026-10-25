@@ -44,16 +44,21 @@ gcloud run services list --platform managed --project traktor-toni-2025
 
 ### Server-side surface
 
-The container is an ASP.NET host whose only dynamic endpoint is the Drive
-streaming proxy — everything else is static Blazor WASM:
+The container is an ASP.NET host. Its main dynamic endpoint is the Drive
+streaming proxy; everything else is static Blazor WASM, plus the remote-control
+hub:
 
 ```
-GET /api/proxy/drive/{fileId}?token={googleAccessToken}
+GET /api/proxy/drive/{fileId}                 token from the drive_token cookie
+GET /api/proxy/cast/{fileId}?ticket={ticket}  for a Cast device (no cookie)
+POST /api/cast/tickets[/renew|/revoke]        the sender's ticket calls
 ```
 
-It re-issues `GET https://www.googleapis.com/drive/v3/files/{fileId}?alt=media`
+The proxy re-issues `GET https://www.googleapis.com/drive/v3/files/{fileId}?alt=media`
 with `Authorization: Bearer {token}` and forwards `Range` / `Content-Range`.
 It exists only because `<audio src>` cannot attach an `Authorization` header.
+No Google token is ever in a URL: see
+[Cast media tickets](docs/decisions/20261025-71-cast-media-tickets.md).
 
 ## Casting to a TV
 
@@ -65,8 +70,10 @@ shows what is playing with transport and seek.
 The Cast device fetches the audio itself, so it gets the *absolute* proxy URL and
 the proxy must accept it — see
 [docs/adr-001-tv-playback.md](docs/adr-001-tv-playback.md) for why
-`www.gstatic.com` is allowed, why the access token is re-issued mid-set, and what
-has not been verified against a real television.
+`www.gstatic.com` is allowed and what has not been verified against a real
+television. The URL carries a ticket scoped to one file, and the sender keeps the
+token behind it current on the server, so the TV keeps its URL across renewals
+([Cast media tickets](docs/decisions/20261025-71-cast-media-tickets.md)).
 
 ## Deploy
 
