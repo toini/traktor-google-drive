@@ -73,12 +73,13 @@ else
                 <tr>
                     <th scope="col" class="col-expand" data-col="expand"><span class="visually-hidden">Set</span></th>
                     <th scope="col" class="col-play" data-col="play"><span class="visually-hidden">Play</span></th>
-                    <th scope="col" class="col-index sortable" data-col="index" aria-sort="@AriaSort(SortColumn.Index)" @onclick="() => SortBy(SortColumn.Index)">#<span class="sort-indicator">@Arrow(SortColumn.Index)</span></th>
+                    <th scope="col" class="col-index sortable" data-col="index" aria-sort="@AriaSort(SortColumn.Index)" @onclick="() => SortBy(SortColumn.Index)"><span class="th-inner"><span class="th-label">#</span><span class="sort-indicator">@Arrow(SortColumn.Index)</span></span></th>
                     @* Keyed, so a <th> keeps its identity (and its resized width)
-                       when a column before it is hidden. *@
+                       when a column before it is hidden. The label truncates
+                       (full text in its title) and the arrow never wraps. *@
                     @foreach (var column in VisibleColumns)
                     {
-                        <th @key="column.Id" scope="col" class="@column.HeaderClass" data-col="@column.Id" aria-sort="@AriaSort(column.Sort)" @onclick="() => SortBy(column.Sort)">@column.Label<span class="sort-indicator">@Arrow(column.Sort)</span></th>
+                        <th @key="column.Id" scope="col" class="@column.HeaderClass" data-col="@column.Id" aria-sort="@AriaSort(column.Sort)" @onclick="() => SortBy(column.Sort)"><span class="th-inner"><span class="th-label" title="@column.Label">@column.Label</span><span class="sort-indicator">@Arrow(column.Sort)</span></span></th>
                     }
                 </tr>
             </thead>

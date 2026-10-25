@@ -3,6 +3,7 @@
 @using TraktorGoogleDrive.Services
 @using TraktorNmlParser.Models
 @inject SetMatcher SetMatcher
+@inject CollectionService CollectionService
 
 <div class="set-detail">
     @if (loading)
@@ -20,21 +21,24 @@
                     <optgroup label="Suggested">
                         @foreach (var p in candidates)
                         {
-                            <option value="@p.Uuid">@p.Name (@p.Tracks.Count)</option>
+                            <option value="@p.Uuid">@p.Name (@CountOf(p))</option>
                         }
                     </optgroup>
                 }
                 <optgroup label="All playlists">
                     @foreach (var p in all.Where(p => candidates.All(c => c.Uuid != p.Uuid)))
                     {
-                        <option value="@p.Uuid">@p.Name (@p.Tracks.Count)</option>
+                        <option value="@p.Uuid">@p.Name (@CountOf(p))</option>
                     }
                 </optgroup>
             </select>
 
             @if (selected is not null)
             {
-                <span class="set-detail-count">@selected.Tracks.Count tracks</span>
+                <span class="set-detail-count">@entries.Count @(entries.Count == 1 ? "track" : "tracks")@if (SeparatorCount > 0)
+                    {
+                        <span> · @SeparatorCount @(SeparatorCount == 1 ? "separator" : "separators")</span>
+                    }</span>
             }
             @if (isOverride)
             {
@@ -48,19 +52,37 @@
                 No playlist matched this recording. Pick one above — the choice is remembered.
             </p>
         }
-        else if (selected.Tracks.Count == 0)
+        else if (entries.Count == 0)
         {
             <p class="state-message subtle">That playlist is empty.</p>
         }
         else
         {
+            @* The same entries as the playlist table (PlaylistEntries), so the
+               numbers and the separators match it row for row. Nothing here
+               plays; a separator is only a dim rule with its words. *@
             <ol class="set-tracklist">
-                @foreach (var t in selected.Tracks)
+                @foreach (var e in entries)
                 {
-                    <li>
-                        <span class="set-track-title">@(t.Title ?? Path.GetFileName(t.Path))</span>
-                        <span class="set-track-artist">@t.Artist</span>
-                        <span class="set-track-time">@TrackTime.Format(t.PlaytimeFloat)</span>
+                    @if (e.Kind == EntryKind.Separator)
+                    {
+                        <li value="@e.Position" class="set-separator" data-entry-kind="separator" data-position="@e.Position">
+                            <span class="separator-label">@PlaylistEntries.SeparatorLabel(e.Title)</span>
+                        </li>
+                        continue;
+                    }
+                    <li value="@e.Position" class="@(e.Kind == EntryKind.Track ? "" : "set-unresolved")"
+                        data-entry-kind="@KindAttribute(e.Kind)" data-position="@e.Position">
+                        @if (MarkerText(e.Kind) is { } marker)
+                        {
+                            <span class="entry-marker">@marker</span>
+                        }
+                        <span class="set-track-title">@TitleOf(e)</span>
+                        @if (!string.IsNullOrEmpty(e.Track?.Artist))
+                        {
+                            <span class="set-track-artist">@e.Track.Artist</span>
+                        }
+                        <span class="set-track-time">@TrackTime.Format(e.Track?.PlaytimeFloat)</span>
                     </li>
                 }
             </ol>
@@ -77,6 +99,43 @@
     Playlist? selected;
     bool loading = true;
     bool isOverride;
+    // The selected playlist's ENTRY list, every kind, in Traktor's order.
+    IReadOnlyList<PlaylistEntry> entries = [];
+    readonly Dictionary<string, int> counts = [];
+
+    int SeparatorCount => entries.Count(e => e.Kind == EntryKind.Separator);
+
+    // Traktor's entry count, as the table header shows it, not the parser's
+    // Tracks (which drops separators and unresolved entries).
+    int CountOf(Playlist p) => counts.TryGetValue(p.Uuid, out var n) ? n : p.Tracks.Count;
+
+    static string KindAttribute(EntryKind kind) => kind switch
+    {
+        EntryKind.Streaming => "streaming",
+        EntryKind.NotInCollection => "not-in-collection",
+        EntryKind.Separator => "separator",
+        _ => "track",
+    };
+
+    static string? MarkerText(EntryKind kind) => kind switch
+    {
+        EntryKind.Streaming => "streaming",
+        EntryKind.NotInCollection => "not in collection",
+        _ => null,
+    };
+
+    static string TitleOf(PlaylistEntry e) =>
+        e.Track?.Title is { Length: > 0 } title ? title
+        : e.Title is { Length: > 0 } entry ? entry
+        : Path.GetFileName(e.Track?.Path ?? "");
+
+    async Task SelectAsync(Playlist? playlist)
+    {
+        selected = playlist;
+        entries = playlist is null ? []
+            : await CollectionService.GetPlaylistEntriesAsync(playlist.Uuid)
+              ?? playlist.Tracks.Select((t, i) => new PlaylistEntry(i + 1, "", EntryKind.Track, t, t.Title ?? "")).ToList();
+    }
 
     string SelectId => $"set-pick-{Recording?.DriveFileId}";
 
@@ -97,8 +156,12 @@
         var year = RecordingYear();
         candidates = await SetMatcher.CandidatesAsync(FileName, year);
         all = await SetMatcher.AllPlaylistsAsync();
+        foreach (var p in all)
+        {
+            if (await CollectionService.GetPlaylistEntriesAsync(p.Uuid) is { } list) counts[p.Uuid] = list.Count;
+        }
         isOverride = await SetMatcher.GetOverrideAsync(Recording.DriveFileId) is not null;
-        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, year);
+        await SelectAsync(await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, year));
         loading = false;
     }
 
@@ -109,7 +172,7 @@
 
         await SetMatcher.SetOverrideAsync(Recording.DriveFileId, uuid);
         isOverride = !string.IsNullOrEmpty(uuid);
-        selected = string.IsNullOrEmpty(uuid) ? null : all.FirstOrDefault(p => p.Uuid == uuid);
+        await SelectAsync(string.IsNullOrEmpty(uuid) ? null : all.FirstOrDefault(p => p.Uuid == uuid));
     }
 
     async Task ClearPick()
@@ -117,6 +180,6 @@
         if (Recording is null) return;
         await SetMatcher.SetOverrideAsync(Recording.DriveFileId, null);
         isOverride = false;
-        selected = await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, RecordingYear());
+        await SelectAsync(await SetMatcher.ResolveAsync(FileName, Recording.DriveFileId, RecordingYear()));
     }
 }
