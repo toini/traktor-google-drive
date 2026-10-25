@@ -365,25 +365,34 @@ test.describe('gig preview from the cache', () => {
     await mockDrive(page);
     await seedToken(page);
     await page.goto(`/playlist/${GIG}`);
+    // Start on Gig Four, so the next track is Gig Exit: the one fixture track
+    // whose preview end comes from an exit loop (31.5 s). The others' loops are
+    // entrance loops, so they play to their end.
+    await page.locator('#playlist-table tbody tr', { hasText: 'Gig Four' }).first().locator('.play-button').click();
+    await expect(title(page)).toContainText('Gig Four');
     await page.locator('[data-preview-set]').click();
-    await expect(title(page)).toContainText('Gig One');
+    await expect(page.locator('[data-preview-chip]')).toContainText('4/6');
     await expect(page.locator('[data-next-ready]')).toBeVisible();
 
-    // Gig Two, from memory: load cue 0 to the end of its loop at 0.6 s.
-    await expect(title(page)).toContainText('Gig Two', { timeout: 30_000 });
+    // Gig Exit, from memory: load cue 0.3 s to the end of its exit loop at 31.5 s.
+    await expect(title(page)).toContainText('Gig Exit', { timeout: 30_000 });
     expect((await bufferState(page)).source).toBe('cache');
     const range = page.locator('[data-preview-range]');
-    await expect(range).toHaveAttribute('data-end', '0.6');
+    await expect(range).toHaveAttribute('data-end', '31.5');
+
+    // Up to just before the bound; at a tenth of the speed, 0.5 s of track is 5 s.
+    await expect.poll(async () => (await audio(page)).current).toBeGreaterThanOrEqual(0.3);
+    await page.evaluate(async () => (await import('/player.js')).seek(31));
 
     let last = 0;
     await expect.poll(async () => {
       const t = await title(page).textContent();
-      if (t?.includes('Gig Two')) last = Math.max(last, (await audio(page)).current);
+      if (t?.includes('Gig Exit')) last = Math.max(last, (await audio(page)).current);
       return t;
-    }, { timeout: 30_000, intervals: [100] }).toContain('Gig Three');
-    // Advanced at the bound, not at the end of the 2-second file.
-    expect(last).toBeLessThan(1.0);
-    // Gig Three starts at its load cue (0.4 s).
-    await expect.poll(async () => (await audio(page)).current).toBeGreaterThanOrEqual(0.4);
+    }, { timeout: 30_000, intervals: [100] }).toContain('Gas Chamber');
+    // Advanced at the bound, not at the end of the 40-second file.
+    expect(last).toBeLessThan(32.5);
+    // Gas Chamber starts at its load cue (120 s).
+    await expect.poll(async () => (await audio(page)).current).toBeGreaterThanOrEqual(120);
   });
 });
