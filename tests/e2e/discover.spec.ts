@@ -83,7 +83,7 @@ test.describe('Discover', () => {
     const card = page.locator('[data-current]');
     // Internal Motion (2020) before Feeding Generation Z II (2024); 1616 is in the collection.
     await expect(card.locator('[data-track-title]')).toHaveText('Internal Motion (Original Mix)');
-    await expect(page.locator('[data-queue-count]')).toHaveText('4');
+    await expect(page.locator('[data-queue-count]')).toHaveText('6');
 
     await page.locator('[data-verdict="skip"]').click();
     await expect(card.locator('[data-track-title]')).toHaveText('Burnt Side (Original Mix)');
@@ -101,13 +101,13 @@ test.describe('Discover', () => {
     await page.locator('[data-listen]').focus();
     await page.keyboard.press('m');
     await expect(card.locator('[data-track-title]')).toHaveText('Machine Choir');
-    await expect(page.locator('[data-queue-count]')).toHaveText('1');
+    await expect(page.locator('[data-queue-count]')).toHaveText('3');
 
     // A refresh fetches the list again but never re-offers what was heard.
     await page.goto('/discover/H/seeds');
     await seedRow(page, 'Carnivor Records').locator('[data-refresh]').click();
     await page.locator('[data-tab="listen"]').click();
-    await expect(page.locator('[data-queue-count]')).toHaveText('1');
+    await expect(page.locator('[data-queue-count]')).toHaveText('3');
     expect(calls.storeRequests).toEqual([]);
   });
 
@@ -146,7 +146,7 @@ test.describe('Discover', () => {
     await seedRow(page, 'Carnivor Records').locator('[data-watermark]').fill('2020-08');
     await seedRow(page, 'Carnivor Records').locator('[data-watermark]').dispatchEvent('change');
     await page.locator('[data-tab="listen"]').click();
-    await expect(page.locator('[data-queue-count]')).toHaveText('2');
+    await expect(page.locator('[data-queue-count]')).toHaveText('4');
     await expect(page.locator('[data-current] [data-track-title]')).toHaveText('Hunger');
   });
 
@@ -200,6 +200,56 @@ test.describe('Discover', () => {
     await seedToken(other);
     await other.goto('/discover/H/seeds');
     await expect(other.locator('tr[data-seed]')).toHaveCount(2);
+  });
+
+  test('the starter list shows on first run, Carnivor is heard through 2026-10-25, and it is not re-applied', async ({ page }) => {
+    const calls = await open(page, '/discover/H/shortlist', { realStarter: true });
+
+    // The three picks wait as "maybe", known by URL until their release page is read.
+    const liked = page.locator('[data-liked]');
+    await expect(liked).toHaveCount(3);
+    await expect(liked.locator('[data-liked-title]')).toHaveText(['Satanas', 'Im no immigrant', 'Madtype shadym t y remix']);
+    await expect(page.locator('[data-save-status="Saved"]')).toBeVisible();
+    const firstLog = [...calls.appDataCreates.map((c) => c.body), ...calls.appDataUpdates.map((u) => u.body)].join('\n');
+    expect(firstLog.split('\n').filter((l) => l.includes('"t":"starter"'))).toHaveLength(1);
+    expect(firstLog).toContain('beatport:4930160');
+
+    // Look up reads the release page on a click and resolves title and artist.
+    const pick = (slug: string) => page.locator(`[data-liked="url:https://carnivorrecords.bandcamp.com/track/${slug}"]`);
+    await pick('satanas').locator('[data-look-up]').click();
+    await expect(pick('satanas').locator('[data-liked-title]')).toHaveText('Fixture Artist A – Satanas');
+    await expect(pick('im-no-immigrant').locator('[data-liked-title]')).toHaveText("Fixture Artist B – I'm No Immigrant");
+    await expect(pick('madtype-shadym-t-y-remix').locator('[data-look-up]')).toBeVisible();   // its release was not read
+
+    // The Carnivor seed came with the starter, heard through 2026-10-25 (a day, not a month):
+    // a refresh reads the list but nothing dated on or before that day is ever offered.
+    await page.goto('/discover/H/seeds');
+    const row = page.locator('tr[data-seed="Carnivor Records"]');
+    await expect(row).toHaveAttribute('data-seed-origin', 'EtiLisaa');
+    await expect(row.locator('[data-watermark]')).toHaveValue('2026-10-25');
+    await row.locator('[data-refresh]').click();
+    await expect(row.locator('[data-busy]')).toHaveCount(0);
+    await page.locator('[data-tab="listen"]').click();
+    await expect(page.locator('[data-queue-count]')).toHaveText('0');
+    expect(calls.storeRequests).toEqual([]);
+
+    // Toni decides one; a second device then loads the same log with the starter file
+    // still shipped: nothing is applied again, and his decision stands.
+    await page.locator('[data-tab="shortlist"]').click();
+    await pick('satanas').locator('[data-dont-buy]').click();
+    await expect(liked).toHaveCount(2);
+    await expect(page.locator('[data-save-status="Saved"]')).toBeVisible();
+    const log = calls.appDataUpdates.at(-1)?.body ?? calls.appDataCreates.at(-1)!.body;
+
+    const other = await page.context().newPage();
+    await mockDrive(other, { nml: discoverNml() });
+    const otherCalls = await mockDiscover(other, { realStarter: true, appData: { [calls.appDataCreates[0].name]: log } });
+    await seedToken(other);
+    await other.goto('/discover/H/shortlist');
+    await expect(other.locator('[data-liked]')).toHaveCount(2);
+    await expect(other.locator('[data-save-status="Saved"]')).toBeVisible();
+    const otherLog = [...otherCalls.appDataCreates.map((c) => c.body), ...otherCalls.appDataUpdates.map((u) => u.body)].join('\n');
+    expect(otherLog).not.toContain('"t":"starter"');
   });
 
   test('a token without drive.appdata keeps working locally and asks to allow saving', async ({ page }) => {

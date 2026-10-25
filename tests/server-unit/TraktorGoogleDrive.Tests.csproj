@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <!-- Recorded store pages (ADR 20261025-54 §12): no test ever calls a store. -->
+    <None Include="..\..\TraktorGoogleDrive\wwwroot\discover\starter.json" Link="starter.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\fixtures\discover\**\*" LinkBase="fixtures\discover" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

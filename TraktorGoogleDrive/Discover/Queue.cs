@@ -63,6 +63,7 @@ public static class QueueBuilder
     {
         var items = new List<QueueItem>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var heardUrls = state.HeardTrackUrls;
 
         var ordered = releases
             .Where(r => state.Seeds.TryGetValue(r.SeedKey, out var seed) && seed.Genre == genre)
@@ -74,7 +75,7 @@ public static class QueueBuilder
 
         foreach (var release in ordered)
         {
-            if (state.HeardReleases.Contains(release.Url)) continue;
+            if (state.IsReleaseHeard(release.Url, release.Title, release.Label, release.Artist)) continue;
             var seed = state.Seeds[release.SeedKey];
             if (DiscoverState.BeforeWatermark(release.Date, seed.Watermark)) continue;
 
@@ -83,6 +84,7 @@ public static class QueueBuilder
                 var key = ReleaseInfo.TrackKey(release.Source, track.TrackId);
                 if (!seen.Add(key)) continue;
                 if (state.Tracks.ContainsKey(key)) continue;          // heard, whatever the verdict
+                if (track.TrackUrl is { } u && heardUrls.Contains(DiscoverState.TrackUrlKey(u))) continue;  // heard, known by URL
                 if (owned.Owns(track.Artist, track.Title)) continue;  // already in the collection
                 items.Add(new QueueItem(key, release, track));
             }
@@ -97,6 +99,7 @@ public static class QueueBuilder
     public static string? HeardThrough(DiscoverState state, Seed seed, IEnumerable<ReleaseInfo> releases, OwnedIndex owned)
     {
         string? through = null;
+        var heardUrls = state.HeardTrackUrls;
         var months = releases
             .Where(r => r.SeedKey == seed.Key && r.Date is not null)
             .GroupBy(r => r.Date!.Value.ToString("yyyy-MM"))
@@ -104,15 +107,17 @@ public static class QueueBuilder
         foreach (var month in months)
         {
             var done = month.All(release =>
-                state.HeardReleases.Contains(release.Url)
+                state.IsReleaseHeard(release.Url, release.Title, release.Label, release.Artist)
                 || DiscoverState.BeforeWatermark(release.Date, seed.Watermark)
                 || release.Tracks.All(t =>
                     state.Tracks.ContainsKey(ReleaseInfo.TrackKey(release.Source, t.TrackId))
+                    || (t.TrackUrl is { } u && heardUrls.Contains(DiscoverState.TrackUrlKey(u)))
                     || owned.Owns(t.Artist, t.Title)));
             if (!done) break;
             through = month.Key;
         }
-        return through is not null && (seed.Watermark is null || string.CompareOrdinal(through, seed.Watermark) > 0)
+        return through is not null
+               && (DiscoverState.LastDay(seed.Watermark) is not { } current || DiscoverState.LastDay(through) > current)
             ? through
             : null;
     }

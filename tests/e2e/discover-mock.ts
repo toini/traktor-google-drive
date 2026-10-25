@@ -11,7 +11,7 @@ export const discoverNml = () => readFileSync(join(here, 'fixtures', 'discover-c
 export const H16_UUID = '16161616161616161616161616161616';
 export const CARNIVOR = 'https://carnivorrecords.bandcamp.com';
 
-type Track = { trackId: number; number: number; title: string; artist: string; duration: number };
+type Track = { trackId: number; number: number; title: string; artist: string; duration: number; slug?: string };
 
 function release(slug: string, title: string, artist: string, date: string, tracks: Track[]) {
   const url = `${CARNIVOR}/album/${slug}`;
@@ -19,7 +19,7 @@ function release(slug: string, title: string, artist: string, date: string, trac
     source: 'bandcamp', url, type: 'album', id: tracks[0].trackId * 7, title, artist,
     label: 'Carnivor Records', labelUrl: CARNIVOR, releaseDate: `${date}T00:00:00+00:00`,
     tags: ['techno', 'peak time techno'],
-    tracks: tracks.map((t) => ({ ...t, trackUrl: `${CARNIVOR}/track/${t.title.toLowerCase().replace(/\W+/g, '-')}`, isrc: null, playable: true })),
+    tracks: tracks.map(({ slug, ...t }) => ({ ...t, trackUrl: `${CARNIVOR}/track/${slug ?? t.title.toLowerCase().replace(/\W+/g, '-')}`, isrc: null, playable: true })),
     albumUrl: null, streamingLimit: 3,
   };
 }
@@ -33,6 +33,9 @@ export const RELEASES = {
   newer: release('feeding-generation-z-ii', 'Feeding Generation Z II', 'Various', '2024-03-01', [
     { trackId: 501, number: 1, title: 'Hunger', artist: 'Kristonov', duration: 380 },
     { trackId: 502, number: 2, title: 'Machine Choir', artist: 'Strasse Killer', duration: 402 },
+    // The two tracks of Toni's starter list (wwwroot/discover/starter.json).
+    { trackId: 503, number: 3, title: 'Satanas', artist: 'Fixture Artist A', duration: 395, slug: 'satanas' },
+    { trackId: 504, number: 4, title: "I'm No Immigrant", artist: 'Fixture Artist B', duration: 371, slug: 'im-no-immigrant' },
   ]),
   internalMotion: release('internal-motion', 'Internal Motion', 'obwigszyh', '2020-08-19', [
     { trackId: 1402866115, number: 1, title: '1616 (Original Mix)', artist: 'obwigszyh', duration: 358 },
@@ -54,6 +57,8 @@ export type DiscoverMockOptions = {
   appData?: Record<string, string>;
   /** Answer appData calls with 403 insufficient scope, as a pre-Discover token gets. */
   appDataScopeMissing?: boolean;
+  /** Serve the real wwwroot/discover/starter.json. Otherwise an empty one, so other tests start blank. */
+  realStarter?: boolean;
 };
 
 /**
@@ -70,6 +75,11 @@ export async function mockDiscover(page: Page, opts: DiscoverMockOptions = {}): 
     calls.storeRequests.push(route.request().url());
     return route.abort();
   });
+
+  if (!opts.realStarter) {
+    await page.route('**/discover/starter.json', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ batches: [] }) }));
+  }
 
   await page.route('**/api/discover/**', async (route) => {
     const u = new URL(route.request().url());

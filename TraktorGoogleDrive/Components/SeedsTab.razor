@@ -39,8 +39,11 @@
                                 }
                             </td>
                             <td>
-                                <input class="discover-input month" type="month" data-watermark value="@seed.Watermark"
-                                       @onchange="e => Discover.SetWatermark(seed, e.Value?.ToString() is { Length: > 0 } m ? m : null)" />
+                                @* A month (OneNote's precision) or a day: "2023-06" or "2026-10-25". *@
+                                <input class="discover-input month" data-watermark value="@seed.Watermark" placeholder="YYYY-MM-DD"
+                                       title="Heard everything up to this month or day"
+                                       @onchange="e => SetWatermark(seed, e.Value?.ToString())" />
+                                @if (badWatermark.Contains(seed.Key)) { <span class="discover-warn" data-bad-watermark>Use YYYY-MM or YYYY-MM-DD</span> }
                                 @if (offer is not null)
                                 {
                                     <button class="discover-button" data-heard-through="@offer" @onclick="() => Discover.RaiseWatermark(seed, offer)">Heard through @offer</button>
@@ -163,6 +166,16 @@
     };
 
     static string OriginClass(SeedOrigin o) => o == SeedOrigin.EtiLisaa ? "eti" : "";
+
+    readonly HashSet<string> badWatermark = new();
+
+    void SetWatermark(Seed seed, string? value)
+    {
+        var v = value?.Trim() ?? "";
+        badWatermark.Remove(seed.Key);
+        if (v.Length > 0 && !DiscoverState.IsWatermark(v)) { badWatermark.Add(seed.Key); return; }
+        Discover.SetWatermark(seed, v.Length == 0 ? null : v);
+    }
 
     async Task GuessAsync(Seed seed)
     {

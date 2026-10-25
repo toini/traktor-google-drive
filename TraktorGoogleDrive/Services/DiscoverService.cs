@@ -27,6 +27,7 @@ public sealed partial class DiscoverService
     private readonly DiscoverStore _store;
     private readonly DiscoverApi _api;
     private readonly IJSRuntime _js;
+    private readonly HttpClient _http;
 
     private Task? _loading;
     private List<CollectionTrack> _tracks = [];
@@ -52,12 +53,13 @@ public sealed partial class DiscoverService
         public DateTimeOffset? RefreshedAt { get; set; }
     }
 
-    public DiscoverService(CollectionService collection, DiscoverStore store, DiscoverApi api, IJSRuntime js)
+    public DiscoverService(CollectionService collection, DiscoverStore store, DiscoverApi api, IJSRuntime js, HttpClient http)
     {
         _collection = collection;
         _store = store;
         _api = api;
         _js = js;
+        _http = http;
         _store.Changed += () => Changed?.Invoke();
     }
 
@@ -69,7 +71,58 @@ public sealed partial class DiscoverService
         BuildFromCollection(collection);
         await LoadReleaseCacheAsync();
         await _store.LoadAsync();
+        await ApplyStarterAsync();
+        foreach (var release in _releases.Values.DistinctBy(r => r.Url)) ResolveUrlTracks(release);
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// The starter list (wwwroot/discover/starter.json), once. Only after Drive
+    /// was read: with an unreadable log there is no telling whether it was applied
+    /// on another device, and applying it again could undo a change made there.
+    /// </summary>
+    private async Task ApplyStarterAsync()
+    {
+        if (_store.Status is not (DiscoverStore.SaveStatus.Saved or DiscoverStore.SaveStatus.Pending)) return;
+        string json;
+        try { json = await _http.GetStringAsync("discover/starter.json"); }
+        catch (HttpRequestException) { return; }
+        if (StarterFile.Parse(json) is not { } starter) return;
+        foreach (var e in starter.EventsFor(State)) _store.Append(e);
+    }
+
+    /// <summary>
+    /// Tracks known only by URL (starter list, imports) get their real title and
+    /// artist once their release page has been read.
+    /// </summary>
+    private void ResolveUrlTracks(ReleaseInfo release)
+    {
+        foreach (var track in release.Tracks.Where(t => t.TrackUrl is not null))
+        {
+            var key = DiscoverState.UrlTrackKey(track.TrackUrl!);
+            if (State.Tracks.TryGetValue(key, out var known) && known.Artist is null)
+                _store.Append(new DiscoverEvent
+                {
+                    Type = "track", At = default, TrackKey = key, Artist = track.Artist, Title = track.Title,
+                    ReleaseTitle = release.Title, ReleaseDate = release.Date, Label = release.Label ?? known.Label,
+                });
+        }
+    }
+
+    /// <summary>Reads the release page of a track known only by URL, on Toni's click.</summary>
+    public async Task<string?> LookUpAsync(TrackState track)
+    {
+        var url = track.ReleaseUrl ?? track.TrackUrl;
+        if (url is null) return "No URL to look up";
+        try
+        {
+            var release = await _api.GetReleaseAsync(url);
+            var info = ToInfo(release, "");
+            ResolveUrlTracks(info);
+            Changed?.Invoke();
+            return State.Tracks.GetValueOrDefault(track.Key)?.Artist is null ? "That track is not on the release page" : null;
+        }
+        catch (DiscoverApiException e) { return e.Message; }
     }
 
     private void BuildFromCollection(Collection collection)
@@ -251,7 +304,7 @@ public sealed partial class DiscoverService
             {
                 var r = progress.Refs[i];
                 progress.Walked = i + 1;
-                if (State.HeardReleases.Contains(r.Url)) continue;
+                if (State.IsReleaseHeard(r.Url, r.Title, null, r.Artist)) continue;
 
                 if (!_releases.TryGetValue(r.Url, out var info))
                 {
@@ -262,6 +315,7 @@ public sealed partial class DiscoverService
                     fetched++;
                     info = ToInfo(release, seed.Key);
                     _releases[info.Url] = info;
+                    ResolveUrlTracks(info);
                     if (!string.Equals(info.Url, r.Url, StringComparison.OrdinalIgnoreCase)) _releases[r.Url] = info;
                     await SaveReleaseCacheAsync();
                     Changed?.Invoke();

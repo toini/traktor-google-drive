@@ -86,10 +86,16 @@
                             <li class="discover-row" data-liked="@t.Key">
                                 <div class="discover-row-main">
                                     <span class="discover-badge">@(t.Pass1 == Pass1.Like ? "♥" : "?")</span>
-                                    <span class="discover-row-title">@t.Artist – @t.Title</span>
-                                    <span class="discover-row-meta">@t.Label · @t.ReleaseTitle @Date(t.ReleaseDate)</span>
+                                    <span class="discover-row-title" data-liked-title>@(t.Artist is null ? t.Title : $"{t.Artist} – {t.Title}")</span>
+                                    <span class="discover-row-meta">@t.Label · @t.ReleaseTitle @Date(t.ReleaseDate)@(string.IsNullOrWhiteSpace(t.Note) ? "" : " · " + t.Note)</span>
                                 </div>
                                 <div class="discover-row-actions">
+                                    @if (t.Artist is null)
+                                    {
+                                        @* Known only by its URL (starter list): one release-page read on a click. *@
+                                        <button class="discover-button" data-look-up @onclick="() => LookUpAsync(t)">Look up</button>
+                                        @if (lookUpErrors.GetValueOrDefault(t.Key) is { } err) { <span class="discover-warn">@err</span> }
+                                    }
                                     <DiscoverStars Value="t.Rating" OnRate="r => Discover.Judge(t, rating: r)" />
                                     <button class="discover-button buy" data-buy @onclick="() => Discover.Judge(t, decision: Decision.Buy)">Buy</button>
                                     <button class="discover-button" data-dont-buy @onclick="() => Discover.Judge(t, decision: Decision.Skip)">Don't buy</button>
@@ -152,6 +158,13 @@
 
     bool loaded;
     bool copied;
+    readonly Dictionary<string, string> lookUpErrors = new();
+
+    async Task LookUpAsync(TrackState t)
+    {
+        lookUpErrors.Remove(t.Key);
+        if (await Discover.LookUpAsync(t) is { } error) lookUpErrors[t.Key] = error;
+    }
     string? loadError;
 
     bool TabIs(string tab) => (Tab ?? DefaultTab) == tab;

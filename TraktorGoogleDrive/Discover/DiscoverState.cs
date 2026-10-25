@@ -35,6 +35,8 @@ public sealed record DiscoverEvent
     [JsonPropertyName("label")] public string? Label { get; init; }
     [JsonPropertyName("rtitle")] public string? ReleaseTitle { get; init; }
     [JsonPropertyName("rdate")] public DateOnly? ReleaseDate { get; init; }
+    /// <summary>Catalogue number of a heard release, for matching it across stores.</summary>
+    [JsonPropertyName("cat")] public string? Catalog { get; init; }
     [JsonPropertyName("pass1")] public Pass1? Pass1 { get; init; }
     [JsonPropertyName("rating")] public int? Rating { get; init; }
     [JsonPropertyName("decision")] public Decision? Decision { get; init; }
@@ -99,6 +101,31 @@ public sealed class DiscoverState
     public HashSet<string> HeardReleases { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Names Toni removed from proposals ("never suggest").</summary>
     public HashSet<string> StopNames { get; } = new(StringComparer.Ordinal);
+    /// <summary>Heard releases as store-independent keys, so the same release on another store is heard too.</summary>
+    public List<ReleaseMatch> HeardReleaseMatches { get; } = [];
+
+    /// <summary>A release is heard by its URL, or by matching a heard release from another store.</summary>
+    public bool IsReleaseHeard(string url, string? title, string? label, string? artist) =>
+        HeardReleases.Contains(url)
+        || (HeardReleaseMatches.Count > 0 && ReleaseMatch.From(title, label, artist, null) is { } m
+            && HeardReleaseMatches.Any(h => h.Matches(m)));
+
+    /// <summary>Versions of the starter list already applied to this log (never applied twice).</summary>
+    public HashSet<string> StarterVersions { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Canonical track URLs of every heard track. A track known only by its URL
+    /// (the starter list, later the OneNote import) has a <c>url:</c> key until its
+    /// page is read, and must still never be queued (ADR §4.3).
+    /// </summary>
+    public IReadOnlySet<string> HeardTrackUrls =>
+        Tracks.Values.Where(t => t.TrackUrl is not null).Select(t => TrackUrlKey(t.TrackUrl!)).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>Key of a track known only by URL: "url:https://x.bandcamp.com/track/slug".</summary>
+    public static string UrlTrackKey(string trackUrl) => "url:" + TrackUrlKey(trackUrl);
+
+    public static string TrackUrlKey(string url) =>
+        url.Trim().ToLowerInvariant().Replace("http://", "https://").Split('?', '#')[0].TrimEnd('/');
 
     public static DiscoverState Fold(IEnumerable<DiscoverEvent> events)
     {
@@ -140,13 +167,18 @@ public sealed class DiscoverState
             case "watermark" when e.SeedKey is not null && Seeds.TryGetValue(e.SeedKey, out var w):
                 // Imports and "heard through" only raise it; Toni editing the field
                 // by hand (Clear) may also lower or remove it.
-                if (e.Clear == true) w.Watermark = IsMonth(e.Month) ? e.Month : null;
-                else if (IsMonth(e.Month) && (w.Watermark is null || string.CompareOrdinal(e.Month, w.Watermark) > 0))
+                if (e.Clear == true) w.Watermark = IsWatermark(e.Month) ? e.Month : null;
+                else if (LastDay(e.Month) is { } raised && (LastDay(w.Watermark) is not { } current || raised > current))
                     w.Watermark = e.Month;
                 break;
 
             case "release-heard" when e.ReleaseUrl is not null:
                 HeardReleases.Add(e.ReleaseUrl);
+                if (ReleaseMatch.From(e.ReleaseTitle, e.Label, e.Artist, e.Catalog) is { } match) HeardReleaseMatches.Add(match);
+                break;
+
+            case "starter" when e.Name is not null:
+                StarterVersions.Add(e.Name);
                 break;
 
             case "stop-name" when e.Name is not null:
@@ -178,7 +210,23 @@ public sealed class DiscoverState
     public static bool IsMonth(string? month) =>
         month is { Length: 7 } && DateOnly.TryParseExact(month + "-01", "yyyy-MM-dd", out _);
 
+    /// <summary>A watermark is a month ("2023-06", OneNote's precision) or a day ("2026-10-25").</summary>
+    public static bool IsWatermark(string? value) => LastDay(value) is not null;
+
+    /// <summary>The last day a watermark covers: the day itself, or a month's last day.</summary>
+    public static DateOnly? LastDay(string? watermark)
+    {
+        if (watermark is null) return null;
+        if (watermark.Length == 10 && DateOnly.TryParseExact(watermark, "yyyy-MM-dd", out var day)) return day;
+        if (IsMonth(watermark))
+        {
+            var first = DateOnly.ParseExact(watermark + "-01", "yyyy-MM-dd");
+            return first.AddMonths(1).AddDays(-1);
+        }
+        return null;
+    }
+
     /// <summary>True when a release dated <paramref name="date"/> is at or before the seed's watermark.</summary>
     public static bool BeforeWatermark(DateOnly? date, string? watermark) =>
-        date is { } d && watermark is not null && string.CompareOrdinal(d.ToString("yyyy-MM"), watermark) <= 0;
+        date is { } d && LastDay(watermark) is { } last && d <= last;
 }

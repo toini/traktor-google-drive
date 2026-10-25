@@ -35,6 +35,26 @@ the text below still says "recommended", the decisions list is what settles it.
   month is done. The event log lives in `appDataFolder` (`DiscoverStore`), with
   unsaved events kept in localStorage; a token without the new scope keeps working
   on the device and shows "Allow saving to Drive".
+- **Starter list** (`TraktorGoogleDrive/wwwroot/discover/starter.json`): Toni's
+  triage from before the app was deployed, as versioned batches applied once each
+  to his log, as ordinary events, and only after the log was read from Drive (so a
+  device that cannot read it never re-applies a batch over a change made elsewhere).
+  Batch `2026-10-25.1`: the Carnivor Records seed (H) heard through **2026-10-25**;
+  heard releases *Feeding Generation Z II*, *Feeding Generation Z*, *Elegies*, *19th
+  Century* (Bandcamp) and *Toxic Compilation 2025 V.1* (Beatport 4930160, kept under
+  both its URL and `beatport:4930160`); picks *Satanas*, *I'm No Immigrant* and
+  *Madtype (Shadym & T Y remix)* as **maybe**, known by URL until their release page
+  is read (a seed refresh, or "Look up" on the shortlist row). New confirmations go
+  into a new batch.
+- **Watermarks are a month or a day.** OneNote marks are months ("2023-06", covering
+  the whole month); Toni's Carnivor mark is a day, so releases later in October 2026
+  still appear. A watermark is compared by the last day it covers.
+- **Heard releases match across stores** (`ReleaseMatch`): by catalogue number when
+  both sides have one (a leading "DS054 - " in a title counts, "ER31" equals
+  "ER031"), else by normalised title ("V.1" = "Vol. 1") with label and artists
+  agreeing when both sides know them; a title under 12 characters needs labels on
+  both sides. A heard Beatport release therefore stays heard when Bandcamp or
+  Discogs lists it.
 - **Not yet**: playback of discovery tracks in the player bar (`PlayableItem` and the
   `discover:H` queue). It changes `PlayerService`, where PR 17 (prefetch and
   buffering) is in flight, so it is built after PR 17 merges. Until then a track is
