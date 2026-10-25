@@ -5,7 +5,7 @@ Date: 2026-10-25
 ## Status
 
 **Proposed**, implemented on `toni/fix/cast-token-out-of-urls` in the same PR as
-this ADR, cut from `master` at `d249a93`. It replaces §4 of
+this ADR, on top of `master` at `448b3b0`. It replaces §4 of
 [adr-001](../adr-001-tv-playback.md) ("Re-arm the token": re-issue `LOAD` with a
 new token in the URL) and closes the item that the remote-control ADR
 ([20261018-63](20261018-63-remote-control.md)) left under "Deliberately not done":
