@@ -64,13 +64,27 @@ test.describe('player bar', () => {
   });
 
   test('shows elapsed and total time', async ({ page }) => {
-    await mockDrive(page);
+    // Hold the audio so the element has no metadata yet. Without the hold,
+    // the 5:12 phase lasts only until metadata loads and the check races it.
+    let releaseMedia!: () => void;
+    const mediaGate = new Promise<void>((resolve) => { releaseMedia = resolve; });
+    // Longer than the default 2s, so the track does not end and advance
+    // the queue before the total is checked.
+    await mockDrive(page, { mediaGate, wavSeconds: 30 });
     await seedToken(page);
     await page.goto(`/playlist/${PSYTECH}`);
     await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();
+
+    const elapsed = page.locator('.player-time > span').first();
+    const total = page.locator('.player-time > span').last();
     // 312s from the fixture's PLAYTIME_FLOAT, used until the media element
     // reports its own duration.
-    await expect(page.locator('.player-time')).toContainText('5:12');
+    await expect(elapsed).toHaveText('0:00');
+    await expect(total).toHaveText('5:12');
+
+    // Once the element has metadata, its real duration (the 30s mock WAV) wins.
+    releaseMedia();
+    await expect(total).toHaveText('0:30');
   });
 });
 
