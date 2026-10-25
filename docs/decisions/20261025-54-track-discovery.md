@@ -25,6 +25,11 @@ the text below still says "recommended", the decisions list is what settles it.
 6. **Never offer what Toni has already heard** (§4.3): everything the OneNote import,
    the Bandcamp wishlist import and the collection say he has heard is marked heard,
    whatever its verdict, and is never queued.
+7. **"Eti lisää" comments are the top seed source** (§3.1). A collection track
+   whose comment says "eti/etsi lisää" ("search for more", any case, with or
+   without the umlauts) seeds its artist **and** its label in its genre, ahead of
+   every rating-based seed. The first concrete seed is **Obwigszyh + Carnivor
+   Records (H)**, from "1616 (Original Mix)", 5★, comment "KOVA LOPPU. eti lisaa".
 
 ## Context
 
@@ -499,6 +504,7 @@ Bandcamp iframe only as a fallback.**
 
 | Origin | How | When |
 |---|---|---|
+| **"Eti lisää" comments** (top priority) | A collection track whose `COMMENT` matches `et(s)?i lis(ää\|aa)` (case-insensitive) seeds its artist and its label in the genre of the folder its playlists sit in. Shown first in the seed list. Three exist today: Obwigszyh / Carnivor Records "1616 (Original Mix)" (H, "KOVA LOPPU. eti lisaa"); BADVOID remix of "Rockstar" by BIJOU on Do Not Duplicate Recordings ("3-1 Hullu. Eti lisää"); Muddy Monkeyz "Atomic Drink" on Selva Digital Records ("2-2 ETI LISÄÄ. …"). "lisää luuppi" ("add a loop") on Dragon's "Tetrakis" is **not** a marker: the regex needs "eti/etsi" before "lisää" | Increment 1 |
 | **Playlist seed** | Pick a playlist, a rating threshold (default ≥ 4★), artists and/or labels. The genre comes from the playlist's top folder. A preview shows the resulting seeds with counts before anything is saved | Increment 1 (§3.2) |
 | **Genre top lists** | Per genre, ranked by a score (below). Toni ticks which ones to watch | Increment 1 |
 | **Manual** | Paste a Bandcamp, Discogs or Beatport URL of a label or artist, pick the genre | Increment 1 |
@@ -857,6 +863,107 @@ IndexedDB, so it survives a reload without asking the server.
 | **Discogs coverage of digital techno and psy** | Are H labels' digital releases on Discogs with dates? Do label and release profiles list a Bandcamp URL, which is their only playable fallback without Beatport? | **S3**: for the top 20 labels per genre and the 14 H16 labels, query Discogs (authenticated, ≤ 60/min) and count releases since 2024, date precision, and Bandcamp URLs | A coverage table per genre. If H coverage is poor and Beatport is refused, Bandcamp is the H source too |
 | **Bandcamp release emails** | Do follows of labels and artists produce emails with release URLs, and can they be filtered reliably? | **S4**: Toni follows 3 labels on Bandcamp. Inspect the next emails' structure | A sample email and a parse rule. Decide Apps Script vs Gmail API |
 | **`drive.appdata` from WASM** | Writing and listing `appDataFolder` from the browser with the GIS token flow, and how re-consent looks | **S5**: a branch-only page that writes and reads a log file. Shared with the set-tracklist ADR | Works on laptop and tablet after one consent |
+
+### Spike findings (increment 0, 2026-10-25)
+
+All Bandcamp requests were by hand, one at a time with ≥ 2 s between them, with the
+User-Agent `traktor-google-drive/1.0 (+https://github.com/toini/traktor-google-drive)`:
+**7 page requests from the laptop (plus one stream range request and two short
+plays of one stream) and 3 from Cloud Run**, no `/search`, no `/api/`.
+
+**S1, Bandcamp page data (laptop):**
+
+| Question | Result |
+|---|---|
+| Label page `/music` | **Darker Sounds: 55 releases** (12 rendered in the grid with `/album/…` links and `data-item-id="album-<id>"`, the other 43 in a `data-client-items` JSON attribute with `id`, `title`, `artist`, `page_url`, `type`). **Erebos (`erebosrecordsofficial`): 53** (16 + 37). **Carnivor Records: 10**, all rendered, including Obwigszyh's *Internal Motion*. **The label page has no release dates.** `erebosrecords.bandcamp.com` is an empty stub page: a label's real subdomain must come from a known URL (the collection's comments, Discogs, OneNote), never from guessing |
+| Release page | `data-tralbum` is there, with `album_release_date` (`09 Nov 2025 18:21:12 GMT`), `trackinfo[]` (title, duration, `track_id`, `title_link`, `file["mp3-128"]`), and `play_cap_data: {streaming_limits_enabled: true, streaming_limit: 3}`. Tags come from the `ld+json` block's `keywords` (`Hard Techno`, `Dark Hard Techno`, `Dark Techno Industrial`…), not from tag links. `data-band` gives the label name, `data-embed` the embed ids |
+| Track page `/track/<slug>` | The same `data-tralbum` with `album_url` (`/album/shadow-alliance-ep`) and the album's release date, and the track's `isrc` in `current`. **So an imported track URL maps to its release** (§4.3) with one fetch |
+| Stream URL lifetime | `https://t4.bcbits.com/stream/<hash>/mp3-128/<track_id>?p=0&ts=…&t=…&token=<unix expiry>_<sig>`. The expiry is **fetch time + 24 h** (86,400 s, measured on two fetches) |
+| Referer and CORS on the stream | A `Range` request with **no Referer** and a foreign `Origin` gets **206**, `audio/mpeg`, `accept-ranges: bytes`. **No `Access-Control-Allow-Origin`** header: the bytes cannot be read by `fetch`, so no waveforms (as §2.4 expected) |
+| A 302 from our origin in `<audio>` | **Plays** in desktop Google Chrome and in Playwright's Chromium: a local server answered `/audio/bandcamp/2927639579` with 302 to the stream URL. Playback started, `duration` was right (470 s), and **a seek to 300 s worked without hitting our endpoint again**: the element keeps using the redirected URL for its range requests. So after the 24 h expiry a seek fails, and the player re-requests our URL at the current position (the existing reload-at-position path) |
+| Android Chrome | **Not verified**: no device or emulator was reachable from this machine. To check on the tablet in increment 1, against the branch deploy |
+| Play cap | `streaming_limit: 3` is per listener: Bandcamp counts full plays of an unbought track. Triage plays a track once or twice, so the cap matters only for repeated pass-2 listening. Not a blocker |
+
+Two consequences for the adapter:
+
+- **Dates cost a release-page fetch each.** The grid is newest first, so the adapter
+  walks it from the top, fetching release pages until it passes the seed's
+  watermark (usually a handful), then queues those oldest first. With no watermark it
+  stops after the 10 newest, and "Load older" continues the walk on request.
+- **The stream URL is cached for 23 h** per track, and the redirect endpoint only
+  refetches the release page after that.
+
+**S1b, Bandcamp from Cloud Run:** a throwaway Cloud Run **job `bc-spike-s1b`** in
+`traktor-toni-2025` / europe-north1 (`curlimages/curl`) fetched Carnivor's `/music`,
+Darker Sounds' *Shadow Alliance EP* and Erebos's `/music`: **all three 200, the same
+byte sizes as from the laptop, with no challenge page**. The job was deleted
+afterwards (`gcloud run jobs list` is empty).
+
+**S3, Discogs coverage of the H16 labels and the first seed** (unauthenticated API,
+one request per 2.6 s, 56 requests; database search answered without a token):
+
+| Label | Discogs releases | Since 2024 | Newest (date precision) | Bandcamp URL in profile | Bandcamp releases |
+|---|---|---|---|---|---|
+| **Carnivor Records** | **2** | 0 | 2020-04-15 (day) | yes | **10** |
+| Darker Sounds | 9 | 2 | 2026-02-25 (day) | yes | 55 |
+| Erebos Records | 13 | 0 | 2021-04-20 | no | 53 |
+| RAW. | wrong match (a 1990s CD label of the same name) | | | | |
+| Valhall Records | 1 | 1 | 2025-08-15 | no | |
+| Attack MuZik | 9 | 4 | 2025-03-21 | no | |
+| Legion IX | 1 | 0 | 2020-12-17 (vinyl) | no | |
+| Antibody | not found | | | | |
+| Falsive Records | 34 | 17 | 2026-01-22 | yes | |
+| Fresh Cut | 8 | 0 | 2020-06-15 | no | |
+| Definition Of Hard Techno | 27 | 0 | 2023-02-16 | no | |
+| Eternal Damnation | 9 | 0 | 2020-02-10 (vinyl) | yes (and Beatport) | |
+| DEMIAN RECORDS | 24 | 4 | 2024-03-14 (vinyl) | yes | |
+| Vision Serpent | 1 | 1 | 2026-05-22 | no | |
+
+**Obwigszyh** on Discogs: 34 releases (2018 onward, mostly self-released or small
+labels), profile links SoundCloud and Facebook only.
+
+What this says:
+
+- **For these H labels Discogs is far behind Bandcamp** (Carnivor 2 vs 10, Darker
+  Sounds 9 vs 55, Erebos 13 vs 53). Where a label has a Bandcamp page, Bandcamp is the
+  better release list as well as the only audio. Discogs earns its place for labels
+  with **no** Bandcamp page (Attack MuZik, Definition Of Hard Techno, Fresh Cut,
+  Valhall, Vision Serpent), and as a source of Bandcamp URLs (6 of 13 found).
+- When Discogs has a full date, it is day-accurate, but only on the release itself:
+  the label's release list gives the year only, so a date costs one request each,
+  as on Bandcamp.
+- Name matching needs a human check: `RAW.` matched an unrelated label, and
+  `Antibody` matched nothing. The seed's Discogs ref is confirmed by Toni once, then
+  stored.
+- **Carnivor and Obwigszyh, the first seed, live on Bandcamp** (Carnivor's own page,
+  10 releases, *Internal Motion* among them). Increment 1, which is Bandcamp-only,
+  therefore covers the first seed. Obwigszyh's other labels (LÄRM, EXILES and
+  self-releases) need their own Bandcamp URLs: unknown until a release page or Toni
+  supplies them.
+
+**S2, Beatport:** not applied for; that is Toni's to do. Steps:
+
+1. Sign in to (or create) a Beatport account, and open the partner portal's
+   developer section:
+   <https://partnerportal.beatport.com/hc/en-us/categories/13076449714580-Developers>.
+2. Submit a request (<https://partnerportal.beatport.com/hc/en-us/requests/new>) for
+   **API v4 access**: a personal, non-commercial tool for one user that lists label
+   and artist releases and plays their samples, in order to buy tracks on Beatport;
+   no data redistribution, a few hundred requests a day.
+3. Give the OAuth callback URI they ask for: `https://<the Cloud Run URL>/api/discover/beatport/callback`
+   (only needed for a user flow; the adapter uses client credentials).
+4. When a `client_id` and `client_secret` arrive, put them into Secret Manager as
+   `Discover__BeatportClientId` / `Discover__BeatportClientSecret`. Never in the repo.
+
+**S4, Bandcamp release emails:** not run (needs Toni to follow labels). Deferred to
+increment 4.
+
+**S5, `drive.appdata` from the browser:** **not verified live.** Minting a token with
+the new scope needs Toni's own consent click, which no automated session has (no
+user-scope token was available from `gcloud`). The calls are the documented ones:
+`GET /drive/v3/files?spaces=appDataFolder`, and a multipart `POST /upload/drive/v3/files`
+with `parents: ["appDataFolder"]`. Increment 1 covers them with the Drive mock in e2e,
+and the first real check is Toni's re-consent on the branch.
 
 ## 12. Testing
 
