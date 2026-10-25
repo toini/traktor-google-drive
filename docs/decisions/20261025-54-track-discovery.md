@@ -4,11 +4,27 @@ Date: 2026-10-25
 
 ## Status
 
-**Proposed. Design only, nothing is implemented.** Written on
-`toni/docs/track-discovery`, cut from `master` at `9865fab`. The ADR and its
-implementation will go in one PR later. Several choices below depend on Toni's
-answers (§"Open questions") and on the spikes in §11, so they are marked
-**recommended**, not decided.
+**Accepted 2026-10-25 by Toni**, with the choices recorded under §"Decisions Toni
+made". Written on `toni/docs/track-discovery`, cut from `master` at `9865fab`.
+Increment 1 is implemented on the same branch, in the same PR as this ADR. Where
+the text below still says "recommended", the decisions list is what settles it.
+
+## Decisions Toni made
+
+1. **Bandcamp: B2, fetched only when Toni acts** (§1.2). A label's release list is
+   fetched when he opens or refreshes that seed, a release page when its track is
+   about to play or he opens it. At most 1 request per 2 s, a daily cap, cached, an
+   honest User-Agent, never `/search` or `/api/`, **never in the background**.
+   Accepted knowing the acceptable-use policy's wording.
+2. **Hefty is not Toni.** Hefty stays a normal seed. There is no alias stop list;
+   the stop-list mechanism stays for `Various Artists`, `NN` and the like (§3.1).
+3. **Storage: S-A**, the Drive `appDataFolder` with append-only per-device logs
+   (§8). Adding the `drive.appdata` scope, and the one re-consent it costs, is OK.
+4. **First genre: H**, through the H16 playlist seed flow (§3.2).
+5. **No YouTube, no Spotify** (§1.5).
+6. **Never offer what Toni has already heard** (§4.3): everything the OneNote import,
+   the Bandcamp wishlist import and the collection say he has heard is marked heard,
+   whatever its verdict, and is never queued.
 
 ## Context
 
@@ -97,7 +113,7 @@ playlists.**
 | **H** | hard techno (also `H/T1`, `H/T1-3`) | 31 | 548 | 507 | 264 | 493 (90%) |
 | **P** | psytrance | 13 | 229 | 211 | 119 | 167 (73%) |
 | **C** | dark tek chillout | 9 | 66 | 62 | 43 | 47 (71%) |
-| X | unknown (open question 3) | 10 | 166 | 163 | 107 | 129 |
+| X | unknown (open question 1) | 10 | 166 | 163 | 107 | 129 |
 | F | unknown, one playlist `F5-2024` | 1 | 23 | 8 | 1 | 16 |
 | DNB | drum and bass | 1 | 23 | 2 | 2 | 23 |
 | Gigs | one playlist per gig, plus `.rec`/`.bak` variants | 62 | — | | | |
@@ -163,8 +179,9 @@ stars over all tracks of that label in the genre. Plays sum `PLAYCOUNT`.
 | **P** | Derango 28, Dragon 22, Schoiroideairis 17, Ka-Sol 7, Biollusion 7, Alchemized 5 | Dragon 15/22, Derango 11/28, Schoiroideairis 8/17, Tyamat 4/4, Ka-Sol 4/7 | Dragon 463, Derango 333, Ritalin Child 234, Schoiroideairis 207 |
 | **C** | Hefty 31, ZABO 13, Rezz 4, MNGRM 3 (25 artists in total) | Hefty 17/31, ZABO 10/13, MNGRM 3/3, Rezz 3/4 | Hefty 494, ZABO 138, MNGRM 54, Rezz 48 |
 
-**Hefty** is a top artist in every genre and has 99 tracks overall. If that is
-Toni's own alias, it must be excluded from seeds (open question 2).
+**Hefty** is a top artist in every genre and has 99 tracks overall. It is not Toni
+(decision 2), so it is an ordinary seed, and a strong one: Darker Sounds' newest
+release (2025-11-09) is a Hefty EP.
 
 ### Recency
 
@@ -201,7 +218,7 @@ At ≥ 4★ that yields:
   Trust True, Obwigszyh, Mike Opani, Maze Runner, Hardtrax, Bernhard Von Zorn,
   Dave Black, CVNSUMED, David Phoenix, Various Artists (1 each).
 
-After the stop list (`Various Artists`, `NN`, and Hefty if that is Toni), **20
+After the stop list (`Various Artists`, `NN`), **21
 artist seeds and 14 label seeds for H**, from one playlist. That is a good size for
 one triage session, and much more focused than "H's top 20 by track count", which is
 dominated by 2017–2019 labels (Industrial Philharmonics' newest dated track is
@@ -218,7 +235,8 @@ dominated by 2017–2019 labels (Industrial Philharmonics' newest dated track is
    release page when its track comes up to play. It is slow, cached and
    identifiable. Bandcamp's own acceptable-use policy forbids automated access
    outright, so this is a deliberate, low-volume personal-use exception, and
-   **Toni's call** (open question 1). The ToS-clean fallback is listed with it.
+   **Toni's call**, and he made it (decision 1). The ToS-clean fallback is listed
+   with it.
 3. **The player bar plays previews through our `<audio>` element**: the source is
    `/api/discover/audio/{source}/{trackId}`, which our server answers with a 302 to
    the source's current stream URL. Bytes go from the CDN to the browser, not through
@@ -494,8 +512,8 @@ at five years. Raw track counts reward old bulk imports (Industrial Philharmonic
 
 **Stop list**: `Various Artists`, `VA`, `NN`, `Unknown`, Traktor separator rows
 (`==============`), store artefacts in artist fields (one C track's artist field
-holds a pasted Bandcamp page), `DistroKid` (a distributor, not a label), and Toni's
-own aliases (open question 2).
+holds a pasted Bandcamp page), and `DistroKid` (a distributor, not a label). Toni
+can add names to it from the seed list.
 
 **Artist names are split** on `,`, `&`, `feat.`, `ft.`, `vs.`, `x`, so "A & B"
 seeds A and B.
@@ -508,8 +526,7 @@ seeds A and B.
    unrated (off).
 3. The preview lists each candidate with its track count in the playlist, its
    overall counts in the genre, whether it is already a seed, and whether it is on
-   the stop list. For H16 at ≥ 4★: 14 labels and 23 artists, 20 artists after the stop list (21 if
-   Hefty stays).
+   the stop list. For H16 at ≥ 4★: 14 labels and 23 artists, 21 artists after the stop list.
 4. Saving creates `(entity, H)` seeds with origin `playlist:H16`, so a later view can
    say why a seed exists.
 
@@ -568,6 +585,37 @@ two refs.
   Toni sets them in the seed list. The collection cannot supply them (no dates for
   Padang or Another Psyde). The newest release *owned* is shown as a hint, not used.
 - **Undated releases** (some Discogs rows) are queued once and then remembered by key.
+
+### 4.3 Hard rule: never offer what Toni has already heard
+
+Toni: *"When you ingest that you'll know which releases on which labels are already
+listened. Don't offer to listen another time."* This is a rule, not a preference:
+
+- **Every imported track URL** and **every imported release or catalogue header**
+  (for example `ER029`–`ER031`) marks that track and its release as **heard**,
+  **whatever the verdict**: `ei`, `ehkä`, `osta`, `ostettu`, or no token at all.
+  The verdict is kept as the item's triage state (§7.1), but "heard" does not
+  depend on it.
+- **A period header** (`=== 2023-06`, `2023-4`) sets the "heard through" watermark of
+  every label whose URLs follow it, until the next header, to **at least** that month.
+  A watermark only ever moves forward: an import never lowers one.
+- **Releases on a label dated on or before its watermark are never queued** (§4.2).
+- **Matching works across URL shapes and sources:**
+  - a Bandcamp **track** URL is mapped to its release (the release page lists its
+    tracks; until that page is fetched, the track key is remembered and matched when
+    it is), and an **album** URL marks every track on it;
+  - a Discogs or Beatport release that is the same as an imported Bandcamp one
+    (same normalised label + catalogue number, or same normalised artist + title,
+    §6.2) is heard too;
+  - a catalogue header (`ER031`, `ER30`) is matched by label + catalogue number,
+    tolerating a missing leading zero.
+- **The same rule covers the other two sources of "heard":**
+  - every item on the **Bandcamp wishlist** import (§7.2) is heard (it lands in pass
+    2 to decide, never back in pass 1);
+  - every track **already in the collection** is heard and owned (§6.2), and a
+    release whose tracks are all owned is never queued.
+- "Heard" is stored as its own flag, separate from the verdict, so a later re-import
+  or a cleared verdict never brings a track back.
 
 ## 5. Triage workflow
 
@@ -655,23 +703,65 @@ landscape. Increment 2 tests this on the Android tablet.
 | Export to `.docx`, `.mht` or `.pdf` | Windows OneNote exports Word and MHT. Mac OneNote exports PDF only | Links in `.docx`, often lost in PDF | A fallback: upload the `.docx` |
 | Microsoft Graph OneNote API | A Microsoft OAuth app, consent, a second identity provider | Everything, as HTML | Too much machinery for a one-time import. **Rejected** |
 
-**A tolerant parser**, line by line, every line classified and shown in a preview
-table before anything is saved:
+**Toni's real format.** The coordinator read his OneNote "Musiikki" section in
+OneNote for the web (read only, 2026-10-25). Music pages: *Zenon playlist*, *Zenon
+playlist – history*, *Gig 2024-12-20 Menom…*, *Industrial heavy*, *Industrial*,
+*Tekno playlist*, *Minimal playlist*, *Ozora 2018 Pumpui*, *Techgnosis & Zentrix
+pl…*, *Chill / alt*, *DJ Setup*, *DJ bio*.
 
-- **URLs**: Bandcamp, Beatport, SoundCloud, Discogs → a track, release or
-  seed ref, depending on the URL's shape.
-- **Date marks**: `2025-06`, `6/2025`, `06.2025`, `kesä 2025` (Finnish month names),
-  `-> 2025-06`, `asti 2025-06` → the watermark of the label on that line or the
-  heading above it.
-- **Ratings and words**: `1`…`5`, `★★★★`, `+`/`++`/`-`, `skip`, `buy`, and their
-  Finnish equivalents (`osta`, `ohita`, `ei`…; the real list comes from Toni's
-  sample) → pass-1 state, rating and decision.
-- **Label names**: lines without a URL in a list → a seed candidate, matched against
-  the collection's labels to guess the genre.
-- **Everything else** is shown as "not understood", never silently dropped.
+- **Period headers** `=== 2023-06`, `2023-4`, sometimes a bare `===`, with a
+  `=====…` separator line before a new block. These are the "listened through"
+  marks.
+- **Release or group headers** as plain lines: `ER031 - Source Of Darkness (Part 1)`,
+  `ER30`, `ER29` (catalogue numbers), `Hefty dark chill 3`.
+- **A section header `OSTOON NYT`** ("to buy now"), followed by URLs marked
+  `ostettu` ("bought").
+- **Track lines**: one Bandcamp URL and free text after it. Almost always
+  `https://<label>.bandcamp.com/track/<slug>`, sometimes `/album/<slug>`. Slugs often
+  carry the BPM (`-138-bpm`, `-134bpm`). Subdomains seen: `erebosrecordsofficial`,
+  `anotherpsyderecords`, `tyamat`, `chronozonerecords`, `groove`, `adngroove`.
+  (So Erebos's real Bandcamp is `erebosrecordsofficial`; `erebosrecords.bandcamp.com`
+  is an empty stub, see S1.)
+- **Verdicts and ratings, in Finnish**, after the URL: a digit 1–4 is the rating;
+  `ei` no; `ehkä` maybe; `osta` buy; `ostettu` bought; `wishlist`/`wislist` on the
+  Bandcamp wishlist; `joo` yes; `kova` strong (positive); `huh`, `öö`, `?`,
+  `hmm ehkä parempi` unsure. Combined: `3 ehkä`, `4. osta`, `3 Ei`, `grooovi. Ei`,
+  `kova wishlist`, `wislist osta`. Free comments with a rating: `alku 3 loppu 2
+  ostettu` (intro 3, ending 2, bought), `aloitus biisi. 3. osta` (opener, 3, buy),
+  `Tiukka loppu. 3 Ei`, `mogwai alun jälkeen kova. ei`. Some lines have no token.
+- **Highlights**: grey marks a line as bought. Yellow is an emphasis note
+  (`<-- Mogwai tällä levyllä`, "Mogwai is on this release").
+- ***Industrial heavy* (2019)** is a seed list: artist names as links, with a
+  country code `(FI)`, `(DE)`, and short verdicts (`EGGVN ei hyvä` "not good",
+  `tsekkaa` "check it out").
+- ***Tekno playlist* (2017)** is a table with Artist and Track columns.
 
-**Toni: please share one label-list page and one track-list page** (open question 7).
-The parser should be written against real samples, not guesses.
+**The parser (increment 4), shaped by that format.** Every line is classified and
+shown in a preview table before anything is saved:
+
+1. **Input**: read `text/html` from the paste event first (OneNote for the web keeps
+   hyperlinks and highlight colours in it), fall back to `text/plain`.
+2. **Period header** (`^=+\s*\d{4}-\d{1,2}` or a bare `\d{4}-\d{1,2}` line) → the
+   current period. It applies to the URLs below it until the next header, and raises
+   each of their labels' watermarks to at least that month (§4.3).
+3. **URL line**: the URL is the item (track or album, label from the subdomain). In
+   the text after it: **rating** = the first standalone digit 1–5; **verdict** = the
+   last of `osta`, `ostettu`, `ei`, `ehkä`, `joo`, `wishlist`/`wislist`; the rest is
+   the **note**, with the original text always kept. Mapping: `ei` → skip;
+   `ehkä`, `huh`, `öö`, `?` → maybe; `joo`, `kova`, `wishlist` → like; `osta` →
+   decision buy; `ostettu` or a grey highlight → bought. BPM in the slug is kept as
+   metadata.
+4. **Under `OSTOON NYT`**: items default to decision buy.
+5. **Release or catalogue header** (`ER031 - …`, `ER30`): a heard release of the
+   label of the URLs around it.
+6. **A line without a URL** in a list of links (the *Industrial heavy* style): an
+   artist or label **seed candidate**, with the country code and verdict as a note;
+   `ei hyvä` proposes "don't seed".
+7. **A table**: Artist / Track rows → heard tracks matched like any other.
+8. **Everything else** is shown as "not understood", never dropped silently.
+9. **Dedupe by URL**, and owned detection (§6.2) still applies.
+
+**Every imported item is heard**, whatever its verdict (§4.3).
 
 ### 7.2 The Bandcamp wishlist
 
@@ -679,11 +769,12 @@ The parser should be written against real samples, not guesses.
   page data, and its own JavaScript pages through
   `/api/fancollection/1/wishlist_items`, which is under `/api/` (robots-disallowed).
   It needs no cookie when the wishlist is public.
-- **Recommended: a one-time, Toni-initiated import**: the server reads the wishlist
-  page (and, with Toni's explicit go-ahead, the paging endpoint) at 1 request per
-  2 s. Every item becomes a liked track in pass 2, with its genre from its tags. The
+- **A one-time, Toni-initiated import**: the server reads the wishlist page only
+  (decision 1 rules out `/api/`, so no paging endpoint; items beyond the first page
+  are pasted as URLs instead). Every item is **heard** (§4.3) and becomes a liked
+  track in pass 2, with its genre from its tags. The
   fan name may be `toini`: it appears among a release's supporters in a Bandcamp page
-  that was pasted into one track's artist field (open question 4).
+  that was pasted into one track's artist field (open question 2).
 - The alternative is Toni exporting nothing and the wishlist staying where it is,
   with only new finds in the app.
 
@@ -826,27 +917,18 @@ IndexedDB, so it survives a reload without asking the server.
 
 ## Open questions for Toni
 
-1. **Bandcamp posture.** Are you OK with B2, user-paced fetching of label and
-   release pages, knowing Bandcamp's policy forbids automated access? Or only B3
-   (its emails) plus B4/B5 (embed and links)? This decides most of increment 1.
-2. **Is "Hefty" you?** It is a top artist in H (43 tracks), C (31) and Z (24). If
-   so, it goes on the stop list. Any other aliases?
-3. **What are X, F and DNB**, and the root playlists `ZX3`, `Psybreaks-uudet`,
+Answered (see §"Decisions Toni made"): the Bandcamp posture (B2), Hefty (not an
+alias), storage (`drive.appdata`), the first genre (H via H16), and the OneNote
+format (read from OneNote for the web, §7.1). Still open:
+
+1. **What are X, F and DNB**, and the root playlists `ZX3`, `Psybreaks-uudet`,
    `Downtempo`, `Techno 02`? X shares 100 of its 166 tracks with H. Should any of
    them be a Discover genre, or count towards one?
-4. **Your Bandcamp fan name**: is it `toini`? Is the wishlist public? Import it
+2. **Your Bandcamp fan name**: is it `toini`? Is the wishlist public? Import it
    once into pass 2?
-5. **Beatport**: OK to apply for partner API access in your name? Without it,
+3. **Beatport**: will you apply for partner API access (steps in §11)? Without it,
    Discogs-found techno with no Bandcamp page is link-out only.
-6. **Storage**: OK to add `drive.appdata` (the same re-consent as the set-tracklist
-   ADR), or would you rather have Firestore and a nightly refresh, accepting new
-   infrastructure?
-7. **OneNote samples**: one label-list page with its date marks, and one track-list
-   page with ratings and words. Which words did you use (Finnish or English)?
-8. **Defaults**: seed from tracks rated ≥ 4★? Auto seed at ≥ 2 tracks in a genre?
-   Skim 60 s from 35% for Z and P, 25% for H, 20% for C?
-9. **Which genres first?** Increment 1 is Bandcamp-only, so it suits Z, P and C
-   best. Is starting with H16's labels on Bandcamp still useful, or should H wait for
-   Discogs and Beatport?
-10. **Bought detection**: tracks bought on Bandcamp land in Traktor how, and how
-    soon? The "bought but not imported after 30 days" flag assumes they do.
+4. **Defaults**: auto seed at ≥ 2 tracks in a genre? Skim 60 s from 35% for Z and P,
+   25% for H, 20% for C?
+5. **Bought detection**: tracks bought on Bandcamp land in Traktor how, and how
+   soon? The "bought but not imported after 30 days" flag assumes they do.
