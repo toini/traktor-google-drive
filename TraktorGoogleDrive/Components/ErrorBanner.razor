@@ -7,37 +7,46 @@
 {
     <div class="error-banner @(Errors.AnyError ? "level-error" : "level-info")"
          role="@(Errors.AnyError ? "alert" : "status")">
+        @* Collapsed, the banner is a single line: the newest entry, cut to fit,
+           with the full text in its tooltip and behind "Show details". *@
         <div class="error-banner-head">
             <span class="error-banner-title">@Title</span>
-            @if (HasDetail)
+            @if (!expanded && Errors.Errors.Count > 0)
             {
-                <button class="error-banner-toggle" @onclick="() => expanded = !expanded">
-                    @(expanded ? "Hide" : "Show details")
-                </button>
+                var latest = Errors.Errors[0];
+                <span class="error-banner-peek" title="@latest.Summary">
+                    <span class="error-time">@latest.Time</span>
+                    <span class="error-summary">@latest.Summary</span>
+                </span>
             }
+            <button class="error-banner-toggle" aria-expanded="@(expanded ? "true" : "false")"
+                    @onclick="() => expanded = !expanded">
+                @(expanded ? "Hide" : "Show details")
+            </button>
             <button class="error-banner-close" @onclick="Errors.Clear" aria-label="Dismiss">✕</button>
         </div>
 
-        <ul class="error-list">
-            @foreach (var entry in expanded ? Errors.Errors : Errors.Errors.Take(1))
-            {
-                <li class="@(entry.Severity == Severity.Error ? "is-error" : "is-info")">
-                    <span class="error-time">@entry.Time</span>
-                    <span class="error-summary">@entry.Summary</span>
-                    @if (expanded && !string.IsNullOrEmpty(entry.Detail))
-                    {
-                        <pre class="error-detail">@entry.Detail</pre>
-                    }
-                </li>
-            }
-        </ul>
+        @if (expanded)
+        {
+            <ul class="error-list">
+                @foreach (var entry in Errors.Errors)
+                {
+                    <li class="@(entry.Severity == Severity.Error ? "is-error" : "is-info")">
+                        <span class="error-time">@entry.Time</span>
+                        <span class="error-summary">@entry.Summary</span>
+                        @if (!string.IsNullOrEmpty(entry.Detail))
+                        {
+                            <pre class="error-detail">@entry.Detail</pre>
+                        }
+                    </li>
+                }
+            </ul>
+        }
     </div>
 }
 
 @code {
     bool expanded;
-
-    bool HasDetail => Errors.Errors.Any(e => !string.IsNullOrEmpty(e.Detail)) || Errors.Errors.Count > 1;
 
     string Title
     {

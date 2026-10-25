@@ -1,22 +1,54 @@
 @namespace TraktorGoogleDrive.Layout
+@using Microsoft.AspNetCore.Components.Routing
 @using TraktorGoogleDrive.Components
 @using TraktorGoogleDrive.Services
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject AuthService Auth
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
-<div class="page">
-    <aside class="sidebar">
-        <a class="traktor-logo" href="/music">
-            <h4>TRAKTOR</h4>
-            <small>Google Drive</small>
-        </a>
+@* Two sidebar modes, split at 1000px (layout.js owns the query):
+   - wide: the sidebar sits beside the content; « hides it, ☰ brings it back,
+     and that choice is remembered.
+   - narrow (a tablet in portrait): it starts hidden and opens as a drawer over
+     the content, closed by the backdrop, Esc, « or picking a playlist.
+   The buttons say "sidebar", not "playlists": a button named "…play…" is
+   taken for a track's play button by anything that looks for one. *@
+<div class="page @(collapsed ? "sidebar-collapsed" : "") @(drawerOpen ? "drawer-open" : "")">
+    <aside id="app-sidebar" class="sidebar" aria-label="Playlists" tabindex="-1" @ref="sidebar">
+        <div class="sidebar-head">
+            <a class="traktor-logo" href="/music">
+                <h4>TRAKTOR</h4>
+                <small>Google Drive</small>
+            </a>
+            <button type="button" class="sidebar-close" data-sidebar-close
+                    aria-controls="app-sidebar" aria-expanded="true"
+                    aria-label="Hide sidebar" title="Hide sidebar"
+                    @onclick="HideSidebar">
+                <span aria-hidden="true">«</span>
+            </button>
+        </div>
         <FolderTree />
     </aside>
 
+    @if (drawerOpen)
+    {
+        <div class="sidebar-backdrop" data-sidebar-backdrop @onclick="CloseDrawer"></div>
+    }
+
     <main>
         <div class="top-row px-4">
+            <button type="button" class="sidebar-toggle" data-sidebar-toggle
+                    aria-controls="app-sidebar" aria-expanded="@(SidebarVisible ? "true" : "false")"
+                    aria-label="@(SidebarVisible ? "Hide sidebar" : "Show sidebar")"
+                    title="@(SidebarVisible ? "Hide sidebar" : "Show sidebar")"
+                    @ref="toggle" @onclick="Toggle">
+                <span aria-hidden="true">☰</span>
+            </button>
             <div class="top-row-brand">
+                @* Only shown while the sidebar (and its wordmark) is out of view. *@
+                <a class="top-brand-logo" href="/music">TRAKTOR</a>
                 <span class="brand-text">Music Collection</span>
             </div>
             <RemoteToggle />
@@ -36,9 +68,134 @@
 </div>
 
 @code {
+    const string CollapsedKey = "sidebar-collapsed:v1";
+
+    bool collapsed;   // wide mode, remembered
+    bool drawerOpen;  // narrow mode, never remembered
+    bool narrow;
+    bool focusSidebar;
+    bool focusToggle;
+    ElementReference sidebar;
+    ElementReference toggle;
+    DotNetObjectReference<MainLayout>? self;
+
+    bool SidebarVisible => narrow ? drawerOpen : !collapsed;
+
+    // Read synchronously so the first render already has the right layout: an
+    // async read would flash the sidebar open on every load.
+    protected override void OnInitialized()
+    {
+        if (JS is IJSInProcessRuntime sync)
+        {
+            try { collapsed = sync.Invoke<string?>("localStorage.getItem", CollapsedKey) == "1"; }
+            catch { /* storage blocked: start expanded */ }
+            try { narrow = sync.Invoke<bool>("traktorLayout.isNarrow"); }
+            catch { /* layout.js missing (stale cache): behave as wide */ }
+        }
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            self = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("traktorLayout.watch", self); }
+            catch { /* no live updates: the toggle still works */ }
+        }
+        if (focusSidebar)
+        {
+            focusSidebar = false;
+            try { await JS.InvokeVoidAsync("traktorLayout.focusInto", sidebar); }
+            catch { }
+        }
+        if (focusToggle)
+        {
+            // After the render: on a wide screen the toggle only now exists visibly.
+            focusToggle = false;
+            try { await toggle.FocusAsync(); }
+            catch { }
+        }
+    }
+
+    [JSInvokable]
+    public void OnNarrowChanged(bool isNarrow)
+    {
+        narrow = isNarrow;
+        drawerOpen = false;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task CloseFromEscape()
+    {
+        if (!drawerOpen) return;
+        await CloseDrawer();
+    }
+
+    async Task Toggle()
+    {
+        narrow = await IsNarrowAsync();
+        if (narrow)
+        {
+            drawerOpen = !drawerOpen;
+            focusSidebar = drawerOpen;
+        }
+        else
+        {
+            await SetCollapsedAsync(!collapsed);
+        }
+    }
+
+    async Task HideSidebar()
+    {
+        narrow = await IsNarrowAsync();
+        if (narrow) await CloseDrawer();
+        else
+        {
+            await SetCollapsedAsync(true);
+            focusToggle = true;
+        }
+    }
+
+    Task CloseDrawer()
+    {
+        drawerOpen = false;
+        focusToggle = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    async Task SetCollapsedAsync(bool value)
+    {
+        collapsed = value;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", CollapsedKey, value ? "1" : "0"); }
+        catch { /* storage blocked: it just forgets */ }
+    }
+
+    async Task<bool> IsNarrowAsync()
+    {
+        try { return await JS.InvokeAsync<bool>("traktorLayout.isNarrow"); }
+        catch { return narrow; }
+    }
+
+    // Picking a playlist in the drawer means the user is done with it.
+    void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        InvokeAsync(StateHasChanged);
+    }
+
     async Task SignOut()
     {
         await Auth.SignOutAsync();
         Navigation.NavigateTo("/login", forceLoad: true);
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        self?.Dispose();
     }
 }

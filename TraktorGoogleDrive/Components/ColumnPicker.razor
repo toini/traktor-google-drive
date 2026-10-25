@@ -7,9 +7,12 @@
             aria-haspopup="true"
             aria-expanded="@(open ? "true" : "false")"
             aria-controls="column-picker-menu"
+            aria-label="Columns"
+            title="Choose the visible columns"
             @ref="toggleButton"
             @onclick="ToggleOpen">
-        Columns <span aria-hidden="true">▾</span>
+        @* On a phone-narrow header only the icon shows. *@
+        <span class="column-picker-icon" aria-hidden="true">▥</span><span class="button-label">Columns </span><span aria-hidden="true">▾</span>
     </button>
 
     @if (open)
