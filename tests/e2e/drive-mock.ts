@@ -140,6 +140,11 @@ export type MockOptions = {
   wavSeconds?: number;
   /** Cap each 206 at this many bytes, like the real proxy's 8 MiB slices. */
   maxSliceBytes?: number;
+  /**
+   * Hold every media response until this settles. Lets a test observe the
+   * state before the media element has any metadata, which otherwise races.
+   */
+  mediaGate?: Promise<unknown>;
   /** Override the NML body. */
   nml?: string;
   /** RFC3339 modifiedTime reported for the collection file. */
@@ -161,6 +166,7 @@ export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<Dri
     const headers = await route.request().allHeaders();
     const call: DriveCall = { kind: 'media', url, range: headers['range'], token: proxyToken(url, headers['cookie']) };
     calls.push(call);
+    if (opts.mediaGate) await opts.mediaGate;
     if (opts.mediaStatus) {
       call.status = opts.mediaStatus;
       return route.fulfill({ status: opts.mediaStatus, body: '' });
