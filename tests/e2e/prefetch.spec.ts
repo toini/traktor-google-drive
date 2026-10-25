@@ -214,6 +214,118 @@ test.describe('whole-file download', () => {
   });
 });
 
+/**
+ * Fake Google Identity Services, as in token-expiry.spec.ts: a token request is
+ * a popup, refused unless a real pointer press happened in the last 5 s.
+ * Counts every request, so a test can see who asked for a renewal.
+ */
+async function fakeGis(page: Page, next: string) {
+  await page.route('https://accounts.google.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+  await page.addInitScript((next) => {
+    let lastPress = -Infinity;
+    addEventListener('pointerdown', (e) => { if (e.isTrusted) lastPress = performance.now(); }, true);
+    const gis = { calls: 0, active: () => performance.now() - lastPress < 5000 };
+    (window as any).__gis = gis;
+    (window as any).google = {
+      accounts: {
+        oauth2: {
+          initTokenClient: (cfg: any) => ({
+            requestAccessToken: () => {
+              gis.calls++;
+              if (!gis.active()) {
+                setTimeout(() => cfg.error_callback?.({ type: 'popup_failed_to_open' }), 10);
+                return;
+              }
+              setTimeout(() => cfg.callback({ access_token: next, expires_in: 3600 }), 50);
+            },
+          }),
+        },
+      },
+    };
+  }, next);
+}
+
+const gisCalls = (page: Page) => page.evaluate(() => (window as any).__gis.calls as number);
+
+test.describe('sign-in prompts with the cache on', () => {
+  test('a download Drive refuses never prompts or asks Google itself', async ({ page }) => {
+    const seconds = 60;
+    const calls = await mockDrive(page, { wavSeconds: seconds });
+    await fakeGis(page, RENEWED);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSYTECH}`);
+    const id = (await playButtons(page).first().getAttribute('data-drive-file-id'))!;
+
+    // Drive takes the old token for the stream but refuses it for the download.
+    await page.route((u) => u.hostname === 'www.googleapis.com' && u.pathname === `/drive/v3/files/${id}`, async (route) => {
+      const token = (await route.request().allHeaders())['authorization']?.replace(/^Bearer /, '') ?? null;
+      if (token !== FAKE_TOKEN) return route.fallback();
+      calls.push({ kind: 'media', url: route.request().url(), token, status: 401 });
+      return route.fulfill({ status: 401, body: '' });
+    });
+    await playButtons(page).first().click();
+    await expect.poll(() => directFor(calls, id).some((c) => c.status === 401)).toBe(true);
+    // The download waits for a different token rather than retrying this one.
+    await expectPlayingPast(page, 3);
+    expect(directFor(calls, id).filter((c) => c.status === 401)).toHaveLength(1);
+
+    // Refused, and still: no prompt, no popup, playback goes on.
+    expect(await gisCalls(page)).toBe(0);
+    await expect(page.locator('[data-player-signin]')).toHaveCount(0);
+    await expect(page.locator('.player-buffer')).toHaveAttribute('data-buffer-state', 'downloading');
+  });
+
+  // A set too big for the cache streams either way, so the cache must change
+  // nothing about when the sign-in appears or how often Google is asked.
+  for (const cache of ['on', 'off'] as const) {
+    test(`a streamed set that hits an expired token prompts exactly as before (cache ${cache})`, async ({ page }) => {
+      let accepted = true;
+      const calls = await mockDrive(page, { wavSeconds: 1200, maxSliceBytes: 64 * 1024, acceptToken: () => accepted });
+      await fakeGis(page, RENEWED);
+      if (cache === 'off') await page.addInitScript(() => localStorage.setItem('player:prefetch', 'off'));
+      await seedToken(page);
+      await page.goto(`/playlist/${RECORDED}`);
+      await page.locator('#playlist-table tbody tr', { hasText: 'Z11-3 2021-09-17' }).first().locator('.play-button').click();
+      await expectPlayingPast(page, 0.5);
+      // The click's activation runs out, as it would an hour into a set.
+      await expect.poll(() => page.evaluate(() => (window as any).__gis.active()), { timeout: 10_000 }).toBe(false);
+
+      accepted = false;
+      await seek(page, 1000);
+
+      await expect(page.locator('[data-player-signin-button]')).toBeVisible();
+      // One silent renewal try, the player's own.
+      expect(await gisCalls(page)).toBe(1);
+      expect(directFor(calls, 'drive-z11-3')).toHaveLength(0);
+
+      // The sign-in continues from the same place.
+      accepted = true;
+      await page.locator('[data-player-signin-button]').click();
+      await expectPlayingPast(page, 1000.5);
+      expect((await audio(page)).current).toBeLessThan(1010);
+      await expect(page.locator('[data-player-signin]')).toHaveCount(0);
+    });
+  }
+
+  test('a downloaded track plays on past an expired token, with no prompt and no popup', async ({ page }) => {
+    let accepted = true;
+    await mockDrive(page, { wavSeconds: 60, acceptToken: () => accepted });
+    await fakeGis(page, RENEWED);
+    await seedToken(page);
+    await page.goto(`/playlist/${PSYTECH}`);
+    await playButtons(page).first().click();
+    await expect.poll(async () => (await bufferState(page)).source).toBe('cache');
+    await expect(page.locator('.waveform')).toHaveAttribute('data-waveform-state', 'ready');
+
+    accepted = false;
+    await seek(page, 50);
+    await expectPlayingPast(page, 51);
+    await expect(page.locator('[data-player-signin]')).toHaveCount(0);
+    expect(await gisCalls(page)).toBe(0);
+  });
+});
+
 test.describe('streaming a file too big to download', () => {
   test('streams through the proxy and reconnects by itself after a drop', async ({ page }) => {
     const calls = await mockDrive(page, { wavSeconds: 300, maxSliceBytes: 256 * 1024 });
