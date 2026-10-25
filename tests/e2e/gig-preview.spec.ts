@@ -7,12 +7,17 @@ import { mockCastSdk, castLoads } from './cast-mock';
  * preview (docs/decisions/20261018-47-waveform-cue-markers-gig-preview.md).
  *
  * The "Gig Prep" fixture playlist, in Traktor order:
- *   1 Gig One   .mp3  load 0.3 s, loops 0.5–0.9 and 1.0–1.5  -> 0.3 → 1.5
- *   2 Gig Two   .flac no load, loop 0.2–0.6                  -> 0   → 0.6
+ *   1 Gig One   .mp3  load 0.3 s, loops 0.5–0.9 and 1.0–1.5  -> 0.3 → end (entrance loops)
+ *   2 Gig Two   .flac no load, loop 0.2–0.6                  -> 0   → end (entrance loop)
  *   3 Gig Local Only  not in Drive                           -> skipped
  *   4 Gig Three .mp3  load 0.4, no loop                      -> 0.4 → end
  *   5 Gig Four  .mp3  load 1.5, loop ends at 0.5             -> 1.5 → end
- * Every file is the mock's 2-second WAV, so a whole preview takes seconds.
+ *   6 Gig Exit  .mp3  40 s; load 0.3, loops 0.5–0.9, 31–31.5 -> 0.3 → 31.5
+ *   7 Gas Chamber .mp3 240 s; load 120, 16-beat loop at 121.7 -> 120 → end (entrance loop)
+ * A loop starting less than 30 s after the preview start is an entrance loop and
+ * never ends the preview (GigPreview.EntranceLoopWindowSeconds). Gig One to Four
+ * are the mock's 2-second WAV, so most of a preview takes seconds; the two long
+ * tracks are seeked through.
  */
 const GIG = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f66';
 
@@ -37,6 +42,10 @@ const position = (page: Page) =>
     const m = await import('/player.js');
     return m.position()?.current ?? -1;
   });
+
+/** Seeks the one audio element. Before the end bound, the bound stays armed. */
+const seekTo = (page: Page, seconds: number) =>
+  page.evaluate(async (s) => (await import('/player.js')).seek(s), seconds);
 
 async function open(page: Page) {
   const calls = await mockDrive(page);
@@ -111,9 +120,9 @@ test.describe('continuous play', () => {
   test('follows the table as sorted, and skips rows with no Drive file', async ({ page }) => {
     await open(page);
     // Index is already the ascending default; one click makes it descending:
-    // Four, Three, Local Only (no file), Two, One.
+    // Gas Chamber, Exit, Four, Three, Local Only (no file), Two, One.
     await page.locator('th.col-index').click();
-    await expect(page.locator('#playlist-table tbody tr').first()).toContainText('Gig Four');
+    await expect(page.locator('#playlist-table tbody tr').first()).toContainText('Gas Chamber');
 
     await play(page, 'Gig Three');
     await page.locator('[data-continuous-play]').check();
@@ -133,30 +142,32 @@ test.describe('continuous play', () => {
 });
 
 test.describe('gig preview', () => {
-  test('plays each track from its load cue to its last loop, then advances', async ({ page }) => {
+  test('plays each track from its load cue to its last exit loop, then advances', async ({ page }) => {
     await open(page);
     await page.locator('[data-preview-set]').click();
 
     const chip = page.locator('[data-preview-chip]');
     const range = page.locator('[data-preview-range]');
 
-    // 1. Gig One: load cue to the end of the loop that ends latest.
+    // 1. Gig One: both loops start within 30 s of the load cue, so they are
+    // entrance loops and it plays to the end.
     await expect(title(page)).toContainText('Gig One');
-    await expect(chip).toContainText('1/4'); // four playable rows
+    await expect(chip).toContainText('1/6'); // six playable rows
     await expect(range).toHaveAttribute('data-start', '0.3');
-    await expect(range).toHaveAttribute('data-end', '1.5');
+    await expect(range).toHaveAttribute('data-end', '');
+    await expect(range).toContainText('entrance loop ignored — to end');
     await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.3);
 
-    // 2. Gig Two: no load cue, so from 0.
+    // 2. Gig Two: no load cue, so from 0, and its loop at 0.2 s is an entrance loop.
     await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
-    await expect(chip).toContainText('2/4');
+    await expect(chip).toContainText('2/6');
     await expect(range).toHaveAttribute('data-start', '0');
-    await expect(range).toHaveAttribute('data-end', '0.6');
-    await expect(range).toContainText('no load cue');
+    await expect(range).toHaveAttribute('data-end', '');
+    await expect(range).toContainText('no load cue, entrance loop ignored — to end');
 
     // 3. Local Only is skipped. Gig Three has no loop, so it plays to the end.
     await expect(title(page)).toContainText('Gig Three', { timeout: 10_000 });
-    await expect(chip).toContainText('3/4');
+    await expect(chip).toContainText('3/6');
     await expect(range).toHaveAttribute('data-start', '0.4');
     await expect(range).toHaveAttribute('data-end', '');
     await expect(range).toContainText('no loop');
@@ -166,9 +177,34 @@ test.describe('gig preview', () => {
     await expect(range).toHaveAttribute('data-start', '1.5');
     await expect(range).toContainText('loop ends before load');
 
+    // 5. Gig Exit: the entrance loop right after the load cue is skipped, and the
+    // preview ends at the loop 30.7 s after it.
+    await expect(title(page)).toContainText('Gig Exit', { timeout: 10_000 });
+    await expect(chip).toContainText('5/6');
+    await expect(range).toHaveAttribute('data-start', '0.3');
+    await expect(range).toHaveAttribute('data-end', '31.5');
+    await expect(range).toContainText('entrance loop ignored');
+    await expect.poll(() => position(page)).toBeGreaterThan(1); // past the entrance loop, still here
+    await expect(title(page)).toContainText('Gig Exit');
+    await seekTo(page, 31);
+
+    // 6. Gas Chamber: from the load cue halfway in, and its 16-beat loop just
+    // after it does not end the preview a few seconds later.
+    await expect(title(page)).toContainText('Gas Chamber', { timeout: 10_000 });
+    await expect(chip).toContainText('6/6');
+    await expect(range).toHaveAttribute('data-start', '120');
+    await expect(range).toHaveAttribute('data-end', '');
+    await expect(range).toContainText('2:00 → end · entrance loop ignored — to end');
+    await expect.poll(() => position(page)).toBeGreaterThanOrEqual(120);
+    await seekTo(page, 130); // past the loop's end at 128.6 s
+    await page.waitForTimeout(1000);
+    await expect(title(page)).toContainText('Gas Chamber');
+    await expect(chip).toContainText('6/6');
+
     // End of the list: preview stops, the last track stays loaded.
+    await seekTo(page, 239);
     await expect(chip).toHaveCount(0, { timeout: 10_000 });
-    await expect(title(page)).toContainText('Gig Four');
+    await expect(title(page)).toContainText('Gas Chamber');
   });
 
   test('advances even with continuous play off', async ({ page }) => {
@@ -178,12 +214,19 @@ test.describe('gig preview', () => {
     await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
   });
 
-  test('dims what the preview skips on the waveform', async ({ page }) => {
+  test('dims what the preview skips on the waveform, and nothing after an entrance loop', async ({ page }) => {
     await open(page);
     await page.locator('[data-preview-set]').click();
+    await play(page, 'Gig Exit');
+    await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-end', '31.5');
     await expect.poll(() => waveformMounted(page), { timeout: 30_000 }).toBe(true);
     await expect(page.locator('.waveform-canvas [part~="preview-before"]')).toHaveCount(1);
     await expect(page.locator('.waveform-canvas [part~="preview-after"]')).toHaveCount(1);
+
+    await play(page, 'Gas Chamber');
+    await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-start', '120');
+    await expect(page.locator('.waveform-canvas [part~="preview-before"]')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('.waveform-canvas [part~="preview-after"]')).toHaveCount(0);
   });
 
   test('clicking another row jumps the preview there', async ({ page }) => {
@@ -193,20 +236,22 @@ test.describe('gig preview', () => {
 
     await play(page, 'Gig Three');
     await expect(title(page)).toContainText('Gig Three');
-    await expect(page.locator('[data-preview-chip]')).toContainText('3/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('3/6');
     await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-start', '0.4');
   });
 
   test('stop leaves preview mode and the track plays on unbounded', async ({ page }) => {
     await open(page);
     await page.locator('[data-preview-set]').click();
-    await expect(title(page)).toContainText('Gig One');
+    await play(page, 'Gig Exit');
+    await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-end', '31.5');
 
     await page.locator('[data-stop-preview]').click();
     await expect(page.locator('[data-preview-chip]')).toHaveCount(0);
-    // Past Gig One's 1.5 s bound it is still Gig One: nothing advanced.
-    await page.waitForTimeout(2500);
-    await expect(title(page)).toContainText('Gig One');
+    // Past Gig Exit's 31.5 s bound it is still Gig Exit: nothing advanced.
+    await seekTo(page, 31);
+    await expect.poll(() => position(page)).toBeGreaterThan(32);
+    await expect(title(page)).toContainText('Gig Exit');
   });
 
   test('on a Cast device, starts from the track playing on the TV, at its load cue', async ({ page }) => {
@@ -224,10 +269,10 @@ test.describe('gig preview', () => {
     const load = (await castLoads(page))[1];
     expect(load.title).toBe('Gig Three');
     expect(load.currentTime).toBeCloseTo(0.4);
-    await expect(page.locator('[data-preview-chip]')).toContainText('3/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('3/6');
   });
 
-  test('on a Cast device, each LOAD starts at the load cue and the end is watched from the ticks', async ({ page }) => {
+  test('on a Cast device, each LOAD starts at the load cue and the exit loop end is watched from the ticks', async ({ page }) => {
     await mockCastSdk(page);
     await open(page);
     await page.locator('.cast-button').click();
@@ -238,12 +283,27 @@ test.describe('gig preview', () => {
     expect((await castLoads(page))[0].currentTime).toBeCloseTo(0.3);
     expect((await castLoads(page))[0].title).toBe('Gig One');
 
-    // The device reports it has passed the end of the last loop.
+    // Past the end of Gig One's last loop: an entrance loop, so nothing advances.
     await page.evaluate(() => window.__castTest.tick(1.6));
+    await page.waitForTimeout(1500);
+    expect(await castLoads(page)).toHaveLength(1);
+
+    await play(page, 'Gig Exit');
     await expect.poll(async () => (await castLoads(page)).length).toBe(2);
-    const second = (await castLoads(page))[1];
-    expect(second.title).toBe('Gig Two');
-    expect(second.currentTime).toBe(0);
+    expect((await castLoads(page))[1].title).toBe('Gig Exit');
+    expect((await castLoads(page))[1].currentTime).toBeCloseTo(0.3);
+
+    // Past the entrance loop but before the exit loop: still Gig Exit.
+    await page.evaluate(() => window.__castTest.tick(1.0));
+    await page.waitForTimeout(1500);
+    expect(await castLoads(page)).toHaveLength(2);
+
+    // The device reports it has passed the end of the exit loop.
+    await page.evaluate(() => window.__castTest.tick(31.6));
+    await expect.poll(async () => (await castLoads(page)).length).toBe(3);
+    const third = (await castLoads(page))[2];
+    expect(third.title).toBe('Gas Chamber');
+    expect(third.currentTime).toBeCloseTo(120);
   });
 });
 
@@ -323,7 +383,7 @@ test.describe('gig preview from where you are', () => {
     await expect(previewButton(page)).toHaveAttribute('title', /^Preview from #4 \(the current track\)/);
 
     await previewButton(page).click();
-    await previewStartedAt(page, '3/4', 'Gig Three');
+    await previewStartedAt(page, '3/6', 'Gig Three');
     await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-start', '0.4');
     await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
 
@@ -341,7 +401,7 @@ test.describe('gig preview from where you are', () => {
     await expect.poll(() => paused(page)).toBe(true);
 
     await previewButton(page).click();
-    await previewStartedAt(page, '4/4', 'Gig Four');
+    await previewStartedAt(page, '4/6', 'Gig Four');
     await expect.poll(() => position(page)).toBeGreaterThanOrEqual(1.5);
     expect(await paused(page)).toBe(false);
   });
@@ -354,7 +414,7 @@ test.describe('gig preview from where you are', () => {
     await expect(previewButton(page)).toHaveAttribute('data-preview-from', '4');
 
     await previewButton(page).click();
-    await previewStartedAt(page, '3/4', 'Gig Three');
+    await previewStartedAt(page, '3/6', 'Gig Three');
     await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
   });
 
@@ -367,7 +427,7 @@ test.describe('gig preview from where you are', () => {
     await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing');
 
     await previewButton(page).click();
-    await previewStartedAt(page, '3/4', 'Gig Three');
+    await previewStartedAt(page, '3/6', 'Gig Three');
     await expect.poll(() => position(page)).toBeGreaterThanOrEqual(0.4);
   });
 
@@ -393,55 +453,64 @@ test.describe('gig preview from where you are', () => {
     await play(page, 'Gig Three');
 
     await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('3/4');
+    await expect(chip(page)).toContainText('3/6');
     await expect(title(page)).toContainText('Gig Three');
     await expect(page.locator('.error-banner')).toHaveCount(0);
   });
 
+  /** Starts the preview on Gig Exit, the one track with an exit loop (bound 31.5 s). */
+  async function previewGigExit(page: Page) {
+    await play(page, 'Gig Exit');
+    await expect(row(page, 'Gig Exit').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+    await previewButton(page).click();
+    await previewStartedAt(page, '5/6', 'Gig Exit');
+    await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-end', '31.5');
+  }
+
   test('pausing and resuming the current row keeps the preview and its end bound', async ({ page }) => {
     await slowMotion(page);
     await open(page);
-    await previewButton(page).click();
-    await expect(row(page, 'Gig One').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+    await previewGigExit(page);
 
-    await play(page, 'Gig One'); // pause
+    await play(page, 'Gig Exit'); // pause
     await expect.poll(() => paused(page)).toBe(true);
-    await expect(chip(page)).toContainText('1/4');
-    await play(page, 'Gig One'); // resume
+    await expect(chip(page)).toContainText('5/6');
+    await play(page, 'Gig Exit'); // resume
     await expect.poll(() => paused(page)).toBe(false);
-    await expect(chip(page)).toContainText('1/4');
+    await expect(chip(page)).toContainText('5/6');
 
-    // The 1.5 s bound is still armed: the preview moves on rather than playing
-    // Gig One to its end.
+    // The 31.5 s bound is still armed: the preview moves on rather than playing
+    // Gig Exit to its end.
+    await seekTo(page, 31);
     await speed(page, 1);
-    await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('2/4');
+    await expect(title(page)).toContainText('Gas Chamber', { timeout: 10_000 });
+    await expect(chip(page)).toContainText('6/6');
   });
 
   test('the player bar pause and play keep the end bound too', async ({ page }) => {
     await slowMotion(page);
     await open(page);
-    await previewButton(page).click();
-    await expect(row(page, 'Gig One').locator('.play-button')).toHaveAttribute('data-state', 'playing');
+    await previewGigExit(page);
 
     await page.locator('.player-toggle').click(); // pause
     await expect.poll(() => paused(page)).toBe(true);
     await page.locator('.player-toggle').click(); // play
     await expect.poll(() => paused(page)).toBe(false);
 
+    await seekTo(page, 31);
     await speed(page, 1);
-    await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
+    await expect(title(page)).toContainText('Gas Chamber', { timeout: 10_000 });
   });
 
   test('clicking the playlist again in the sidebar does not end the preview', async ({ page }) => {
     await slowMotion(page);
     await open(page);
     await previewButton(page).click();
-    await previewStartedAt(page, '1/4', 'Gig One');
+    await previewStartedAt(page, '1/6', 'Gig One');
 
     await page.getByRole('link', { name: 'Gig Prep' }).click();
     await page.waitForTimeout(500);
-    await expect(chip(page)).toContainText('1/4');
+    await expect(chip(page)).toContainText('1/6');
     expect(await paused(page)).toBe(false);
   });
 
@@ -473,7 +542,7 @@ test.describe('gig preview from where you are', () => {
     await next(page);
 
     await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('3/4');
+    await expect(chip(page)).toContainText('3/6');
     await page.waitForTimeout(1000); // nothing skips on further
     await expect(title(page)).toContainText('Gig Three');
     await expect(page.locator('.error-banner')).toHaveCount(0);
@@ -486,10 +555,10 @@ test.describe('gig preview from where you are', () => {
   test('eight quick Next clicks in normal playback: no failure banners, the last track plays', async ({ page }) => {
     await openBuffering(page);
     await play(page, 'Gig One');
-    for (let i = 0; i < 8; i++) await next(page); // the last four are past the end: no-ops
+    for (let i = 0; i < 8; i++) await next(page); // the last three are past the end: no-ops
 
-    await expect(row(page, 'Gig Four').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
-    await expect(title(page)).toContainText('Gig Four');
+    await expect(row(page, 'Gas Chamber').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
+    await expect(title(page)).toContainText('Gas Chamber');
     await page.waitForTimeout(500);
     await expect(page.locator('.error-banner')).toHaveCount(0);
   });
@@ -502,7 +571,7 @@ test.describe('gig preview from where you are', () => {
     for (const step of [next, next, next, previous, previous, next, next, previous]) await step(page);
 
     await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('3/4');
+    await expect(chip(page)).toContainText('3/6');
     await page.waitForTimeout(500);
     await expect(title(page)).toContainText('Gig Three');
     await expect(page.locator('.error-banner')).toHaveCount(0);
@@ -518,7 +587,7 @@ test.describe('gig preview from where you are', () => {
       await expect(title(page)).toContainText(expected);
     }
     await expect(row(page, 'Gig Three').locator('.play-button')).toHaveAttribute('data-state', 'playing', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('3/4');
+    await expect(chip(page)).toContainText('3/6');
     await expect(page.locator('.error-banner')).toHaveCount(0);
   });
 
@@ -526,7 +595,7 @@ test.describe('gig preview from where you are', () => {
     await slowMotion(page);
     await open(page);
     await previewButton(page).click();
-    for (const expected of ['2/4', '3/4', '4/4']) {
+    for (const expected of ['2/6', '3/6', '4/6', '5/6', '6/6']) {
       await next(page);
       await expect(chip(page)).toContainText(expected);
     }
@@ -549,11 +618,11 @@ test.describe('gig preview from where you are', () => {
     await expect(row(page, 'Gig One')).toBeVisible();
 
     await previewButton(page).click();
-    await previewStartedAt(page, '1/4', 'Gig One');
+    await previewStartedAt(page, '1/6', 'Gig One');
     await next(page);
 
     await expect(title(page)).toContainText('Gig Three', { timeout: 10_000 });
-    await expect(chip(page)).toContainText('3/4');
+    await expect(chip(page)).toContainText('3/6');
     await expect(page.locator('.error-banner')).toContainText('Skipped "Gig Two"');
     await expect(page.locator('.error-banner')).not.toContainText('rejected the token');
   });
@@ -572,7 +641,7 @@ test.describe('gig preview from where you are', () => {
     await play(page, 'Gig One'); // resume
     await expect.poll(() => paused(page)).toBe(false);
     expect(await position(page)).toBeLessThan(0.3);
-    await expect(chip(page)).toContainText('1/4');
+    await expect(chip(page)).toContainText('1/6');
   });
 });
 
@@ -601,23 +670,23 @@ test.describe('gig preview while browsing', () => {
     await slowMotion(page);
     await open(page);
     await page.locator('[data-preview-set]').click();
-    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/6');
 
     await navigate(page, `/playlist/${PSYTECH}`);
     await expect(page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' })).toBeVisible();
-    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/6');
     await expect(title(page)).toContainText('Gig One');
 
     await page.getByRole('button', { name: 'Next track' }).click();
     await expect(title(page)).toContainText('Gig Two');
-    await expect(page.locator('[data-preview-chip]')).toContainText('2/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('2/6');
   });
 
   test('playing a row of another playlist ends the preview and says why', async ({ page }) => {
     await slowMotion(page);
     await open(page);
     await page.locator('[data-preview-set]').click();
-    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/6');
 
     await navigate(page, `/playlist/${PSYTECH}`);
     await page.locator('#playlist-table tbody tr', { hasText: 'Beta Pulse' }).first().locator('.play-button').click();

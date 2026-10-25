@@ -9,7 +9,7 @@ import { mockDrive, seedToken } from './drive-mock';
  *
  * "Gig Night", in Traktor order (see unresolved-entries.spec.ts): rows 1 and 9
  * are both Gig One; the playable rows are 1, 3, 5, 7, 9, 10, so row 9 is 5/6 in
- * the queue. Gig One's load cue is at 0.3 s, its last loop ends at 1.5 s.
+ * the queue. Gig One's load cue is at 0.3 s, its loops are entrance loops, so it plays to the end.
  */
 const GIG_NIGHT = '0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f67';
 

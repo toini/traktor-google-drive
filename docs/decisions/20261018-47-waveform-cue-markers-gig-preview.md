@@ -318,7 +318,10 @@ function in `Models/`, so all of the rules below sit in one testable place:
 - **End = the end (`START+LEN`) of the last loop cue** (`TYPE=5`). "Last" is taken
   as *the loop that ends latest* (`max(START+LEN)`). In this collection that is the
   same loop as "the last by `START`" in every track (0 differ), and it does not
-  depend on how loops overlap.
+  depend on how loops overlap. **Only exit loops count** (amended 2026-10-25, see
+  the entrance-loop row below): a loop starting less than
+  `GigPreview.EntranceLoopWindowSeconds` (30 s) after the start, or overlapping
+  the start, is never the end.
 - **The end check runs in JS, not over interop.** `player.js`'s
   `play(fileId, url, startAt, stopAt, rebound)` arms the bound for a newly loaded
   file, or with `rebound` for the file already loaded (a preview starting on the
@@ -334,6 +337,7 @@ function in `Models/`, so all of the rules below sit in one testable place:
 |---|---|---|
 | **No load cue** (29%) | (a) start at 0; (b) start at the first non-grid cue; (c) start at hotcue 1 | **(a) 0.** That is where Traktor itself puts the playhead when there is no load marker. (b) looks clever, but 1,080 tracks have an ordinary cue *before* their load marker, so "first cue" is not a reliable intent signal. |
 | **No loop cue** (52%) | (a) play to the natural end; (b) play a fixed slice (e.g. 90 s) from start; (c) skip the track | **(a) to the end.** A gig preview should not silently cut tracks, and (c) loses tracks. Toni chose this (decision 2). A per-track cap is a one-line add if previews get too long. |
+| **Entrance loop: a loop right after the load cue** (added 2026-10-25) | (a) a fixed window: a loop starting less than 30 s after the start, or overlapping it, is an entrance loop; (b) only a loop overlapping the start; (c) use the loop's name or hotcue slot; (d) keep "latest loop wins" | **(a)**, Toni's rule: "If in the cue points there is a loop within 30 seconds, it's an entrance loop, not an exit loop. Don't switch track at that loop when in preview mode." His example is **"Gas Chamber (Original Mix)"**: hotcue 1 at the start, the load cue (2) about halfway, a 16-beat loop (3) right after it, hotcue 4 later. Preview ended at that loop a few seconds in, but that loop is where he mixes *in*. The window is `GigPreview.EntranceLoopWindowSeconds = 30`, measured from the preview start (the load cue, or 0 with none) to the loop's `START`. **The boundary is exclusive:** a loop starting exactly 30 s after is an exit loop. Only exit loops can end the preview; with none, the no-loop rule applies (to the end), and the player bar says "entrance loop ignored — to end". When an exit loop is used and an entrance loop was skipped, the bar adds "entrance loop ignored". The rule lives only in `RangeFor`, so local playback, the Cast tick check, "Preview from #N", the dimmed waveform and the range text all follow it. (b) misses Gas Chamber, whose loop starts just after the cue. (c) is not reliable: names are mostly `n.n.`. |
 | **Last loop ends at or before the start** (1 track) | (a) ignore the end and play to the end; (b) skip; (c) swap start and end | **(a)**, with the reason shown in the player bar. It is almost certainly a stale loop. |
 | **Loop end past the track's duration** | clamp, or ignore | **Treated as "to the end"**, so the element's own `ended` event advances, which is more reliable than waiting for a `timeupdate` at the exact last sample. |
 | **User seeks past the end while previewing** | (a) the seek wins: disarm the end bound for this track and let it play on; (b) advance immediately; (c) clamp the seek to the end | **(a).** Seeking past the range is a deliberate "let me hear this bit". Jumping to the next track would fight the user. The bound re-arms on the next track. Seeking backwards, or before the start, just works. |
@@ -392,6 +396,12 @@ the existing re-arm already covers that.
   trivial, so every rule in §4 is instead exercised end to end through the "Gig
   Prep" fixture playlist: one track per edge case, each with a 2-second
   `PLAYTIME`, so the whole preview runs in seconds.
+  *Update 2026-10-25:* the entrance-loop rule needs tracks longer than 30 s, so
+  `tests/unit` now holds an xUnit project that links `CueMarkers.cs` and
+  `TrackTime.cs` as source rather than referencing the WASM project, which made it
+  trivial after all. It covers every range rule, including the 30 s boundary.
+  Gig Prep gained "Gig Exit" (40 s, an entrance and an exit loop) and a "Gas
+  Chamber"-shaped track (240 s), which the mock serves as WAVs of that length.
 - **Not covered by tests:** a track that fails mid-preview (the mock fails every
   file at once or none), and seeking past the end while previewing. Both are
   implemented as the table above says.

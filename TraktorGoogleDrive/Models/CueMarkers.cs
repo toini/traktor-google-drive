@@ -79,12 +79,20 @@ public record PreviewRange(double Start, double? End, string? Note)
 }
 
 /// <summary>
-/// The gig-preview rule from ADR 20261018-47: start at the earliest load cue,
-/// stop at the end of the loop that ends latest, with defaults for the cases a
-/// real collection is full of.
+/// The gig-preview rule from ADR 20261018-47 §4: start at the earliest load cue,
+/// stop at the end of the exit loop that ends latest, with defaults for the cases
+/// a real collection is full of.
 /// </summary>
 public static class GigPreview
 {
+    /// <summary>
+    /// A loop that starts less than this many seconds after the preview start, or
+    /// that overlaps the start, is where Toni mixes the track IN (an entrance
+    /// loop), so it never ends the preview. A loop starting exactly this far after
+    /// the start already counts as an exit loop.
+    /// </summary>
+    public const double EntranceLoopWindowSeconds = 30;
+
     public static PreviewRange RangeFor(Track? track, double durationSeconds)
     {
         var cues = track?.CuePoints ?? [];
@@ -98,27 +106,36 @@ public static class GigPreview
         var start = hasLoad ? load : 0;
         if (durationSeconds > 0 && start >= durationSeconds) start = 0;
 
-        var loopEnds = cues.Where(c => c.Type == CuePointType.Loop && c.Length is > 0)
-            .Select(c => (c.Start + c.Length!.Value) / 1000.0)
+        var loops = cues.Where(c => c.Type == CuePointType.Loop && c.Length is > 0)
+            .Select(c => (Start: c.Start / 1000.0, End: (c.Start + c.Length!.Value) / 1000.0))
             .ToList();
 
-        var startNote = hasLoad ? null : "no load cue";
+        // Exit loops start at least the window after the start. Everything else
+        // either overlaps the start or starts just after it (an entrance loop), or
+        // ends at or before it (almost certainly stale).
+        var exitLoops = loops.Where(l => l.Start - start >= EntranceLoopWindowSeconds).ToList();
+        var hasEntrance = loops.Any(l => l.Start - start < EntranceLoopWindowSeconds && l.End > start);
 
-        if (loopEnds.Count == 0)
+        var startNote = hasLoad ? null : "no load cue";
+        var entranceNote = hasEntrance ? "entrance loop ignored" : null;
+
+        if (loops.Count == 0)
             return new PreviewRange(start, null, Join(startNote, "no loop — to end"));
 
-        var end = loopEnds.Max();
+        if (exitLoops.Count == 0)
+            return new PreviewRange(start, null, Join(startNote, hasEntrance
+                ? "entrance loop ignored — to end"
+                // Almost certainly a stale loop; playing on is safer than skipping.
+                : "loop ends before load — to end"));
 
-        // Almost certainly a stale loop; playing on is safer than skipping.
-        if (end <= start)
-            return new PreviewRange(start, null, Join(startNote, "loop ends before load — to end"));
+        var end = exitLoops.Max(l => l.End);
 
         // Past the end is the same as "to the end", and the element's own ended
         // event is the reliable signal for that.
         if (durationSeconds > 0 && end >= durationSeconds)
-            return new PreviewRange(start, null, startNote);
+            return new PreviewRange(start, null, Join(startNote, entranceNote));
 
-        return new PreviewRange(start, end, startNote);
+        return new PreviewRange(start, end, Join(startNote, entranceNote));
     }
 
     private static string? Join(string? a, string? b) =>

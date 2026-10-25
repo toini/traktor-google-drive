@@ -260,16 +260,16 @@ test.describe('token expiry in gig preview', () => {
 
     await page.locator('[data-preview-set]').click();
     await expect(signIn(page)).toBeVisible();
-    await expect(page.locator('[data-preview-chip]')).toContainText('1/4');
-    await expect(range(page)).toHaveAttribute('data-end', '1.5');
+    await expect(page.locator('[data-preview-chip]')).toContainText('1/6');
+    await expect(range(page)).toHaveAttribute('data-start', '0.3');
 
     valid = new Set([RENEWED]);
     await setGisNext(page, RENEWED);
     await signIn(page).click();
-    // From the load cue, not from 0, and the end bound still advances it.
+    // From the load cue, not from 0, and the preview still advances at its end.
     await expect.poll(async () => (await audio(page)).current).toBeGreaterThanOrEqual(0.3);
     await expect(title(page)).toContainText('Gig Two', { timeout: 10_000 });
-    await expect(range(page)).toHaveAttribute('data-end', '0.6');
+    await expect(range(page)).toContainText('entrance loop ignored');
   });
 
   test('a token that ran out between tracks: sign in starts the next one with its range', async ({ page }) => {
@@ -291,14 +291,14 @@ test.describe('token expiry in gig preview', () => {
     // The advance cannot get a token silently: it waits on Gig Two, preview intact.
     await expect(signIn(page)).toBeVisible({ timeout: 10_000 });
     await expect(title(page)).toContainText('Gig Two');
-    await expect(page.locator('[data-preview-chip]')).toContainText('2/4');
+    await expect(page.locator('[data-preview-chip]')).toContainText('2/6');
     await expect(range(page)).toHaveAttribute('data-start', '0');
-    await expect(range(page)).toHaveAttribute('data-end', '0.6');
+    await expect(range(page)).toContainText('no load cue, entrance loop ignored');
 
     await setGisNext(page, RENEWED);
     await signIn(page).click();
     await expect(signIn(page)).toHaveCount(0);
-    // Gig Two plays to its 0.6 s bound, then the preview moves on.
+    // Gig Two plays to its end (its loop is an entrance loop), then the preview moves on.
     await expect(title(page)).toContainText('Gig Three', { timeout: 10_000 });
     await expect(range(page)).toHaveAttribute('data-start', '0.4');
   });
