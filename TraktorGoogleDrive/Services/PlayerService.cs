@@ -214,6 +214,25 @@ public class PlayerService : IAsyncDisposable
     public bool IsPlaying(string fileId) => CurrentFileId == fileId && State == PlaybackState.Playing;
     public bool IsLoading(string fileId) => CurrentFileId == fileId && State == PlaybackState.Loading;
 
+    /// <summary>The loaded track is this row and it is playing. Row-aware: see <see cref="IsCurrentRow"/>.</summary>
+    public bool IsPlaying(FileEntry row) => IsCurrentRow(row) && State == PlaybackState.Playing;
+    public bool IsLoading(FileEntry row) => IsCurrentRow(row) && State == PlaybackState.Loading;
+
+    /// <summary>
+    /// Whether <paramref name="row"/> is the loaded track's row. A playlist can
+    /// list the same Drive file twice, so the file id alone is not enough: of
+    /// the queue's rows only the one that was played counts. A row outside the
+    /// queue (another playlist's page) still counts by its file, as does any row
+    /// when the player does not know which row it is on (a remote player, or a
+    /// Cast session whose media another sender changed).
+    /// </summary>
+    public bool IsCurrentRow(FileEntry row)
+    {
+        if (string.IsNullOrEmpty(row.DriveFileId) || CurrentFileId != row.DriveFileId) return false;
+        if (Remote is not null || _file is null || _file.DriveFileId != row.DriveFileId) return true;
+        return ReferenceEquals(_file, row) || !_queue.Contains(row);
+    }
+
     private async Task<IJSObjectReference> ModuleAsync()
     {
         if (_module is not null) return _module;
@@ -255,7 +274,11 @@ public class PlayerService : IAsyncDisposable
         _offerPlaylist = null;
     }
 
-    private void AdoptOffer()
+    /// <param name="picked">
+    /// The row being played, if that is why the offer is adopted: when it is a
+    /// copy of the loaded track, the loaded track becomes that row.
+    /// </param>
+    private void AdoptOffer(FileEntry? picked = null)
     {
         if (_offerPlaylist is null) return;
 
@@ -266,23 +289,40 @@ public class PlayerService : IAsyncDisposable
         if (_preview && _queuePlaylist is not null && _queuePlaylist != _offerPlaylist)
             EndPreview("another playlist started");
 
+        var samePlaylist = _queuePlaylist == _offerPlaylist;
         _queue = _offer;
         _queuePlaylist = _offerPlaylist;
 
         var loadedHere = _cast.IsConnected ? _cast.CurrentFileId : _localFileId;
         if (_file is null && loadedHere is not null)
             _file = _queue.FirstOrDefault(f => f.DriveFileId == loadedHere);
+        else if (_file is not null && !_queue.Contains(_file))
+            _file = picked is not null && picked.DriveFileId == _file.DriveFileId
+                ? picked
+                : RowFor(_file, samePlaylist ? _file.PlaylistIndex : null) ?? _file;
 
         // A re-sort moves the current row; remember where it now sits.
         if (_file is not null && IndexOf(_file) is var moved and >= 0) _lastIndex = moved;
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// The queue's row for the loaded track once the page rebuilt its rows (a
+    /// reload of the same playlist gives new objects): the one at the same
+    /// playlist position, so a track listed twice stays on the copy that was
+    /// played, otherwise its first copy. Null when the queue lacks the file.
+    /// </summary>
+    private FileEntry? RowFor(FileEntry file, int? playlistIndex)
+    {
+        var copies = _queue.Where(f => f.DriveFileId == file.DriveFileId).ToList();
+        return copies.FirstOrDefault(f => f.PlaylistIndex == playlistIndex) ?? copies.FirstOrDefault();
+    }
+
     /// <summary>Playing a row of the offered playlist makes it the queue.</summary>
     private void AdoptOfferFor(FileEntry file)
     {
         if (_offerPlaylist is not null && _offerPlaylist != _queuePlaylist && _offer.Contains(file))
-            AdoptOffer();
+            AdoptOffer(file);
     }
 
     public async Task LoadPreferencesAsync()
@@ -441,7 +481,12 @@ public class PlayerService : IAsyncDisposable
 
         // `token` is whatever the page held when it rendered, which can be over an
         // hour old by now; every load below reads the current one instead.
-        if ((_cast.IsConnected ? _cast.CurrentFileId : _localFileId) != file.DriveFileId)
+        // Another row of the same file (a playlist that lists it twice) is a
+        // different pick, not a pause: it restarts from that row, and
+        // Next/Previous continue from there.
+        var otherRow = _file is not null && _file.DriveFileId == file.DriveFileId && !ReferenceEquals(_file, file)
+            && _queue.Contains(file);
+        if ((_cast.IsConnected ? _cast.CurrentFileId : _localFileId) != file.DriveFileId || otherRow)
         {
             await PlayEntryAsync(file);
             return;
