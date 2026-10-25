@@ -9,6 +9,10 @@
 
 main {
     flex: 1;
+    /* A flex item will not shrink below its content by default, so a wide
+       table pushed main past the window and the whole page scrolled sideways.
+       With this, the table scrolls inside its own container instead. */
+    min-width: 0;
     background-color: #2a2a2a;
 }
 

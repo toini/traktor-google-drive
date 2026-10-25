@@ -41,10 +41,13 @@
     border: 1px solid #30363d;
 }
 
+/* Fits the default columns at 1280px (about 970px right of the sidebar), so
+   the page itself never scrolls sideways. Narrower than this, the table
+   scrolls inside .table-responsive instead. */
 #playlist-table {
     table-layout: fixed;
     width: 100%;
-    min-width: 1100px;
+    min-width: 900px;
     background-color: #1a1a1a;
     color: #e6e6e6;
     margin-bottom: 0;
@@ -58,11 +61,29 @@
     font-weight: 600;
     text-transform: uppercase;
     font-size: 11px;
-    letter-spacing: 0.06em;
-    padding: 10px 12px;
+    letter-spacing: 0.04em;
+    padding: 10px;
     position: relative;
     user-select: none;
     text-align: left;
+    /* One line, always: a narrow column used to wrap the sort arrow (or the
+       second word) onto a second line, and the whole row grew to 54px. */
+    white-space: nowrap;
+    vertical-align: bottom;
+}
+
+/* The label gives way (with an ellipsis, full text in its title); the arrow
+   keeps its slot, so sorting never changes the label's width. */
+#playlist-table th .th-inner {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+}
+
+#playlist-table th .th-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #playlist-table td {
@@ -98,6 +119,7 @@
 
 .sort-indicator {
     display: inline-block;
+    flex: none;
     width: 10px;
     margin-left: 3px;
     color: #ff6600;
@@ -309,8 +331,9 @@
     background: #ff6600;
 }
 
+/* "2026-10-25" (about 70px) plus padding; the header "Added" plus arrow is less. */
 .col-added {
-    width: 108px;
+    width: 96px;
     text-align: right;
     font-variant-numeric: tabular-nums;
     color: #8b949e;
@@ -395,6 +418,24 @@
 .set-track-artist { color: #8b949e; }
 .set-track-artist::before { content: " — "; }
 .set-track-time { color: #6e7681; float: right; font-variant-numeric: tabular-nums; }
+
+/* Unresolved entries and separators, dim as in the table. */
+.set-tracklist li.set-unresolved,
+.set-tracklist li.set-unresolved .set-track-title { color: #8b949e; }
+
+.set-tracklist li.set-separator {
+    color: #6e7681;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.set-tracklist li.set-separator .separator-label {
+    display: inline-block;
+    padding-left: 4px;
+    border-bottom: 1px solid #484f58;
+    min-width: 60%;
+}
 
 @media (max-width: 1100px) {
     .set-tracklist { columns: 1; }
@@ -543,9 +584,9 @@
 
 /* Rating (INFO RANKING), as Traktor shows it: filled stars in its orange,
    the rest dim. */
-/* Wide enough for five stars and the header's sort arrow. */
+/* Wide enough for five stars (70px) and the header's sort arrow. */
 .col-rating {
-    width: 108px;
+    width: 96px;
 }
 
 .rating-stars {
