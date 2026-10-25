@@ -48,6 +48,23 @@
         </div>
 
         <div class="player-body">
+            @if (Player.Buffer is { } notes && (notes.NextReady || notes.Network != ""))
+            {
+                @* Floats right of the title, so the title line keeps its height. *@
+                <div class="player-buffer-notes">
+                    @if (notes.Network != "")
+                    {
+                        <span class="player-net" data-network-status="@notes.Network" role="status">
+                            @(notes.Network == "reconnecting" ? "Buffering, reconnecting…" : "Buffering…")
+                        </span>
+                    }
+                    @if (notes.NextReady)
+                    {
+                        <span class="player-next-ready" data-next-ready
+                              title="The next track is downloaded and plays without network">Next ✓ offline</span>
+                    }
+                </div>
+            }
             <div class="player-title">
                 @if (Player.PreviewActive)
                 {
@@ -85,6 +102,16 @@
                        value="@((int)(Fraction * 1000))"
                        aria-label="Seek"
                        @onchange="OnSeekInput" />
+            }
+            @if (Player.Buffer is { State: not "none" } buffer)
+            {
+                @* How much of the track is on this device: full means it plays
+                   without network. *@
+                <div class="player-buffer" data-buffer-state="@buffer.State"
+                     data-buffer-percent="@((int)(buffer.Fraction * 100))"
+                     title="@BufferTitle(buffer)">
+                    <div class="player-buffer-fill" style="width: @((buffer.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                </div>
             }
         </div>
 
@@ -127,7 +154,14 @@
         : Player.RemoteBlocked ? "it needs a click there before it can play"
         : null;
 
-    double Fraction => Player.Duration > 0 ? Math.Clamp(Player.CurrentTime / Player.Duration, 0, 1) : 0;
+    static string BufferTitle(BufferStatus b) => b.State switch
+    {
+        "cached" => "Downloaded: plays without network",
+        "downloading" => $"Downloading for offline play: {(int)(b.Fraction * 100)}%",
+        _ => "Streaming (too large to keep on this device)",
+    };
+
+    double Fraction =>Player.Duration > 0 ? Math.Clamp(Player.CurrentTime / Player.Duration, 0, 1) : 0;
 
     protected override void OnInitialized() => Player.Changed += OnChanged;
 

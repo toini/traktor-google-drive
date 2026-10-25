@@ -540,7 +540,9 @@ test.describe('gig preview from where you are', () => {
     await mockDrive(page);
     // Gig Two arrives as bytes no decoder accepts: MEDIA_ERR_SRC_NOT_SUPPORTED,
     // the same code a 401 body produces, but the proxy said 200.
-    await page.route((u) => u.pathname.startsWith('/api/proxy/drive/drive-gig-two'), (route) =>
+    // Both ways in: the proxy stream and the direct whole-file download.
+    await page.route((u) => u.pathname.startsWith('/api/proxy/drive/drive-gig-two')
+      || u.pathname === '/drive/v3/files/drive-gig-two', (route) =>
       route.fulfill({ status: 200, contentType: 'audio/flac', body: 'this is not audio at all' }));
     await seedToken(page);
     await page.goto(`/playlist/${GIG}`);

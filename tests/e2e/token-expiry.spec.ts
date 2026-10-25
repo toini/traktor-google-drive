@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mockDrive, seedToken, FAKE_TOKEN, type DriveCall, type MockOptions } from './drive-mock';
+import { mockDrive, noPrefetch, seedToken, FAKE_TOKEN, type DriveCall, type MockOptions } from './drive-mock';
 
 /**
  * Local playback across the ~1h Google token lifetime.
@@ -107,6 +107,12 @@ async function expectPlayingPast(page: Page, seconds: number) {
 }
 
 test.describe('token expiry during local playback', () => {
+  // These are about the proxy stream, which a set too big for the whole-file
+  // cache still plays from. With the cache on, the 5 MB fixture is in memory
+  // long before the seek that is meant to fetch a slice with an expired token.
+  // Renewal during the whole-file download: prefetch.spec.ts.
+  test.beforeEach(({ page }) => noPrefetch(page));
+
   test('media URLs carry no token: the proxy gets it from a cookie', async ({ page }) => {
     const calls = await mockDrive(page, LONG);
     await seedToken(page);

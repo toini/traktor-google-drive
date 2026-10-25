@@ -2,6 +2,8 @@
 // possible because every AudioTrack owned its own Audio(); with a single
 // element it is unrepresentable.
 
+import * as cache from './prefetch.js';
+
 let audio = null;
 let dotnet = null;
 let currentId = null;
@@ -29,6 +31,26 @@ let stalled = null;        // { at, wasPlaying } while waiting for a sign-in
 let generation = 0;
 let switching = false; // a playing element is being given a new source
 
+// Where the element's bytes come from. 'stream' is the proxy URL, fetched in
+// slices as it plays; 'cache' is the whole file, downloaded by prefetch.js,
+// which needs no network at all. A track starts streaming and moves to the
+// cache, at the same position, once its download completes.
+let source = 'stream';
+let swapping = false;           // moving the loaded track from stream to cache
+const cacheFailed = new Set();  // files whose cached copy would not play: stream them
+
+// A network drop while streaming. The element gives up on a failed slice (or
+// waits on one forever); this reloads at the same position, with backoff, until
+// it plays again or the download finishes and takes over.
+let reconnect = null;           // { attempt, at, timer }
+let waitingSince = null;        // the element has been starved of data since
+let waitTimer = null;
+const SHOW_BUFFERING_MS = 1_500;
+const STALL_RELOAD_MS = 15_000;
+const MAX_RECONNECT_MS = 15_000;
+let net = '';                   // '' | 'buffering' | 'reconnecting'
+let nextId = null;              // the planned next track, for the "ready offline" sign
+
 function load(url) {
     generation++;
     switching = !audio.paused;
@@ -51,11 +73,20 @@ const reportProgress = (force) => {
 export function init(dotNetRef) {
     dotnet = dotNetRef;
     audio = new Audio();
-    audio.preload = 'metadata';
+    // Read ahead as far as the browser will; prefetch.js does the rest.
+    audio.preload = 'auto';
 
-    audio.addEventListener('loadstart', () => { switching = false; report('loading'); });
-    audio.addEventListener('canplay', () => { report('ready'); reportProgress(true); });
+    // A swap to the cached copy is the same track at the same place: no spinner.
+    audio.addEventListener('loadstart', () => { switching = false; if (!swapping) report('loading'); });
+    audio.addEventListener('loadedmetadata', () => { swapping = false; });
+    audio.addEventListener('canplay', () => {
+        report('ready');
+        reportProgress(true);
+        if (!wantPlaying) settleNetwork();
+    });
+    audio.addEventListener('waiting', () => { if (wantPlaying) startWaiting(); });
     audio.addEventListener('timeupdate', () => {
+        if (waitingSince != null && !audio.paused && audio.readyState >= 3) settleNetwork();
         if (endAt != null && audio.currentTime >= endAt) {
             endAt = null; // once per track
             report('previewEnd');
@@ -75,11 +106,142 @@ export function init(dotNetRef) {
     });
     audio.addEventListener('durationchange', () => reportProgress(true));
     audio.addEventListener('seeked', () => reportProgress(true));
-    audio.addEventListener('playing', () => { retriedAuth = false; report('playing'); });
+    audio.addEventListener('playing', () => { retriedAuth = false; settleNetwork(); report('playing'); });
     // Switching tracks pauses the old one on the way; that is not the user pausing.
     audio.addEventListener('pause', () => { if (!switching) report('paused'); });
     audio.addEventListener('ended', () => report('ended'));
     audio.addEventListener('error', () => { onError(); });
+
+    cache.subscribe(onCacheChanged);
+    addEventListener('online', () => { if (reconnect) fireReconnect(); });
+}
+
+/* ---------- whole-file cache ---------- */
+
+/** The cached copy when there is one (and it has not failed to play), else the stream. */
+function sourceFor(fileId, streamUrl) {
+    const local = cacheFailed.has(fileId) ? null : cache.objectUrl(fileId);
+    source = local ? 'cache' : 'stream';
+    return local ?? streamUrl;
+}
+
+/**
+ * The current and next track to have downloaded, from PlayerService:
+ * `{ id, bytes }` each, or null. `bytes` is the NML's estimate, so a set too
+ * big for the cache is never started.
+ */
+export function plan(current, next) {
+    nextId = next?.id ?? null;
+    cache.setPlan([current, next].filter(Boolean));
+    reportBuffer(true);
+}
+
+/**
+ * Moves the loaded track onto its downloaded copy at the same position and in
+ * the same play state. After this a dropped connection cannot touch it.
+ */
+function swapToCache() {
+    if (!audio || !currentId || source === 'cache' || stalled || cacheFailed.has(currentId)) return;
+    const local = cache.objectUrl(currentId);
+    if (!local) return;
+    // Mid-seek the position is not settled yet; swap once it is.
+    if (audio.seeking) { audio.addEventListener('seeked', swapToCache, { once: true }); return; }
+
+    const at = pendingStart ?? reconnect?.at ?? audio.currentTime;
+    const play = wantPlaying;
+    clearReconnect();
+    swapping = true;
+    source = 'cache';
+    pendingStart = at > 0 ? at : null;
+    load(local);
+    const gen = generation;
+    if (play) audio.play().catch((e) => playFailed(e, gen));
+    reportBuffer(true);
+}
+
+function onCacheChanged(id) {
+    if (currentId && source === 'stream' && cache.blob(currentId)) swapToCache();
+    reportBuffer(false);
+}
+
+/* ---------- buffering and reconnecting ---------- */
+
+function startWaiting() {
+    if (waitingSince != null) return;
+    waitingSince = performance.now();
+    clearTimeout(waitTimer);
+    waitTimer = setTimeout(() => {
+        if (waitingSince == null) return;
+        setNet(reconnect ? 'reconnecting' : 'buffering');
+        // A connection that hangs instead of failing never raises an error.
+        waitTimer = setTimeout(() => {
+            if (waitingSince == null || !wantPlaying || source === 'cache') return;
+            scheduleReconnect(audio.currentTime);
+        }, STALL_RELOAD_MS - SHOW_BUFFERING_MS);
+    }, SHOW_BUFFERING_MS);
+}
+
+/** Data is flowing again (or nobody is waiting for it). */
+function settleNetwork() {
+    waitingSince = null;
+    clearTimeout(waitTimer);
+    clearReconnect();
+    setNet('');
+}
+
+function clearReconnect() {
+    if (reconnect) clearTimeout(reconnect.timer);
+    reconnect = null;
+}
+
+/** Reloads the stream at `at` after a backoff; the browser coming online cuts it short. */
+function scheduleReconnect(at) {
+    const attempt = (reconnect?.attempt ?? 0) + 1;
+    if (reconnect) clearTimeout(reconnect.timer);
+    const delay = Math.min(MAX_RECONNECT_MS, 500 * 2 ** (attempt - 1));
+    reconnect = { attempt, at, timer: setTimeout(fireReconnect, delay) };
+    setNet('reconnecting');
+}
+
+function fireReconnect() {
+    const r = reconnect;
+    if (!r || !audio || !currentId) return;
+    clearTimeout(r.timer);
+    // The download may have finished meanwhile: then the network is moot.
+    if (cache.blob(currentId) && !cacheFailed.has(currentId)) { swapToCache(); return; }
+    // Kept until the element plays (or has data, when paused), so a reload that
+    // fails again backs off further. One that hangs is retried regardless.
+    reconnect = { ...r, timer: setTimeout(() => { if (reconnect) scheduleReconnect(r.at); }, STALL_RELOAD_MS) };
+    reload(r.at, wantPlaying, true);
+}
+
+function setNet(value) {
+    if (net === value) return;
+    net = value;
+    reportBuffer(true);
+}
+
+let lastBuffer = '';
+function reportBuffer(force) {
+    if (!dotnet) return;
+    const s = currentId ? cache.status(currentId) : null;
+    const state = !currentId ? 'none'
+        : source === 'cache' ? 'cached'
+        : !s || s.state === 'skipped' || s.state === 'failed' ? 'stream'
+        : s.state === 'complete' ? 'cached'
+        : 'downloading';
+    const fraction = state === 'cached' ? 1 : s?.total ? Math.min(1, s.received / s.total) : 0;
+    const nextReady = !!nextId && nextId !== currentId && cache.blob(nextId) != null;
+    // Two-percent steps are plenty for a progress line, and keep interop quiet.
+    const key = `${currentId}|${state}|${Math.floor(fraction * 50)}|${nextReady}|${net}`;
+    if (key === lastBuffer && !force) return;
+    lastBuffer = key;
+    dotnet.invokeMethodAsync('OnBufferChanged', state, fraction, nextReady, net);
+}
+
+/** What the cache and the connection look like now, for tests and diagnostics. */
+export function bufferState() {
+    return { source, net, reconnecting: !!reconnect, cache: cache.debug() };
 }
 
 /**
@@ -98,11 +260,12 @@ async function probe(url) {
 }
 
 /** Loads the same URL again at `at`. The preview bound (endAt) is left alone. */
-function reload(at, play) {
+function reload(at, play, keepReconnect) {
     if (!audio || !currentUrl) return;
+    if (!keepReconnect) clearReconnect();
     pendingStart = at > 0 ? at : null;
     wantPlaying = play;
-    load(currentUrl);
+    load(sourceFor(currentId, currentUrl));
     const gen = generation;
     if (play) {
         audio.play().catch((e) => playFailed(e, gen));
@@ -121,13 +284,30 @@ async function onError() {
     if (!id || !url) { report('error'); return; }
 
     // Where it stopped, before anything reloads: the position to resume at.
-    const at = pendingStart ?? audio.currentTime;
+    const at = pendingStart ?? reconnect?.at ?? audio.currentTime;
     const wasPlaying = wantPlaying;
+    const code = audio.error.code;
+
+    // The downloaded copy would not play: stream it instead, from here.
+    if (source === 'cache') {
+        cacheFailed.add(id);
+        swapping = false;
+        reload(at, wasPlaying);
+        return;
+    }
 
     // Also how an undecodable file (MEDIA_ERR_SRC_NOT_SUPPORTED, the same code a
     // 401 body gives) is told apart from an expired token: the proxy says 200.
     const status = await probe(url);
     if (gen !== generation) return; // another load started meanwhile
+
+    // The network, not the file: no answer at all, or a fetch that failed on a
+    // file the proxy still serves. Reconnect at the same place, however long
+    // the tunnel. (A bad file fails as MEDIA_ERR_SRC_NOT_SUPPORTED instead.)
+    if (status === 0 || (code === MediaError.MEDIA_ERR_NETWORK && (status < 400 || status >= 500))) {
+        scheduleReconnect(at);
+        return;
+    }
     if (status !== 401 && status !== 403) { report('error'); return; }
 
     if (!retriedAuth) {
@@ -173,9 +353,18 @@ export async function play(fileId, url, startAt, stopAt, rebound) {
         currentId = fileId;
         stalled = null;
         retriedAuth = false;
-        load(url);
+        swapping = false;
+        settleNetwork();
+        load(sourceFor(fileId, url));
+        reportBuffer(true);
     } else if (stalled) {
         resume();
+        return;
+    } else if (reconnect || audio.error) {
+        // Paused while reconnecting, or a dead stream: continue from where it was.
+        if (rebound) endAt = stopAt ?? null;
+        const at = rebound && startAt != null ? startAt : reconnect?.at ?? audio.currentTime;
+        reload(at, true);
         return;
     } else if (rebound) {
         // The file is already loaded: the bounds were passed on purpose, for gig
@@ -225,7 +414,10 @@ export function cue(fileId, url, position) {
     stalled = null;
     retriedAuth = false;
     wantPlaying = false;
-    load(url);
+    swapping = false;
+    settleNetwork();
+    load(sourceFor(fileId, url));
+    reportBuffer(true);
     // Registered after init's listener, so the pending seek has been applied.
     audio.addEventListener('loadedmetadata', () => {
         if (currentId === fileId && audio.paused) report('paused');
@@ -234,6 +426,11 @@ export function cue(fileId, url, position) {
 
 export function pause() {
     wantPlaying = false;
+    // A pending reconnect stays, so play continues from its position; the
+    // "buffering" sign goes, since nothing is waiting for data any more.
+    waitingSince = null;
+    clearTimeout(waitTimer);
+    if (!reconnect) setNet('');
     audio?.pause();
 }
 
@@ -249,7 +446,14 @@ export function stop() {
     wantPlaying = false;
     endAt = null;
     pendingStart = null;
+    swapping = false;
+    source = 'stream';
+    nextId = null;
+    settleNetwork();
+    // Downloads stop; finished files stay, for a quick replay.
+    cache.stopAll();
     report('idle');
+    reportBuffer(true);
 }
 
 /** Arms or clears the preview end for the loaded file. */

@@ -362,6 +362,8 @@ test.describe('remote control when the laptop\'s Google session runs out', () =>
       name: 'Laptop · Chrome',
       // Small slices, so a far seek needs a fresh request, which then 401s.
       mock: { maxSliceBytes: 64 * 1024, acceptToken: () => accepted },
+      // Streaming only: a track downloaded whole would never meet the 401.
+      init: () => localStorage.setItem('player:prefetch', 'off'),
     });
     const tablet = await device(browser, { name: 'Tablet · Chrome' });
     await playFirstRow(laptop.page);

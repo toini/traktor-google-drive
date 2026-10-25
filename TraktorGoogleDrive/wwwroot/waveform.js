@@ -12,6 +12,10 @@
 // file size, so a 2-hour MP3 set never gets here.
 //
 // Either way the peaks are cached in IndexedDB, so this happens once per file.
+// And when the player is downloading the whole file anyway (prefetch.js), both
+// read that copy instead of fetching their own.
+
+import * as cache from './prefetch.js';
 
 const DB_NAME = 'traktor-waveforms';
 const STORE = 'peaks';
@@ -83,7 +87,11 @@ async function tokenAfterRefusal(usedToken) {
 
 const refused = (status) => status === 401 || status === 403;
 
-async function readRange(url, start, end) {
+async function readRange(url, start, end, fileId) {
+    // Already downloaded whole for playback (prefetch.js): read it from memory.
+    const local = fileId ? cache.blob(fileId) : null;
+    if (local) return new DataView(await local.slice(start, end + 1).arrayBuffer());
+
     const headers = { Range: `bytes=${start}-${end}` };
     // The proxy takes the token from the cookie; note which one this read used.
     const used = window.authGetToken?.() ?? null;
@@ -166,7 +174,7 @@ export async function computePeaks(url, fileId, dotNetRef) {
     const cached = await cachedPeaks(fileId);
     if (cached) return cached;
 
-    const header = parseHeader(await readRange(url, 0, 4095));
+    const header = parseHeader(await readRange(url, 0, 4095, fileId));
     if (header.format !== 1 && header.format !== 3) throw new Error(`unsupported WAV format ${header.format}`);
 
     const frame = (header.bits / 8) * header.channels;
@@ -184,7 +192,7 @@ export async function computePeaks(url, fileId, dotNetRef) {
 
     let done = 0;
     const peaks = await mapLimit(offsets, CONCURRENCY, async (start) => {
-        const view = await readRange(url, start, start + WINDOW_BYTES - 1);
+        const view = await readRange(url, start, start + WINDOW_BYTES - 1, fileId);
         const p = peakOf(view, header);
         if (++done % 40 === 0) dotNetRef?.invokeMethodAsync('OnPeakProgress', done / offsets.length);
         return p;
@@ -226,6 +234,35 @@ async function concatRest(head, used, value, reader) {
 }
 
 /**
+ * The bytes the player's whole-file download (prefetch.js) fetched for this
+ * track, once it finishes, or null when it is not downloading it. Then the file
+ * crosses the network once, for both playback and the picture.
+ */
+async function downloadedForPlayback(fileId, onProgress) {
+    if (!cache.status(fileId)) return null;
+    const unsubscribe = cache.subscribe((id) => {
+        const s = id === fileId ? cache.status(fileId) : null;
+        if (s?.total) onProgress(Math.min(1, s.received / s.total));
+    });
+    try {
+        const blob = await cache.whenComplete(fileId);
+        return blob ? await blob.arrayBuffer() : null;
+    } finally {
+        unsubscribe();
+    }
+}
+
+async function downloadForWaveform(directUrl, token, onProgress) {
+    let res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (refused(res.status)) {
+        const renewed = await tokenAfterRefusal(token);
+        if (renewed) res = await fetch(directUrl, { headers: { Authorization: `Bearer ${renewed}` } });
+    }
+    if (!res.ok) throw new Error(`download for waveform: HTTP ${res.status}`);
+    return await readWithProgress(res, onProgress);
+}
+
+/**
  * Peaks for a compressed file: one direct download from Drive, decoded at a low
  * sample rate. `directUrl` is the googleapis.com media URL, which takes the
  * token as a header — unlike the proxy it costs no Cloud Run egress.
@@ -234,16 +271,10 @@ export async function computeCompressedPeaks(directUrl, token, fileId, dotNetRef
     const cached = await cachedPeaks(fileId);
     if (cached) return cached;
 
-    let res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
-    if (refused(res.status)) {
-        const renewed = await tokenAfterRefusal(token);
-        if (renewed) res = await fetch(directUrl, { headers: { Authorization: `Bearer ${renewed}` } });
-    }
-    if (!res.ok) throw new Error(`download for waveform: HTTP ${res.status}`);
-
     // Download is the slow half; report it as the first 90%.
-    const bytes = await readWithProgress(res,
-        (f) => dotNetRef?.invokeMethodAsync('OnPeakProgress', f * 0.9));
+    const onProgress = (f) => dotNetRef?.invokeMethodAsync('OnPeakProgress', f * 0.9);
+    const bytes = await downloadedForPlayback(fileId, onProgress)
+        ?? await downloadForWaveform(directUrl, token, onProgress);
 
     // OfflineAudioContext resamples to its own rate while decoding, which is
     // what keeps memory bounded: 8 kHz is ~1/5 of the samples at 44.1 kHz.
