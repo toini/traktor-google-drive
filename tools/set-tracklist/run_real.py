@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
-"""Run the detector on a real recording once its audio is local, and grade it against the
-history ground truth.
+"""Run the detector on a real recording against one of its playlists and print a tracklist
+Toni can check by ear: start time, artist - title, confidence, and the candidates judged
+"not played".
 
-Files are found by base name anywhere under --audio-dir (a Drive for desktop folder, or an
-unzipped download). Candidate lists come from the collection's playlists, as in the app.
+Track files are found by base name under --audio-dir (a Drive for desktop folder or an
+unzipped download). The same file in two folders (same base name) counts as one candidate.
 
-The signed boundary error (detected minus history, median over boundaries) also measures the
-anchor: history deck starts lead the audible handover, so expect it positive by roughly half
-a blend. A large offset common to every boundary means the recording's start time is wrong.
+With --ground-truth (a history-derived JSON from ground_truth.py) it also scores the result
+with the ADR §8 metrics. Its signed boundary median also checks the anchor: history deck starts
+lead the audible handover, so expect it positive by about half a blend. A large offset shared
+by every boundary means the recording's start time is wrong.
 
 Usage:
-  run_real.py --audio-dir DIR [--recording NAME] [--rec-playlist P] [--base-playlist P]
-              [--ground-truth JSON] [--out DIR] [--ni-root DIR]
+  run_real.py --recording FILE --playlist "Folder/Name" --audio-dir DIR
+              [--prior rec|base|none] [--method viterbi|greedy] [--candidates excerpts|whole]
+              [--grid] [--ground-truth JSON] [--out DIR] [--ni-root DIR]
+
+Examples:
+  run_real.py --recording ~/Downloads/h15/H15\\ 2023-05-22.wav --audio-dir ~/Downloads/h15 \\
+      --playlist "H/H15 2023 Darker Sounds - nauhoitettu 2023-05-22?"
+  run_real.py --recording ".../Z19-2025 Sentimony 2025-02-23.wav" --audio-dir ... \\
+      --playlist "Z/Z19-2025 Sentimony " --prior base --grid \\
+      --ground-truth ground-truth/z19-2025-sentimony-2025-02-23.json
 """
 from __future__ import annotations
 
@@ -30,9 +40,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import detect  # noqa: E402
 import evaluate  # noqa: E402
 import nml  # noqa: E402
-from ground_truth import is_separator  # noqa: E402
+from ground_truth import fmt, is_separator  # noqa: E402
 
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 SR = 22050
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,73 +56,141 @@ def find_files(root: str) -> dict[str, str]:
     return out
 
 
+def label(t: nml.Track) -> str:
+    return f"{t.artist} – {t.title}" if t.artist and t.artist not in t.title else t.title
+
+
+def conf_word(c: float) -> str:
+    return "high" if c >= 0.5 else "likely" if c >= 0.2 else "unsure"
+
+
+def tracklist(segs: list[detect.Segment], cands: dict[str, nml.Track], playlist_order: list[str]) -> str:
+    lines = []
+    played = set()
+    for i, s in enumerate(segs, 1):
+        if s.track == detect.UNKNOWN:
+            lines.append(f"{i:3d}. {fmt(s.start)}  {'?':6s}  (unknown)  [{fmt(s.start)}-{fmt(s.end)}]")
+            continue
+        played.add(s.track)
+        t = cands[s.track]
+        lines.append(f"{i:3d}. {fmt(s.start)}  {conf_word(s.confidence):6s}  {label(t)}"
+                     f"  [{(s.end - s.start) / 60:.1f} min, list #{playlist_order.index(s.track) + 1}]")
+    not_played = [k for k in playlist_order if k not in played]
+    if not_played:
+        lines.append("")
+        lines.append("Not played (judged absent from the recording):")
+        for k in not_played:
+            lines.append(f"     list #{playlist_order.index(k) + 1:2d}  {label(cands[k])}")
+    return "\n".join(lines)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--audio-dir", required=True)
-    ap.add_argument("--recording", default="Z19-2025 Sentimony 2025-02-23.wav")
-    ap.add_argument("--rec-playlist", default="Z/Z19-2025 Sentimony 2025-02-23.rec")
-    ap.add_argument("--base-playlist", default="Z/Z19-2025 Sentimony ")
-    ap.add_argument("--ground-truth", default=os.path.join(HERE, "ground-truth", "z19-2025-sentimony-2025-02-23.json"))
+    ap.add_argument("--recording", required=True, help="path to the recording's audio file")
+    ap.add_argument("--playlist", required=True, help='collection playlist, "Folder/Name" (as nml.py prints it)')
+    ap.add_argument("--audio-dir", required=True, help="folder holding the playlist's track files (searched recursively)")
+    ap.add_argument("--prior", default="rec", choices=["rec", "base", "none"],
+                    help="how much to trust the playlist order: rec = strong, base = weak, none")
+    ap.add_argument("--method", default="viterbi", choices=["viterbi", "greedy"])
+    ap.add_argument("--candidates", default="excerpts", choices=["excerpts", "whole"])
+    ap.add_argument("--grid", action="store_true", help="also run every prior x method x candidates combination")
+    ap.add_argument("--ground-truth", help="history ground-truth JSON to score against")
     ap.add_argument("--out", default=os.path.join(HERE, "out"))
     ap.add_argument("--ni-root", default=nml.DEFAULT_NI_ROOT)
     a = ap.parse_args()
+
     coll = nml.read_collection(os.path.join(a.ni_root, "Traktor 4.5.1", "collection.nml"))
+    if a.playlist not in coll.playlists:
+        near = [p for p in coll.playlists if a.playlist.lower().strip() in p.lower()]
+        sys.exit(f"playlist {a.playlist!r} not found" + (f"; did you mean {near[:5]}?" if near else ""))
     files = find_files(a.audio_dir)
 
-    def keys(pl: str) -> list[str]:
-        return [k for k in coll.playlists[pl] if k in coll.tracks and not is_separator(coll.tracks[k])]
-
-    rec_keys, base_keys = keys(a.rec_playlist), keys(a.base_playlist)
-    missing = [coll.tracks[k].path for k in dict.fromkeys(base_keys + rec_keys)
-               if os.path.basename(coll.tracks[k].path).lower() not in files]
-    if a.recording.lower() not in files or missing:
-        sys.exit(f"missing audio: recording={a.recording.lower() not in files}, tracks={len(missing)}\n"
-                 + "\n".join(missing[:10]))
+    # Candidates in list order, separators dropped, one per file base name.
+    order: list[str] = []
+    cands: dict[str, nml.Track] = {}
+    for k in coll.playlists[a.playlist]:
+        t = coll.tracks.get(k)
+        if t is None or is_separator(t):
+            continue
+        base = os.path.basename(t.path).lower()
+        if base not in cands:
+            cands[base] = t
+            order.append(base)
+    missing = [cands[b].path for b in order if b not in files]
+    if not os.path.exists(a.recording) or missing:
+        sys.exit(f"missing audio: recording={'ok' if os.path.exists(a.recording) else a.recording}, "
+                 f"tracks missing={len(missing)}\n" + "\n".join(missing))
 
     t0 = time.time()
-    y, _ = librosa.load(files[a.recording.lower()], sr=SR, mono=True)
+    y, _ = librosa.load(a.recording, sr=SR, mono=True)
     rec = detect.beat_features(y, SR, None)
-    t_rec = time.time() - t0
-    print(f"recording: {len(y) / SR / 60:.1f} min, tempo {rec.tempo:.1f}, features in {t_rec:.0f}s")
+    print(f"recording: {os.path.basename(a.recording)}, {len(y) / SR / 60:.1f} min, "
+          f"tempo {rec.tempo:.1f} BPM, features in {time.time() - t0:.0f}s")
 
-    feats: dict[str, dict[str, detect.BeatFeatures]] = {"whole": {}, "excerpts": {}}
+    reps = ["excerpts", "whole"] if a.grid else [a.candidates]
+    feats: dict[str, dict[str, detect.BeatFeatures]] = {r: {} for r in reps}
     t0 = time.time()
-    for k in dict.fromkeys(base_keys + rec_keys):
-        t = coll.tracks[k]
-        ty, _ = librosa.load(files[os.path.basename(t.path).lower()], sr=SR, mono=True)
-        feats["whole"][k] = detect.beat_features(ty, SR, t.bpm)
-        feats["excerpts"][k] = detect.beat_features(detect.excerpts(ty, SR), SR, t.bpm)
-    print(f"{len(feats['whole'])} candidates, features in {time.time() - t0:.0f}s")
+    for b in order:
+        t = cands[b]
+        ty, _ = librosa.load(files[b], sr=SR, mono=True)
+        if "whole" in feats:
+            feats["whole"][b] = detect.beat_features(ty, SR, t.bpm)
+        if "excerpts" in feats:
+            feats["excerpts"][b] = detect.beat_features(detect.excerpts(ty, SR), SR, t.bpm)
+    print(f"{len(order)} candidates from {a.playlist!r}, features in {time.time() - t0:.0f}s")
 
-    gt = json.load(open(a.ground_truth))
-    title_of = {k: coll.tracks[k].title for k in feats["whole"]}
-    truth = [(s["start"], s["end"], s["track"]["title"]) for s in gt["segments"]]
-    blends = [(p["track"]["title"], n["track"]["title"], n["deckStart"], p["deckEnd"])
-              for p, n in zip(gt["segments"], gt["segments"][1:])]
-
+    stem = os.path.splitext(os.path.basename(a.recording))[0]
     os.makedirs(a.out, exist_ok=True)
+
+    segs = detect.detect(rec, feats[a.candidates if not a.grid else "excerpts"], prior=a.prior, method=a.method)
+    text = tracklist(segs, cands, order)
+    print(f"\nTracklist ({a.method}, prior={a.prior}, {a.candidates if not a.grid else 'excerpts'}):\n{text}")
+    with open(os.path.join(a.out, f"{stem}.tracklist.txt"), "w") as f:
+        f.write(text + "\n")
+    with open(os.path.join(a.out, f"{stem}.tracklist.json"), "w") as f:
+        json.dump({
+            "v": 1,
+            "recording": {"name": os.path.basename(a.recording), "duration": round(len(y) / SR, 1)},
+            "playlist": a.playlist,
+            "generator": {"tool": "set-tracklist", "version": "0.1.0", "method": "audio",
+                          "prior": a.prior, "decoder": a.method},
+            "segments": [{"start": round(s.start, 1), "end": round(s.end, 1),
+                          "track": None if s.track == detect.UNKNOWN else
+                          {"title": cands[s.track].title, "artist": cands[s.track].artist},
+                          "confidence": s.confidence, "source": "audio"} for s in segs],
+            "notPlayed": [{"title": cands[b].title, "artist": cands[b].artist}
+                          for b in order if b not in {s.track for s in segs}],
+        }, f, indent=1, ensure_ascii=False)
+    print(f"\nwrote {os.path.join(a.out, stem)}.tracklist.txt and .json")
+
+    if not (a.grid or a.ground_truth):
+        return
+    truth = blends = None
+    if a.ground_truth:
+        gt = json.load(open(a.ground_truth))
+        truth = [(s["start"], s["end"], s["track"]["title"]) for s in gt["segments"]]
+        blends = [(p["track"]["title"], n["track"]["title"], n["deckStart"], p["deckEnd"])
+                  for p, n in zip(gt["segments"], gt["segments"][1:])]
     rows = []
-    for scen, cands, prior in (("rec", rec_keys, "rec"), ("base", base_keys, "base"), ("base-no-order", base_keys, "none")):
-        for rep in ("whole", "excerpts"):
-            for method in ("viterbi", "greedy"):
+    for prior in (["rec", "base", "none"] if a.grid else [a.prior]):
+        for rep in reps:
+            for method in (["viterbi", "greedy"] if a.grid else [a.method]):
                 t1 = time.time()
-                segs = detect.detect(rec, {c: feats[rep][c] for c in cands}, prior=prior, method=method)
-                pred = [(s.start, s.end, title_of.get(s.track, s.track)) for s in segs]
-                sc = evaluate.evaluate(truth, pred, blends)
-                signed = [p[0] - t[0] for t, p in zip(truth[1:], pred[1:])] if len(pred) == len(truth) else []
-                rows.append({"scenario": scen, "candidates": rep, "method": method, "seconds": round(time.time() - t1, 2),
-                             "signed_boundary_median": round(float(np.median(signed)), 1) if signed else None,
-                             **asdict(sc)})
-                with open(os.path.join(a.out, f"z19-{scen}-{rep}-{method}.json"), "w") as f:
-                    json.dump([{"start": s.start, "end": s.end, "title": title_of.get(s.track, s.track),
-                                "confidence": s.confidence} for s in segs], f, indent=1, ensure_ascii=False)
-    hdr = ["scenario", "candidates", "method", "accuracy", "boundary_median", "signed_boundary_median",
-           "within_15", "within_30", "played_f1", "kendall_tau", "seconds"]
-    print("| " + " | ".join(hdr) + " |")
-    print("|" + "---|" * len(hdr))
+                s2 = detect.detect(rec, feats[rep], prior=prior, method=method)
+                row = {"prior": prior, "candidates": rep, "method": method, "seconds": round(time.time() - t1, 2),
+                       "segments": len(s2), "unknown": sum(s.track == detect.UNKNOWN for s in s2)}
+                if truth:
+                    pred = [(s.start, s.end, cands[s.track].title if s.track in cands else s.track) for s in s2]
+                    row.update(asdict(evaluate.evaluate(truth, pred, blends)))
+                    if len(pred) == len(truth):
+                        row["signed_boundary_median"] = round(float(np.median(
+                            [p[0] - t[0] for t, p in zip(truth[1:], pred[1:])])), 1)
+                rows.append(row)
+    hdr = list(dict.fromkeys(k for r in rows for k in r))
+    print("\n| " + " | ".join(hdr) + " |\n|" + "---|" * len(hdr))
     for r in rows:
-        print("| " + " | ".join(str(r[h]) for h in hdr) + " |")
-    with open(os.path.join(a.out, "z19-scores.json"), "w") as f:
+        print("| " + " | ".join(str(r.get(h, "")) for h in hdr) + " |")
+    with open(os.path.join(a.out, f"{stem}.scores.json"), "w") as f:
         json.dump(rows, f, indent=1)
 
 

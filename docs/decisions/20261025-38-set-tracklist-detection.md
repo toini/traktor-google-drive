@@ -24,9 +24,27 @@ evidence about Toni's habits, not about every set he has recorded since.
 - **±15 s is precise enough** for a boundary (open question 5). "Now playing" is the
   goal, not publishable tracklists, so a blend is shown at its midpoint and the nudge
   UI stays coarse.
-- **Spike first, on `Z19-2025 Sentimony 2025-02-23.wav`** (135 min, a 39-track `.rec`
-  playlist and a 51-track base playlist; the base playlist has 60 entries, 9 of which
-  are `====` separators). Open question 4.
+- **Spike set = H15 (Toni, 2026-10-25); Z19 is an optional benchmark.** The spike
+  starts on `Setit/H15 2023-05-22.wav`: 55 min, WAV, from 2023, so it predates the
+  history files and has no timestamps. Its candidate list is the playlist
+  `H/H15 2023 Darker Sounds - nauhoitettu 2023-05-22?` ("recorded 2023-05-22?"; the
+  "?" is Toni's own uncertainty). The playlist has 25 entries:
+  - 8 are `====` separators (`silent.wav`);
+  - 17 are real entries, which are 16 distinct tracks, because "Hefty – American
+    Intervention (Algia Remix)" sits in both `Dark progressive psy/` and
+    `Industrial techno/`;
+  - together they run about 120 min, against a 55-min recording.
+
+  So the run treats the list as a strong order prior with skips allowed: the ADR's
+  `.rec` case (`--prior rec`).
+
+  There is no ground truth for H15. It is evaluated by:
+  - **(a)** Toni judging the produced tracklist by ear in the app;
+  - **(b)** optionally, a quick tap-marked truth, if he agrees later.
+
+  `Z19-2025 Sentimony 2025-02-23.wav` (135 min, 39-track `.rec` list, 51-track base
+  list) stays as the later benchmark, because history gives it exact ground truth.
+  Open question 4.
 - **History files exist** (open question 1). Toni's Google Drive "Native Instruments"
   folder holds 141 `history_*.nml` files: 50 unique sessions from 2025-02-23 to
   2026-08-17. See §"Spike findings".
@@ -635,7 +653,15 @@ before it can grade a detector at ±15 s.
 
 **Audio for the spike is not on this laptop.** The NML paths point to
 `/Users/toni/Google Drive/…`, which does not exist here, and there is no Drive for
-desktop mount. The spike needs the Z19 recording (1.33 GiB) and 51 tracks (39 played,
+desktop mount.
+
+- **H15 (the spike set)** needs 18 files, **1.32 GiB**:
+  - the recording (558 MiB), in `Musiikki/Traktor/Setit/`;
+  - 17 FLAC files (799 MiB): 15 in `2023/Industrial techno/` and 2 in
+    `2023/Dark progressive psy/`.
+
+  One of the two Algia Remix copies is enough, which saves 51 MiB.
+- **Z19 (the benchmark)** needs the recording (1.33 GiB) and 51 tracks (39 played,
 12 base-only; 50 FLAC, 1 WAV, 4.1 GiB): **5.51 GiB** in total.
 
 **The audio pipeline, on synthetic mixes** (`synth.py`, `detect.py`, `evaluate.py`,
@@ -672,8 +698,12 @@ Three lessons carry over to real audio:
   pitch shifts. Toni plays with keylock on, so that path is not built.
 
 Synthetic results prove the plumbing and the tuning direction, not the targets: the
-tracks are far more distinct than real Sentimony psytrance. `run_real.py` runs the
-same grid on Z19 once the audio is local. Its signed boundary median also checks the
+tracks are far more distinct than real Sentimony psytrance. `run_real.py` takes any
+recording and playlist, and prints a tracklist Toni can check by ear: start time,
+confidence word (high / likely / unsure), the list position, and the candidates
+judged "not played". It writes the same as text and as §0-shaped JSON. With
+`--ground-truth` and `--grid`, it scores every prior × decoder × candidate form, as
+for Z19. Its signed boundary median also checks the
 anchor. Not built yet:
 - 3d (`AUDIO_ID` envelopes);
 - 3b (`fpcalc` is not installed);
