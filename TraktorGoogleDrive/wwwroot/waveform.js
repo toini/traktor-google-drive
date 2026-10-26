@@ -4,7 +4,9 @@
 // Uncompressed (WAV/AIFF): a 1-2 GB WAV cannot be decoded in the browser, since
 // decodeAudioData expands PCM to Float32 and a 1.4 GB file needs ~2.8 GB of RAM.
 // But the amplitude at any point is readable straight from the bytes at that
-// offset, so a few hundred small range reads (~1 MB total) give the picture.
+// offset, so range reads give the picture: from the player's downloaded copy
+// when it has one (no network at all), otherwise 80 reads of 32 KB straight
+// from Drive, started once the audio can play.
 //
 // Compressed (MP3/FLAC/AAC): has to be decoded, so it is fetched once straight
 // from Drive (not the Cloud Run proxy, which bills egress per GiB) and decoded at
@@ -20,9 +22,16 @@ import * as cache from './prefetch.js';
 const DB_NAME = 'traktor-waveforms';
 const STORE = 'peaks';
 const VERSION = 1;
+// From a downloaded copy: reads cost nothing, so full resolution.
 const BUCKETS = 400;      // horizontal resolution
 const WINDOW_BYTES = 2048; // bytes sampled per bucket
 const CONCURRENCY = 12;
+// Over the network (a file too big to download): each read is a round trip to
+// Drive, so fewer, larger ones, and few at a time beside the audio stream.
+// 80 × 32 KB ≈ 2.5 MB, against 400 × 2 KB through the proxy before.
+const NET_BUCKETS = 80;
+const NET_WINDOW_BYTES = 32 * 1024;
+const NET_CONCURRENCY = 4;
 const DECODE_RATE = 8000; // Hz; plenty for a 400-bucket envelope
 
 /* ---------- IndexedDB cache ---------- */
@@ -67,7 +76,17 @@ async function cachePut(key, value) {
 /** Peaks already computed for this file, or null. Never fetches anything. */
 export async function cachedPeaks(fileId) {
     const cached = await cacheGet(fileId);
-    return cached?.version === VERSION ? cached.peaks : null;
+    return cached?.version === VERSION && !cached.partial ? cached.peaks : null;
+}
+
+/**
+ * Peaks a network sampler got before it was stopped (a track change, a reload,
+ * a dropped connection): `{ buckets, window, peaks }` with null where a read is
+ * still missing, so the next attempt reads only those. Null when there are none.
+ */
+async function partialPeaks(fileId) {
+    const cached = await cacheGet(fileId);
+    return cached?.version === VERSION && cached.partial ? cached : null;
 }
 
 /* ---------- WAV parsing ---------- */
@@ -87,21 +106,89 @@ async function tokenAfterRefusal(usedToken) {
 
 const refused = (status) => status === 401 || status === 403;
 
-async function readRange(url, start, end, fileId) {
-    // Already downloaded whole for playback (prefetch.js): read it from memory.
-    const local = fileId ? cache.blob(fileId) : null;
-    if (local) return new DataView(await local.slice(start, end + 1).arrayBuffer());
+const directUrl = (fileId) =>
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
 
-    const headers = { Range: `bytes=${start}-${end}` };
-    // The proxy takes the token from the cookie; note which one this read used.
-    const used = window.authGetToken?.() ?? null;
-    let res = await fetch(url, { headers });
-    if (refused(res.status) && await tokenAfterRefusal(used)) {
-        window.authSyncProxyCookie?.();
-        res = await fetch(url, { headers });
-    }
-    if (!res.ok) throw new Error(`range ${start}-${end}: HTTP ${res.status}`);
-    return new DataView(await res.arrayBuffer());
+/** Reads byte ranges of a downloaded file: no network at all. */
+const blobReader = (blob) => async (start, end) =>
+    new DataView(await blob.slice(start, end + 1).arrayBuffer());
+
+/**
+ * Reads byte ranges over the network: straight from googleapis.com with the
+ * token as a header (no Cloud Run egress, no proxy hop), or through the proxy
+ * (`proxyUrl`, token in the cookie) once a direct read fails in a way the
+ * network does not explain (CORS, a blocker). Every read stops on `signal`.
+ */
+function networkReader(proxyUrl, fileId, signal) {
+    let direct = true;
+    const viaProxy = async (headers) => {
+        // The proxy takes the token from the cookie; note which one this read used.
+        const used = window.authGetToken?.() ?? null;
+        let res = await fetch(proxyUrl, { headers, signal });
+        if (refused(res.status) && await tokenAfterRefusal(used)) {
+            window.authSyncProxyCookie?.();
+            res = await fetch(proxyUrl, { headers, signal });
+        }
+        return res;
+    };
+    const viaDrive = async (headers) => {
+        const token = window.authGetToken?.() ?? null;
+        let res = await fetch(directUrl(fileId), { headers: { ...headers, Authorization: `Bearer ${token}` }, signal });
+        if (refused(res.status)) {
+            const renewed = await tokenAfterRefusal(token);
+            if (renewed) res = await fetch(directUrl(fileId), { headers: { ...headers, Authorization: `Bearer ${renewed}` }, signal });
+        }
+        return res;
+    };
+    return async (start, end) => {
+        const headers = { Range: `bytes=${start}-${end}` };
+        let res = null;
+        if (direct) {
+            try {
+                res = await viaDrive(headers);
+            } catch (e) {
+                if (signal?.aborted) throw e;
+                direct = false; // not a status: the request itself was refused
+            }
+        }
+        res ??= await viaProxy(headers);
+        if (!res.ok) throw new Error(`range ${start}-${end}: HTTP ${res.status}`);
+        return new DataView(await res.arrayBuffer());
+    };
+}
+
+/* ---------- one sampler at a time ---------- */
+
+// The sampler for the waveform on screen. A new one (another track's waveform)
+// or the player moving to another file aborts it, so no reads for a track
+// nobody is looking at are left running.
+let sampler = null; // { fileId, controller }
+
+function beginSampling(fileId) {
+    sampler?.controller.abort();
+    sampler = { fileId, controller: new AbortController() };
+    return sampler.controller.signal;
+}
+
+addEventListener('player:track', (e) => {
+    if (sampler && sampler.fileId !== e.detail) sampler.controller.abort();
+});
+
+/** Stops whatever sampling is running (the waveform went away). */
+export function cancelSampling() {
+    sampler?.controller.abort();
+    sampler = null;
+}
+
+/** Rejects with an AbortError once `signal` aborts; otherwise settles with `promise`. */
+function abortable(promise, signal) {
+    if (!signal) return promise;
+    return new Promise((resolve, reject) => {
+        const onAbort = () => reject(new DOMException('aborted', 'AbortError'));
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener('abort', onAbort, { once: true });
+        promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+    });
 }
 
 function ascii(view, offset) {
@@ -170,35 +257,99 @@ async function mapLimit(items, limit, fn) {
 
 /* ---------- public API: peaks ---------- */
 
+/**
+ * Peaks for an uncompressed file. When the player downloads it whole (up to
+ * prefetch.js's cap), they come from that copy once it is complete, and nothing
+ * is read over the network for them. A file too big for that (a recorded set)
+ * is sampled with NET_BUCKETS larger reads, straight from Drive, and only once
+ * the audio can play, so the picture never delays the music.
+ *
+ * Over the network each read is a Drive round trip (about a second in prod), so
+ * the picture fills in as reads land (drawn live when this file's waveform is
+ * mounted), and what has arrived is saved: a sampler stopped by a track change
+ * or a reload resumes with only the missing reads. A read that fails twice is
+ * left out; the picture is drawn without it and the gap is retried next time.
+ */
 export async function computePeaks(url, fileId, dotNetRef) {
+    const signal = beginSampling(fileId);
     const cached = await cachedPeaks(fileId);
     if (cached) return cached;
 
-    const header = parseHeader(await readRange(url, 0, 4095, fileId));
+    const progress = (f) => dotNetRef?.invokeMethodAsync('OnPeakProgress', f);
+    const local = await downloadedForPlayback(fileId, (f) => progress(f * 0.9), signal);
+    if (local) {
+        const peaks = await samplePeaks(blobReader(local), BUCKETS, WINDOW_BYTES, CONCURRENCY, null, signal,
+            (done, total) => progress(0.9 + 0.1 * done / total));
+        await cachePut(fileId, { version: VERSION, peaks });
+        return peaks;
+    }
+
+    await (await import('./player.js')).whenPlayable(signal);
+    const previous = await partialPeaks(fileId);
+    const read = networkReader(url, fileId, signal);
+    let latest = null;
+    let lastSave = 0;
+    const save = (peaks) => cachePut(fileId, { version: VERSION, partial: true, buckets: peaks.length, peaks });
+    try {
+        const peaks = await samplePeaks(read, NET_BUCKETS, NET_WINDOW_BYTES, NET_CONCURRENCY, previous?.peaks ?? null, signal,
+            (done, total, partial) => {
+                latest = partial;
+                progress(done / total);
+                drawLive(fileId, partial);
+                if (done - lastSave >= 8) { lastSave = done; save(partial.slice()); }
+            });
+        if (peaks.some((p) => p == null)) {
+            await save(peaks);
+            return peaks.map((p) => p ?? 0);
+        }
+        await cachePut(fileId, { version: VERSION, peaks });
+        return peaks;
+    } catch (e) {
+        if (latest) await save(latest.slice());
+        throw e;
+    }
+}
+
+/**
+ * Samples `maxBuckets` windows of `window` bytes spread over the WAV's data,
+ * `concurrency` at a time. `have` holds peaks from an earlier, unfinished run
+ * (null where missing), which are kept rather than read again. `onProgress`
+ * gets (done, total, peaks so far with null where still missing).
+ */
+async function samplePeaks(read, maxBuckets, window, concurrency, have, signal, onProgress) {
+    const header = parseHeader(await read(0, 4095));
     if (header.format !== 1 && header.format !== 3) throw new Error(`unsupported WAV format ${header.format}`);
 
     const frame = (header.bits / 8) * header.channels;
-    const usable = Math.max(0, header.dataSize - WINDOW_BYTES);
+    const usable = Math.max(0, header.dataSize - window);
 
     // Never ask for more windows than the file has distinct bytes to give: a
-    // short file would otherwise get hundreds of overlapping reads of the same
-    // audio, which is pure waste and hammers the proxy for no extra detail.
-    const buckets = Math.max(1, Math.min(BUCKETS, Math.floor(header.dataSize / WINDOW_BYTES)));
+    // short file would otherwise get overlapping reads of the same audio, which
+    // is pure waste for no extra detail.
+    const buckets = Math.max(1, Math.min(maxBuckets, Math.floor(header.dataSize / window)));
+    const peaks = have?.length === buckets ? have.slice() : new Array(buckets).fill(null);
 
-    const offsets = Array.from({ length: buckets }, (_, i) => {
+    const todo = [];
+    for (let i = 0; i < buckets; i++) {
+        if (peaks[i] != null) continue;
         const raw = header.dataOffset + Math.floor((usable * i) / buckets);
-        return raw - (raw % frame); // stay on a frame boundary or samples shear
-    });
+        todo.push({ i, start: raw - (raw % frame) }); // on a frame boundary, or samples shear
+    }
 
-    let done = 0;
-    const peaks = await mapLimit(offsets, CONCURRENCY, async (start) => {
-        const view = await readRange(url, start, start + WINDOW_BYTES - 1, fileId);
-        const p = peakOf(view, header);
-        if (++done % 40 === 0) dotNetRef?.invokeMethodAsync('OnPeakProgress', done / offsets.length);
-        return p;
+    let done = buckets - todo.length;
+    const step = Math.max(1, Math.floor(buckets / 20));
+    if (done) onProgress(done, buckets, peaks);
+    await mapLimit(todo, concurrency, async ({ i, start }) => {
+        for (let attempt = 0; attempt < 2 && peaks[i] == null; attempt++) {
+            if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+            try {
+                peaks[i] = peakOf(await read(start, start + window - 1), header);
+            } catch (e) {
+                if (signal.aborted) throw e;
+            }
+        }
+        if (++done % step === 0 || done === buckets) onProgress(done, buckets, peaks);
     });
-
-    await cachePut(fileId, { version: VERSION, peaks });
     return peaks;
 }
 
@@ -238,25 +389,24 @@ async function concatRest(head, used, value, reader) {
  * track, once it finishes, or null when it is not downloading it. Then the file
  * crosses the network once, for both playback and the picture.
  */
-async function downloadedForPlayback(fileId, onProgress) {
+async function downloadedForPlayback(fileId, onProgress, signal) {
     if (!cache.status(fileId)) return null;
     const unsubscribe = cache.subscribe((id) => {
         const s = id === fileId ? cache.status(fileId) : null;
         if (s?.total) onProgress(Math.min(1, s.received / s.total));
     });
     try {
-        const blob = await cache.whenComplete(fileId);
-        return blob ? await blob.arrayBuffer() : null;
+        return await abortable(cache.whenComplete(fileId), signal);
     } finally {
         unsubscribe();
     }
 }
 
-async function downloadForWaveform(directUrl, token, onProgress) {
-    let res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` } });
+async function downloadForWaveform(directUrl, token, onProgress, signal) {
+    let res = await fetch(directUrl, { headers: { Authorization: `Bearer ${token}` }, signal });
     if (refused(res.status)) {
         const renewed = await tokenAfterRefusal(token);
-        if (renewed) res = await fetch(directUrl, { headers: { Authorization: `Bearer ${renewed}` } });
+        if (renewed) res = await fetch(directUrl, { headers: { Authorization: `Bearer ${renewed}` }, signal });
     }
     if (!res.ok) throw new Error(`download for waveform: HTTP ${res.status}`);
     return await readWithProgress(res, onProgress);
@@ -268,13 +418,16 @@ async function downloadForWaveform(directUrl, token, onProgress) {
  * token as a header — unlike the proxy it costs no Cloud Run egress.
  */
 export async function computeCompressedPeaks(directUrl, token, fileId, dotNetRef) {
+    const signal = beginSampling(fileId);
     const cached = await cachedPeaks(fileId);
     if (cached) return cached;
 
     // Download is the slow half; report it as the first 90%.
     const onProgress = (f) => dotNetRef?.invokeMethodAsync('OnPeakProgress', f * 0.9);
-    const bytes = await downloadedForPlayback(fileId, onProgress)
-        ?? await downloadForWaveform(directUrl, token, onProgress);
+    const local = await downloadedForPlayback(fileId, onProgress, signal);
+    const bytes = local ? await local.arrayBuffer()
+        : await downloadForWaveform(directUrl, token, onProgress, signal);
+    if (signal.aborted) throw new DOMException('aborted', 'AbortError');
 
     // OfflineAudioContext resamples to its own rate while decoding, which is
     // what keeps memory bounded: 8 kHz is ~1/5 of the samples at 44.1 kHz.
@@ -324,6 +477,28 @@ const COLORS = {
 let ws = null;
 let regions = null;
 let followsPlayer = false; // mounted on the player's element, not a picture for the TV
+let mountedFor = null;     // the file id the mounted waveform draws
+
+/** Redraws the mounted waveform with `peaks` (missing ones flat), if it is this file's. */
+function drawLive(fileId, peaks) {
+    if (!ws || mountedFor !== fileId) return;
+    const filled = peaks.map((p) => p ?? 0);
+    drawn = { fileId, have: peaks.filter((p) => p != null).length, total: peaks.length };
+    try {
+        ws.setOptions({ peaks: [filled], duration: ws.getDuration(), normalize: filled.some((p) => p > 0) });
+    } catch { /* torn down meanwhile */ }
+}
+
+let drawn = null;
+/** How much of the mounted waveform has real peaks so far, for tests and diagnostics. */
+export function drawnPeaks() {
+    return drawn;
+}
+
+/** The final peaks for the mounted waveform. */
+export function setPeaks(peaks, fileId) {
+    drawLive(fileId, peaks);
+}
 
 // The player swaps to a second, primed element when it advances (player.js).
 // The cursor and click-to-seek move with it.
@@ -380,7 +555,7 @@ function addMarkers(markers, range, duration) {
     });
 }
 
-export async function mount(container, mediaElement, peaks, duration, markers, range, dotNetRef) {
+export async function mount(container, mediaElement, peaks, duration, markers, range, dotNetRef, fileId) {
     const [{ default: WaveSurfer }, { default: RegionsPlugin }] = await Promise.all([
         import('./lib/wavesurfer/wavesurfer.esm.js'),
         import('./lib/wavesurfer/plugins/regions.esm.js'),
@@ -409,6 +584,7 @@ export async function mount(container, mediaElement, peaks, duration, markers, r
 
     ws = WaveSurfer.create(options);
     followsPlayer = !!mediaElement;
+    mountedFor = fileId ?? null;
     // Mounted on an element the player swapped away from while this was loading.
     const active = mediaElement ? (await import('./player.js')).element() : null;
     if (active && active !== mediaElement) ws.setMediaElement(active);
@@ -445,4 +621,5 @@ export function destroy() {
     try { ws.destroy(); } catch { /* already torn down with its container */ }
     ws = null;
     regions = null;
+    mountedFor = null;
 }
