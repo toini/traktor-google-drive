@@ -21,7 +21,8 @@ namespace TraktorGoogleDrive.Services;
 public sealed class CollectionSnapshot
 {
     /// <summary>Bump when the shape or what the app derives from the NML changes; an old one is then a miss.</summary>
-    public const int CurrentVersion = 1;
+    /// <remarks>2: <see cref="ExtrasData"/> carries PLAYCOUNT and LAST_PLAYED, for track discovery's seeds.</remarks>
+    public const int CurrentVersion = 2;
 
     public int V { get; set; }
     public string FileId { get; set; } = "";
@@ -46,7 +47,7 @@ public sealed class CollectionSnapshot
     /// <summary>One playlist ENTRY. T is the track index, -1 for none.</summary>
     public sealed record EntryData(int P, string K, EntryKind Kind, int T, string Title);
 
-    public sealed record ExtrasData(int? Color, int? Ranking, string? Album);
+    public sealed record ExtrasData(int? Color, int? Ranking, string? Album, int PlayCount = 0, string? LastPlayed = null);
 
     public static CollectionSnapshot Capture(
         string fileId, DateTimeOffset modified, Collection collection,

@@ -1,0 +1,196 @@
+@using TraktorGoogleDrive.Discover
+@implements IDisposable
+@inject DiscoverService Discover
+
+@* The watch list and where seeds come from (ADR 20261025-54 §3): "eti lisää"
+   comments first (decision 7), a playlist's well-rated tracks, the genre's top
+   lists, or by hand. Nothing is fetched until Toni presses Refresh on a seed. *@
+<div class="discover-seeds">
+    <section class="discover-section" data-section="watch-list">
+        <h2>Watch list <span class="discover-count">@seeds.Count</span></h2>
+        @if (seeds.Count == 0)
+        {
+            <p class="discover-hint">No seeds in @Genre yet. Add some below.</p>
+        }
+        else
+        {
+            <table class="discover-table">
+                <thead>
+                    <tr><th>Seed</th><th>Bandcamp</th><th>Heard through</th><th>Releases</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var seed in seeds)
+                    {
+                        var p = Discover.ProgressOf(seed);
+                        var offer = Discover.HeardThroughOffer(seed);
+                        <tr data-seed="@seed.Name" data-seed-kind="@seed.Kind" data-seed-origin="@seed.Origin">
+                            <td>
+                                <span class="discover-badge @OriginClass(seed.Origin)" title="@seed.Reason">@OriginLabel(seed.Origin)</span>
+                                <span class="discover-seed-name">@seed.Name</span>
+                                <span class="discover-row-meta">@(seed.Kind == SeedKind.Label ? "label" : "artist")</span>
+                            </td>
+                            <td>
+                                <input class="discover-input" data-seed-url placeholder="https://….bandcamp.com"
+                                       value="@seed.BandcampUrl" @onchange="e => Discover.SetSeedUrl(seed, e.Value?.ToString())" />
+                                @if (string.IsNullOrWhiteSpace(seed.BandcampUrl))
+                                {
+                                    <button class="discover-button" data-guess title="Try https://@(Names.BandcampSlugGuess(seed.Name)).bandcamp.com"
+                                            @onclick="() => GuessAsync(seed)">Guess</button>
+                                }
+                            </td>
+                            <td>
+                                @* A month (OneNote's precision) or a day: "2023-06" or "2026-10-25". *@
+                                <input class="discover-input month" data-watermark value="@seed.Watermark" placeholder="YYYY-MM-DD"
+                                       title="Heard everything up to this month or day"
+                                       @onchange="e => SetWatermark(seed, e.Value?.ToString())" />
+                                @if (badWatermark.Contains(seed.Key)) { <span class="discover-warn" data-bad-watermark>Use YYYY-MM or YYYY-MM-DD</span> }
+                                @if (offer is not null)
+                                {
+                                    <button class="discover-button" data-heard-through="@offer" @onclick="() => Discover.RaiseWatermark(seed, offer)">Heard through @offer</button>
+                                }
+                            </td>
+                            <td>
+                                <span data-release-count>@Discover.ReleaseCount(seed)</span>@(p.Listed > 0 ? $" of {p.Listed}" : "")
+                                @if (p.Busy) { <span class="discover-hint" data-busy> @p.Message</span> }
+                                @if (p.Error is not null) { <span class="discover-warn" data-error> @p.Error</span> }
+                            </td>
+                            <td class="discover-row-actions">
+                                <button class="discover-button" data-refresh disabled="@(p.Busy || string.IsNullOrWhiteSpace(seed.BandcampUrl))"
+                                        @onclick="() => Discover.RefreshSeedAsync(seed, force: p.Refs.Count > 0)">Refresh</button>
+                                @if (Discover.HasMore(seed))
+                                {
+                                    <button class="discover-button" data-load-older disabled="@p.Busy" @onclick="() => Discover.RefreshSeedAsync(seed)">Load older</button>
+                                }
+                                <button class="discover-button subtle" data-remove-seed title="Stop watching" @onclick="() => Discover.RemoveSeed(seed)">✕</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="discover-section" data-section="eti-lisaa">
+        <h2>“Eti lisää” in your comments</h2>
+        @{ var eti = Discover.EtiLisaaCandidates().Where(c => c.Genre == Genre).ToList(); }
+        @if (eti.Count == 0)
+        {
+            <p class="discover-hint">No track in @Genre has a comment asking to search for more.</p>
+        }
+        else
+        {
+            <CandidateList Items="eti" />
+        }
+    </section>
+
+    <section class="discover-section" data-section="from-playlist">
+        <h2>From a playlist's best tracks</h2>
+        <div class="discover-toolbar">
+            <select class="discover-input" data-playlist @bind="playlistUuid">
+                <option value="">Pick a playlist…</option>
+                @foreach (var (uuid, name) in Discover.PlaylistsOf(Genre))
+                {
+                    <option value="@uuid">@name</option>
+                }
+            </select>
+            <label class="discover-hint">rated at least
+                <select class="discover-input" data-min-stars @bind="minStars">
+                    @for (var s = 5; s >= 1; s--) { <option value="@s">@s★</option> }
+                </select>
+            </label>
+        </div>
+        @if (!string.IsNullOrEmpty(playlistUuid))
+        {
+            var fromPlaylist = Discover.PlaylistCandidates(playlistUuid, minStars);
+            <p class="discover-hint" data-playlist-summary>
+                @fromPlaylist.Count(c => c.Kind == SeedKind.Label) labels, @fromPlaylist.Count(c => c.Kind == SeedKind.Artist) artists.
+            </p>
+            <CandidateList Items="fromPlaylist" />
+        }
+    </section>
+
+    <section class="discover-section" data-section="top-lists">
+        <h2>Top of @Genre in your collection</h2>
+        <p class="discover-hint">Two or more tracks, or one rated 4★ or more, in @Genre's playlists. Ranked by 4★ tracks, plays and how recent.</p>
+        <div class="discover-columns">
+            <div>
+                <h3>Labels</h3>
+                <CandidateList Items="Discover.TopCandidates(Genre, SeedKind.Label).Take(topCount).ToList()" ShowScore="true" />
+            </div>
+            <div>
+                <h3>Artists</h3>
+                <CandidateList Items="Discover.TopCandidates(Genre, SeedKind.Artist).Take(topCount).ToList()" ShowScore="true" />
+            </div>
+        </div>
+        @if (topCount < 30) { <button class="discover-button" @onclick="() => topCount = 30">Show more</button> }
+    </section>
+
+    <section class="discover-section" data-section="by-hand">
+        <h2>Add by hand</h2>
+        <div class="discover-toolbar">
+            <select class="discover-input" data-manual-kind @bind="manualKind">
+                <option value="@SeedKind.Label">Label</option>
+                <option value="@SeedKind.Artist">Artist</option>
+            </select>
+            <input class="discover-input" data-manual-name placeholder="Name" @bind="manualName" />
+            <input class="discover-input" data-manual-url placeholder="https://….bandcamp.com" @bind="manualUrl" />
+            <button class="discover-button" data-manual-add disabled="@string.IsNullOrWhiteSpace(manualName)" @onclick="AddManual">Add</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Genre { get; set; } = "";
+
+    IReadOnlyList<Seed> seeds = [];
+    string playlistUuid = "";
+    int minStars = 4;
+    int topCount = 10;
+    SeedKind manualKind = SeedKind.Label;
+    string manualName = "";
+    string manualUrl = "";
+
+    protected override void OnParametersSet() => seeds = Discover.SeedsOf(Genre);
+
+    protected override void OnInitialized() => Discover.Changed += Refresh;
+
+    void Refresh() => _ = InvokeAsync(() => { seeds = Discover.SeedsOf(Genre); StateHasChanged(); });
+
+    static string OriginLabel(SeedOrigin o) => o switch
+    {
+        SeedOrigin.EtiLisaa => "eti lisää",
+        SeedOrigin.Playlist => "playlist",
+        SeedOrigin.TopList => "top list",
+        SeedOrigin.Import => "import",
+        _ => "by hand",
+    };
+
+    static string OriginClass(SeedOrigin o) => o == SeedOrigin.EtiLisaa ? "eti" : "";
+
+    readonly HashSet<string> badWatermark = new();
+
+    void SetWatermark(Seed seed, string? value)
+    {
+        var v = value?.Trim() ?? "";
+        badWatermark.Remove(seed.Key);
+        if (v.Length > 0 && !DiscoverState.IsWatermark(v)) { badWatermark.Add(seed.Key); return; }
+        Discover.SetWatermark(seed, v.Length == 0 ? null : v);
+    }
+
+    async Task GuessAsync(Seed seed)
+    {
+        // One fetch, on Toni's click. A wrong guess (a stub page) shows "no releases".
+        Discover.SetSeedUrl(seed, $"https://{Names.BandcampSlugGuess(seed.Name)}.bandcamp.com");
+        var updated = Discover.State.Seeds[seed.Key];
+        await Discover.RefreshSeedAsync(updated, force: true);
+    }
+
+    void AddManual()
+    {
+        Discover.AddManualSeed(manualKind, manualName, Genre, manualUrl);
+        manualName = "";
+        manualUrl = "";
+    }
+
+    public void Dispose() => Discover.Changed -= Refresh;
+}

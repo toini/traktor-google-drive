@@ -65,6 +65,10 @@ public sealed class PlaybackMemory : IAsyncDisposable
 
         var id = _player.CurrentFileId;
 
+        // A Discover preview's stream URL expires and its queue lives on the
+        // Discover page; a reload brings back the last collection track instead.
+        if (Models.PlayableItem.IsDiscoverId(id)) return;
+
         if (id is null)
         {
             // Stopped (e.g. switched playlist): nothing was playing, so a reload

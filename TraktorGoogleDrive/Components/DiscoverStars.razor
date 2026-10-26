@@ -1,0 +1,15 @@
+@* A 1–5 star picker for Discover. Clicking the current rating again clears it. *@
+<span class="discover-stars" role="radiogroup" aria-label="Rating">
+    @for (var i = 1; i <= 5; i++)
+    {
+        var n = i;
+        <button type="button" class="discover-star @(Value >= n ? "on" : "")" role="radio"
+                aria-checked="@(Value == n)" aria-label="@n star@(n == 1 ? "" : "s")" data-star="@n"
+                @onclick="() => OnRate.InvokeAsync(Value == n ? 0 : n)">★</button>
+    }
+</span>
+
+@code {
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int> OnRate { get; set; }
+}

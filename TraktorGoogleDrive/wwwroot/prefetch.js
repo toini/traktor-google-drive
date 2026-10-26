@@ -86,7 +86,9 @@ export function subscribe(fn) {
  * stay until the budget needs their room.
  */
 export function setPlan(items) {
-    const wanted = (items ?? []).filter((i) => i?.id);
+    // Drive files only: a Discover preview ("discover:…") is a store stream that
+    // cannot be downloaded (no CORS). player.js already leaves it out; this is the backstop.
+    const wanted = (items ?? []).filter((i) => i?.id && !String(i.id).startsWith('discover:'));
     plan = enabled() ? wanted.map((i) => i.id) : [];
 
     for (const [id, e] of entries) {

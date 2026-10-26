@@ -83,6 +83,11 @@
                 {
                     <span class="player-output">▶ @(Player.CastDeviceName ?? "TV")</span>
                 }
+                @if (Player.CurrentFile?.External is { } ext && Player.CurrentFile.DriveFileId == Player.CurrentFileId)
+                {
+                    <span class="player-output" data-player-source="@ext.Source"
+                          title="A Discover preview, streamed from @(ext.Source == "bandcamp" ? "Bandcamp" : ext.Source)">@(ext.Source == "bandcamp" ? "Bandcamp" : ext.Source)@(ext.Label is null ? "" : " · " + ext.Label)</span>
+                }
                 @if (Player.PreviewActive && Player.CurrentRange is { } range)
                 {
                     <span class="player-preview-range" data-preview-range
@@ -91,7 +96,8 @@
                 }
             </div>
 
-            @if (Player.CurrentFile is { } file && Player.CurrentFile.DriveFileId == Player.CurrentFileId)
+            @* A Discover preview has no readable bytes (store CDN, no CORS): no waveform, the plain seek bar. *@
+            @if (Player.CurrentFile is { CanWaveform: true } file && Player.CurrentFile.DriveFileId == Player.CurrentFileId)
             {
                 <Waveform File="@file" Url="@Player.CurrentUrl" Casting="@Player.IsCasting"
                           Range="@(Player.PreviewActive ? Player.CurrentRange : null)" />

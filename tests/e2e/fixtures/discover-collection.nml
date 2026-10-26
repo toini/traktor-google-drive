@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  Track discovery fixture (ADR 20261025-54). A slice of the real collection's
+  shape: an H folder with an H16-like playlist, and a Z folder.
+
+    1616 (Original Mix)    Obwigszyh, Carnivor Records, 5 stars, "eti lisaa"  -> owned; seeds Obwigszyh + Carnivor
+    Take You Underground   Hefty, Darker Sounds, 5 stars, Bandcamp "Visit" comment -> Darker Sounds' URL is known
+    Techno Weapon          Hefty, Gastspiel Records, 4 stars
+    Compilation Cut        Various Artists, RAW., 4 stars                     -> the artist is stop-listed
+    Low Burn               Noseda, Erebos Records, 3 stars                    -> below the 4-star default
+    Tetrakis               Dragon, 2TO6 Records (Z), "lisää luuppi!"          -> not a search marker
+-->
+<NML VERSION="19">
+  <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
+  <MUSICFOLDERS></MUSICFOLDERS>
+  <COLLECTION ENTRIES="6">
+    <ENTRY TITLE="1616 (Original Mix)" ARTIST="Obwigszyh">
+      <LOCATION DIR="/:Music/:H/:" FILE="obwigszyh-1616.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <ALBUM TITLE="Internal Motion"></ALBUM>
+      <INFO LABEL="Carnivor Records" COMMENT="KOVA LOPPU. eti lisaa" PLAYTIME="358" RANKING="255" PLAYCOUNT="12" IMPORT_DATE="2025/12/13" LAST_PLAYED="2026/10/11"></INFO>
+    </ENTRY>
+    <ENTRY TITLE="Take You Underground" ARTIST="Hefty">
+      <LOCATION DIR="/:Music/:H/:" FILE="hefty-underground.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="Darker Sounds" COMMENT="Visit https://darkersounds.bandcamp.com" PLAYTIME="400" RANKING="255" PLAYCOUNT="30" IMPORT_DATE="2016/12/5"></INFO>
+    </ENTRY>
+    <ENTRY TITLE="Techno Weapon" ARTIST="Hefty">
+      <LOCATION DIR="/:Music/:H/:" FILE="hefty-weapon.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="Gastspiel Records" PLAYTIME="400" RANKING="204" PLAYCOUNT="8" IMPORT_DATE="2016/12/5"></INFO>
+    </ENTRY>
+    <ENTRY TITLE="Compilation Cut" ARTIST="Various Artists">
+      <LOCATION DIR="/:Music/:H/:" FILE="va-cut.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="RAW." PLAYTIME="300" RANKING="204" IMPORT_DATE="2025/12/13"></INFO>
+    </ENTRY>
+    <ENTRY TITLE="Low Burn" ARTIST="Noseda">
+      <LOCATION DIR="/:Music/:H/:" FILE="noseda-low.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="Erebos Records" PLAYTIME="300" RANKING="153" IMPORT_DATE="2025/12/13"></INFO>
+    </ENTRY>
+    <ENTRY TITLE="Tetrakis" ARTIST="Dragon">
+      <LOCATION DIR="/:Music/:Z/:" FILE="dragon-tetrakis.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="2TO6 Records" COMMENT="1-3 lisää luuppi!" PLAYTIME="500" RANKING="255" IMPORT_DATE="2024/1/13"></INFO>
+    </ENTRY>
+  </COLLECTION>
+  <PLAYLISTS>
+    <NODE TYPE="FOLDER" NAME="$ROOT">
+      <SUBNODES COUNT="2">
+        <NODE TYPE="FOLDER" NAME="H">
+          <SUBNODES COUNT="1">
+            <NODE TYPE="PLAYLIST" NAME="H16 2023/2025 Darker Sounds-2">
+              <PLAYLIST ENTRIES="6" TYPE="LIST" UUID="16161616161616161616161616161616">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:obwigszyh-1616.mp3"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:hefty-underground.mp3"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:hefty-weapon.mp3"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:va-cut.mp3"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:noseda-low.mp3"></PRIMARYKEY></ENTRY>
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:H/:hefty-underground.mp3"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+          </SUBNODES>
+        </NODE>
+        <NODE TYPE="FOLDER" NAME="Z">
+          <SUBNODES COUNT="1">
+            <NODE TYPE="PLAYLIST" NAME="Z19-2025 Sentimony">
+              <PLAYLIST ENTRIES="1" TYPE="LIST" UUID="19191919191919191919191919191919">
+                <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Z/:dragon-tetrakis.mp3"></PRIMARYKEY></ENTRY>
+              </PLAYLIST>
+            </NODE>
+          </SUBNODES>
+        </NODE>
+      </SUBNODES>
+    </NODE>
+  </PLAYLISTS>
+</NML>

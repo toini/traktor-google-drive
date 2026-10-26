@@ -1,0 +1,48 @@
+@using TraktorGoogleDrive.Discover
+@inject DiscoverService Discover
+
+@* Seed candidates with Add, and "never suggest" for names that are not seeds. *@
+@if (Items.Count == 0)
+{
+    <p class="discover-hint">None.</p>
+}
+else
+{
+    var fresh = Items.Where(c => !Discover.State.Seeds.ContainsKey(c.Key)).ToList();
+    @if (fresh.Count > 1)
+    {
+        <button class="discover-button" data-add-all @onclick="() => Discover.AddSeeds(fresh)">Add all @fresh.Count</button>
+    }
+    <ul class="discover-list discover-candidates">
+        @foreach (var c in Items)
+        {
+            var added = Discover.State.Seeds.ContainsKey(c.Key);
+            <li class="discover-row" data-candidate="@c.Name" data-candidate-kind="@c.Kind">
+                <div class="discover-row-main">
+                    <span class="discover-row-title">@c.Name</span>
+                    <span class="discover-row-meta">
+                        @(c.Kind == SeedKind.Label ? "label" : "artist") ·
+                        @if (c.Origin == SeedOrigin.EtiLisaa) { @c.Reason }
+                        else { @($"{c.Tracks} track{(c.Tracks == 1 ? "" : "s")}, {c.Rated4} rated 4★+{(ShowScore ? $", {c.Plays} plays, score {c.Score:0.#}" : "")}") }
+                    </span>
+                </div>
+                <div class="discover-row-actions">
+                    @if (added)
+                    {
+                        <span class="discover-hint" data-added>Watching</span>
+                    }
+                    else
+                    {
+                        <button class="discover-button" data-add @onclick="() => Discover.AddSeed(c)">Add</button>
+                        <button class="discover-button subtle" data-never title="Never suggest this name" @onclick="() => Discover.NeverSuggest(c.Name)">✕</button>
+                    }
+                </div>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<SeedCandidate> Items { get; set; } = [];
+    [Parameter] public bool ShowScore { get; set; }
+}

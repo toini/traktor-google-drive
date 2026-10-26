@@ -29,6 +29,15 @@
                 <span aria-hidden="true">«</span>
             </button>
         </div>
+        @* Track discovery (ADR 20261025-54): one entry per genre, above the playlists. *@
+        <nav class="discover-nav" aria-label="Discover">
+            <span class="discover-nav-title">Discover</span>
+            @foreach (var genre in TraktorGoogleDrive.Discover.Genres.All)
+            {
+                <NavLink class="discover-nav-link" href="@($"discover/{genre}")" Match="NavLinkMatch.Prefix"
+                         title="@TraktorGoogleDrive.Discover.Genres.Name(genre)" data-discover-genre="@genre">@genre</NavLink>
+            }
+        </nav>
         <FolderTree />
     </aside>
 

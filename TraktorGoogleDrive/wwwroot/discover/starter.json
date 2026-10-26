@@ -1,0 +1,79 @@
+{
+  "_comment": "Toni's triage from before Discover was deployed, confirmed by him. Each batch is applied once to his Discover log (ADR 20261025-54 §4.3) and never again; add new entries as a new batch with a new version. URLs, dates and states only.",
+  "batches": [
+    {
+      "version": "2026-10-25.1",
+      "seeds": [
+        {
+          "kind": "Label",
+          "name": "Carnivor Records",
+          "genre": "H",
+          "url": "https://carnivorrecords.bandcamp.com",
+          "watermark": "2026-10-25",
+          "origin": "EtiLisaa",
+          "reason": "“KOVA LOPPU. eti lisaa” on Obwigszyh – 1616 (Original Mix); every release listened through on 2026-10-25"
+        }
+      ],
+      "releasesHeard": [
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/feeding-generation-z-ii",
+          "releaseTitle": "Feeding Generation Z II"
+        },
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/feeding-generation-z",
+          "releaseTitle": "Feeding Generation Z"
+        },
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/elegies",
+          "releaseTitle": "Elegies"
+        },
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/19th-century",
+          "releaseTitle": "19th Century"
+        },
+        {
+          "genre": "H",
+          "label": null,
+          "artist": "Various Artists",
+          "release": "https://www.beatport.com/release/toxic-compilation-2025-v1/4930160",
+          "releaseTitle": "Toxic Compilation 2025 V.1",
+          "id": "beatport:4930160"
+        }
+      ],
+      "tracks": [
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/feeding-generation-z-ii",
+          "releaseTitle": "Feeding Generation Z II",
+          "track": "https://carnivorrecords.bandcamp.com/track/satanas",
+          "pass1": "Maybe"
+        },
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/feeding-generation-z-ii",
+          "releaseTitle": "Feeding Generation Z II",
+          "track": "https://carnivorrecords.bandcamp.com/track/im-no-immigrant",
+          "pass1": "Maybe"
+        },
+        {
+          "genre": "H",
+          "label": "Carnivor Records",
+          "release": "https://carnivorrecords.bandcamp.com/album/elegies",
+          "releaseTitle": "Elegies",
+          "track": "https://carnivorrecords.bandcamp.com/track/madtype-shadym-t-y-remix",
+          "pass1": "Maybe"
+        }
+      ]
+    }
+  ]
+}

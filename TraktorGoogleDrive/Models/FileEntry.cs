@@ -21,6 +21,19 @@ namespace TraktorGoogleDrive.Models
         public string EntryKey { get; set; } = string.Empty;
         /// <summary>Has a Drive file, so it gets a play button and a place in the queue.</summary>
         public bool IsPlayable => Kind == EntryKind.Track && !string.IsNullOrEmpty(DriveFileId);
+        /// <summary>
+        /// Set for a discovery preview (ADR 20261025-54 §2): a store's stream rather
+        /// than a Drive file. <see cref="DriveFileId"/> then holds a synthetic id
+        /// ("discover:bandcamp:&lt;trackId&gt;") so the queue and the remote snapshot
+        /// work unchanged. See <see cref="PlayableItem"/>.
+        /// </summary>
+        public PlayableSource? External { get; set; }
+        /// <summary>Downloadable whole for offline play (prefetch.js). A store stream is not: no CORS.</summary>
+        public bool CanCache => External is null;
+        /// <summary>Has bytes this browser can read for a waveform. A store stream does not.</summary>
+        public bool CanWaveform => External is null;
+        /// <summary>A Cast device can be handed it. Not a store stream: the TV cannot use our cookie.</summary>
+        public bool CanCast => External is null;
         public string? Title => Track?.Title;
         public double? PlaytimeFloat => Track?.PlaytimeFloat;
     }
