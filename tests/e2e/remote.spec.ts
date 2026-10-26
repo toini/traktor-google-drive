@@ -5,6 +5,7 @@ import { mockDrive, seedToken, FAKE_TOKEN } from './drive-mock';
 import type { MockOptions } from './drive-mock';
 import { CAST_DEVICE_NAME, castLoads, castState, mockCastSdk } from './cast-mock';
 import { PORT } from './playwright.remote.config';
+import { mockDiscover, discoverNml, CARNIVOR } from './discover-mock';
 
 // Remote control, increment 1 (ADR 20261018-63 §6): a second device sees what
 // the first plays and can pause, play, seek and skip it. Every test is two (or
@@ -352,6 +353,35 @@ test.describe('remote control', () => {
 
     await expect(strip(tablet.page)).toHaveCount(0, { timeout: 30_000 });
     await expect(laptop.page.locator('[data-remote-toggle]')).toHaveAttribute('data-remote-connected', 'false');
+  });
+});
+
+test.describe('remote control of a Discover preview', () => {
+  test('the tablet sees the laptop\'s preview and Next walks the Listen queue', async ({ browser }) => {
+    const laptop = await device(browser, { name: 'Laptop · Chrome', mock: { nml: discoverNml() } });
+    await mockDiscover(laptop.page, { audioSeconds: 60 });
+    const tablet = await device(browser, { name: 'Tablet · Chrome', mock: { nml: discoverNml() } });
+
+    const p = laptop.page;
+    await p.goto('/discover/H/seeds');
+    await p.locator('[data-section="eti-lisaa"] [data-add-all]').click();
+    const row = p.locator('tr[data-seed="Carnivor Records"]');
+    await row.locator('[data-seed-url]').fill(CARNIVOR);
+    await row.locator('[data-seed-url]').press('Tab');
+    await row.locator('[data-refresh]').click();
+    await expect(row.locator('[data-release-count]')).toHaveText('2');
+    await p.locator('[data-tab="listen"]').click();
+    await p.locator('[data-play-preview]').click();
+    await expect.poll(async () => (await playerAudio(p))?.paused).toBe(false);
+
+    await controllerOn(tablet);
+    await expect(strip(tablet.page)).toContainText('Playing on Laptop · Chrome');
+    await expect(tablet.page.locator('.player-title')).toContainText('Internal Motion (Original Mix)');
+
+    await tablet.page.getByRole('button', { name: 'Next track' }).click();
+    await expect(p.locator('.player-title')).toContainText('Burnt Side (Original Mix)');
+    await expect(p.locator('[data-current] [data-track-title]')).toHaveText('Burnt Side (Original Mix)');
+    await expect(tablet.page.locator('.player-title')).toContainText('Burnt Side (Original Mix)');
   });
 });
 

@@ -3,8 +3,9 @@ import { mockDrive, seedToken } from './drive-mock';
 import { mockDiscover, discoverNml, CARNIVOR, type DiscoverCalls } from './discover-mock';
 
 // Discover previews in the player bar (ADR 20261025-54 §2): the Listen queue is
-// the player's queue, audio comes from our endpoint's redirect to the store CDN
-// (here a stand-in serving a silent MP3), and nothing Drive-only touches it:
+// the player's queue, audio comes from our endpoint (the real one redirects to the
+// store CDN; here the mock serves a silent MP3 itself, see discover-mock.ts), and
+// nothing Drive-only touches it:
 // no whole-file download, no waveform, no buffer bar.
 
 const card = (page: Page) => page.locator('[data-current]');
@@ -18,7 +19,7 @@ async function openListen(page: Page, audioSeconds = 4): Promise<{ calls: Discov
   await seedToken(page);
   // A whole-file download of a preview would go to Drive with its synthetic id.
   const driveForDiscover: string[] = [];
-  page.on('request', (r) => { if (r.url().includes('googleapis.com') && r.url().includes('discover')) driveForDiscover.push(r.url()); });
+  page.on('request', (r) => { if (r.url().includes('googleapis.com') && /discover(%3A|:)/.test(r.url())) driveForDiscover.push(r.url()); });
 
   await page.goto('/discover/H/seeds');
   await page.locator('[data-section="eti-lisaa"] [data-add-all]').click();
@@ -33,7 +34,7 @@ async function openListen(page: Page, audioSeconds = 4): Promise<{ calls: Discov
 }
 
 test.describe('Discover playback', () => {
-  test('plays the card through the redirect, in the player bar, with no download, waveform or buffer bar', async ({ page }) => {
+  test('plays the card through our audio endpoint, in the player bar, with no download, waveform or buffer bar', async ({ page }) => {
     const { calls, driveForDiscover } = await openListen(page);
 
     await page.locator('[data-play-preview]').click();
@@ -42,7 +43,7 @@ test.describe('Discover playback', () => {
     await expect(page.locator('[data-player-source="bandcamp"]')).toContainText('Bandcamp · Carnivor Records');
     await expect(page.locator('[data-play-preview]')).toHaveText(/Pause/);
 
-    // Our endpoint, then the CDN; the media URL carries the release, never a stream URL.
+    // Our endpoint; the media URL carries the release, never a stream URL.
     expect(calls.audio[0]).toMatch(/^\/api\/proxy\/discover\/bandcamp\/776289323\?release=/);
     expect(calls.cdn).toContain('776289323');
     await expect(page.locator('.player-seek')).toBeVisible();          // the plain bar, not a waveform
@@ -75,10 +76,10 @@ test.describe('Discover playback', () => {
   });
 
   test('continuous play walks the Listen queue and the card follows', async ({ page }) => {
-    await openListen(page, 2);
-    await page.locator('[data-continuous-play]').check();
+    await openListen(page, 3);
     await page.locator('[data-play-preview]').click();
     await playing(page);
+    await page.locator('[data-continuous-play]').check();
     await expect(barTitle(page)).toContainText('Burnt Side (Original Mix)', { timeout: 30_000 });
     await expect(cardTitle(page)).toHaveText('Burnt Side (Original Mix)');
     // The next one is primed by src on the spare element, never downloaded.
@@ -88,14 +89,16 @@ test.describe('Discover playback', () => {
 
   test('a failed stream is probed with ?probe=1 and reloaded once, not taken for an expired token', async ({ page }) => {
     const { calls } = await openListen(page);
-    // The first CDN request fails, as an expired signed URL would.
+    // The first audio response fails, as an expired signed URL at the CDN would.
     let failed = false;
-    await page.route('https://stream.fixture.test/**', (route) => {
-      if (!failed) { failed = true; return route.fulfill({ status: 403, body: '' }); }
+    await page.route('**/api/proxy/discover/bandcamp/**', (route) => {
+      const u = new URL(route.request().url());
+      if (!failed && u.searchParams.get('probe') !== '1') { failed = true; return route.fulfill({ status: 403, body: '' }); }
       return route.fallback();
     });
     await page.locator('[data-play-preview]').click();
     await playing(page);
+    expect(failed).toBe(true);
     expect(calls.audio.some((a) => a.includes('probe=1'))).toBe(true);
     await expect(page.locator('[data-player-signin]')).toHaveCount(0);
   });

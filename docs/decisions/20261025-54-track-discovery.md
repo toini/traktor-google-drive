@@ -55,10 +55,27 @@ the text below still says "recommended", the decisions list is what settles it.
   agreeing when both sides know them; a title under 12 characters needs labels on
   both sides. A heard Beatport release therefore stays heard when Bandcamp or
   Discogs lists it.
-- **Not yet**: playback of discovery tracks in the player bar (`PlayableItem` and the
-  `discover:H` queue). It changes `PlayerService`, where PR 17 (prefetch and
-  buffering) is in flight, so it is built after PR 17 merges. Until then a track is
-  heard through "Bandcamp ↗".
+- **Playback in the player bar** (built after PR 17, prefetch and buffering, merged):
+  - **Item model.** The ADR recommended a `PlayableItem` interface (Q2). As built it
+    is the Q1 shape with Q2's capability flags: a preview is a `FileEntry` with an
+    `External` source (`PlayableItem.Discover(...)`), a synthetic id
+    `discover:bandcamp:<trackId>`, and `CanCache`, `CanWaveform`, `CanCast` flags.
+    PR 17 keyed the queue, prefetch, priming, waveform, Cast and remote code by
+    `FileEntry`, so the flags kept every one of those paths unchanged for Drive
+    files while each Drive-only step now asks before it runs.
+  - **The Listen queue is the player's queue** (`discover:H`), offered like a
+    playlist page's rows: Next/Previous, continuous play and a remote controller walk
+    it. While a preview plays the card follows the player, a verdict starts the next
+    track, and P plays or pauses.
+  - **Stream only.** A preview is never planned for whole-file download
+    (`stream` items are left out of `prefetch.js`'s plan, which also refuses
+    `discover:` ids), gets no waveform (the plain seek bar instead), no buffer bar,
+    and is not remembered for a reload. The next track is still primed by `src` on
+    the spare element, which costs one redirect and a few kilobytes.
+  - **Errors.** `player.js` probes a preview with `?probe=1` (a redirect cannot be
+    read cross-origin) and reloads once on a failed stream with a good probe, which
+    is what an expired signed URL looks like.
+  - **Cast** refuses a preview with a message; the TV cannot use our cookie.
 - **Limits of the first cut**: "heard through" is offered only after a refresh has
   read the seed's whole list down to its watermark in this session, because the walk
   reads newest first and anything unread is older (a watermark above it would hide it
@@ -1067,7 +1084,14 @@ and the first real check is Toni's re-consent on the branch.
   `fixtures/discover-collection.nml` (an H16-shaped slice): `/api/discover/**` and
   the appDataFolder are mocked, and any request to a store host is aborted and
   recorded, and the tests assert there were none.
-  Playback in the player bar is tested with the increment's player step.
+- `tests/e2e/discover-play.spec.ts`: the mocked audio endpoint answers 302 to a
+  stand-in CDN serving a generated silent MP3 (with ranges, no CORS headers). Tested:
+  playing through the redirect, no download, waveform or buffer bar, a verdict and
+  the bar's Next moving card and player together, continuous play, the probe and
+  reload on a failed stream, and that a reload does not remember a preview.
+- The xUnit project is `tests/server-unit/TraktorGoogleDrive.Server.Tests.csproj`,
+  beside `tests/unit` (the client's gig-preview rules), which landed on master
+  meanwhile.
 
 ## Consequences
 
