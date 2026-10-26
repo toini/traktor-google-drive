@@ -56,12 +56,24 @@ export const DRIVE_FILES = [
   { id: 'drive-gig-two', name: 'gig-two.flac', mimeType: 'audio/flac', parents: ['folder-gig'] },
   { id: 'drive-gig-three', name: 'gig-three.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
   { id: 'drive-gig-four', name: 'gig-four.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
+  { id: 'drive-gig-exit', name: 'gig-exit.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
+  { id: 'drive-gig-gas-chamber', name: 'gig-gas-chamber.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
   // Gig Night. The separator's silent file is in Drive and must still never
   // be requested; Cafe Noir is stored NFC while the collection has it NFD.
   { id: 'drive-silent', name: 'silent.wav', mimeType: 'audio/wav', parents: ['folder-gig'] },
   { id: 'drive-cafe', name: 'Caf\u00e9 Noir.wav', mimeType: 'audio/wav', parents: ['folder-gig'] },
   { id: 'drive-usb', name: 'usb-anthem.mp3', mimeType: 'audio/mpeg', parents: ['folder-gig'] },
 ];
+
+/**
+ * Files served longer than the default WAV, matching their PLAYTIME in the
+ * fixture: an entrance loop (less than 30 s after the load cue) can only be told
+ * from an exit loop on a track that long.
+ */
+export const WAV_SECONDS: Record<string, number> = {
+  'drive-gig-exit': 40,
+  'drive-gig-gas-chamber': 240,
+};
 
 /**
  * Minimal 16-bit mono PCM WAV. Generated rather than committed so there is no
@@ -162,9 +174,17 @@ export type MockOptions = {
 export async function mockDrive(page: Page, opts: MockOptions = {}): Promise<DriveCall[]> {
   const calls: DriveCall[] = [];
   const nml = opts.nml ?? readFileSync(join(here, 'fixtures', 'collection.nml'), 'utf8');
-  const wav = makeWav(opts.wavSeconds);
+  const defaultWav = makeWav(opts.wavSeconds);
+  const longWavs = new Map<string, Buffer>();
+  const wavFor = (url: string) => {
+    const id = Object.keys(WAV_SECONDS).find((k) => new URL(url).pathname.endsWith(`/${k}`));
+    if (!id) return defaultWav;
+    if (!longWavs.has(id)) longWavs.set(id, makeWav(WAV_SECONDS[id]));
+    return longWavs.get(id)!;
+  };
 
   const serveMedia = async (route: Route, url: string) => {
+    const wav = wavFor(url);
     const headers = await route.request().allHeaders();
     // A direct googleapis.com download (the player's whole-file cache, the
     // waveform) carries the token as a header; the proxy, as a cookie.

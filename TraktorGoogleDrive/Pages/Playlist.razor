@@ -326,7 +326,9 @@ else
 
     string PreviewTitle(FileEntry? from)
     {
-        const string what = "each track from its load cue to the end of its last loop, then the next";
+        // GigPreview.EntranceLoopWindowSeconds: a loop just after the load cue is where the track is mixed in.
+        const string what = "each track from its load cue to the end of its last exit loop, then the next "
+            + "(a loop within 30 s of the load cue is an entrance loop and is ignored)";
         if (from is null) return $"Play {what}";
         var where = from.DriveFileId == Player.CurrentFileId ? " (the current track)" : "";
         return $"Preview from #{from.PlaylistIndex}{where}: {what}";

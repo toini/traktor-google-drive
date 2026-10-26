@@ -64,21 +64,30 @@ test('gig preview advances on the primed element, already at the load cue', asyn
   await mockDrive(page);
   await seedToken(page);
   await page.goto(`/playlist/${GIG}`);
+  // Gig Exit is the one fixture track whose preview end comes from an exit loop
+  // (31.5 s); the others' loops are entrance loops, so they play to their end.
+  await page.locator('#playlist-table tbody tr', { hasText: 'Gig Exit' }).first().locator('.play-button').click();
+  await expect(title(page)).toContainText('Gig Exit');
   await page.locator('[data-preview-set]').click();
+  await expect(page.locator('[data-preview-range]')).toHaveAttribute('data-end', '31.5');
 
-  // Gig Three's load cue is at 0.4 s: primed there while Gig Two plays.
-  await expect(title(page)).toContainText('Gig Two', { timeout: 20_000 });
-  await expect.poll(() => primedState(page)).toMatchObject({ id: 'drive-gig-three', start: 0.4, ready: true });
+  // Gas Chamber's load cue is at 120 s: primed there while Gig Exit plays.
+  await expect.poll(() => primedState(page), { timeout: 20_000 })
+    .toMatchObject({ id: 'drive-gig-gas-chamber', start: 120, ready: true });
 
-  await expect.poll(async () => (await gaps(page)).find((g) => g.to === 'drive-gig-three'), { timeout: 20_000 })
+  // Up to just before the exit loop's end, so the advance is the preview bound,
+  // not the 40-second file ending.
+  await page.evaluate(async () => (await import('/player.js')).seek(31));
+  await expect.poll(async () => (await gaps(page)).find((g) => g.to === 'drive-gig-gas-chamber'), { timeout: 20_000 })
     .toBeTruthy();
-  const gap = (await gaps(page)).find((g) => g.to === 'drive-gig-three')!;
+  const gap = (await gaps(page)).find((g) => g.to === 'drive-gig-gas-chamber')!;
+  expect(gap.from).toBe('drive-gig-exit');
   expect(gap.primed).toBe(true);
   expect(gap.gapMs).toBeLessThan(MAX_GAP_MS);
   // It started at the cue, not at the top.
-  expect(gap.at).toBeGreaterThanOrEqual(0.39);
-  expect(gap.at).toBeLessThan(0.6);
-  await expect(page.locator('[data-preview-chip]')).toContainText('3/4');
+  expect(gap.at).toBeGreaterThanOrEqual(119.99);
+  expect(gap.at).toBeLessThan(120.2);
+  await expect(page.locator('[data-preview-chip]')).toContainText('6/6');
 });
 
 test('picking another row discards the primed track and plays the pick', async ({ page }) => {

@@ -31,7 +31,7 @@
 <NML VERSION="19">
   <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
   <MUSICFOLDERS></MUSICFOLDERS>
-  <COLLECTION ENTRIES="17">
+  <COLLECTION ENTRIES="19">
 
     <ENTRY MODIFIED_DATE="2024/3/17" TITLE="Alpha Drift" ARTIST="Test Artist One">
       <LOCATION DIR="/:Music/:Sets/:" FILE="alpha.wav" VOLUME="Macintosh HD"></LOCATION>
@@ -100,10 +100,11 @@
     </ENTRY>
 
     <!--
-      Gig preview (ADR 20261018-47). Every cue sits inside the first 2 s, because
-      the mock serves the same 2-second WAV for every file, and PLAYTIME matches
+      Gig preview (ADR 20261018-47). Gig One to Four keep every cue inside 2 s, because
+      the mock serves a 2-second WAV by default, and PLAYTIME matches
       it. CUE_V2 START/LEN are milliseconds; HOTCUE is 0-based, -1 = none.
     -->
+    <!-- Both loops start within 30 s of the load cue: entrance loops, so to the end. -->
     <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig One" ARTIST="Gig Artist">
       <LOCATION DIR="/:Music/:Gig/:" FILE="gig-one.mp3" VOLUME="Macintosh HD"></LOCATION>
       <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="4000"></INFO>
@@ -115,7 +116,7 @@
       <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="1000.0" LEN="500.0" REPEATS="-1" HOTCUE="3"></CUE_V2>
     </ENTRY>
 
-    <!-- No load cue: preview starts at 0. -->
+    <!-- No load cue: preview starts at 0. Its loop is an entrance loop, so to the end. -->
     <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Two" ARTIST="Gig Artist">
       <LOCATION DIR="/:Music/:Gig/:" FILE="gig-two.flac" VOLUME="Macintosh HD"></LOCATION>
       <INFO BITRATE="900000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="200"></INFO>
@@ -141,6 +142,40 @@
       <INFO BITRATE="320000" PLAYTIME="2" PLAYTIME_FLOAT="2.0" FILESIZE="80"></INFO>
       <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="1500.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
       <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="200.0" LEN="300.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+    </ENTRY>
+
+    <!--
+      The only two tracks long enough to tell an entrance loop (starts less than
+      30 s after the load cue) from an exit loop. The mock serves each a WAV of
+      its PLAYTIME (drive-mock.ts, WAV_SECONDS).
+
+      Gig Exit: an entrance loop 0.2 s after the load cue, then an exit loop
+      30.7 s after it. The preview ends at the exit loop's end, 31.5 s.
+    -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gig Exit" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-exit.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="40" PLAYTIME_FLOAT="40.0" FILESIZE="625"></INFO>
+      <TEMPO BPM="120.000000"></TEMPO>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="300.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
+      <CUE_V2 NAME="In" DISPL_ORDER="0" TYPE="5" START="500.0" LEN="400.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+      <CUE_V2 NAME="Out" DISPL_ORDER="0" TYPE="5" START="31000.0" LEN="500.0" REPEATS="-1" HOTCUE="2"></CUE_V2>
+    </ENTRY>
+
+    <!--
+      Shaped like Toni's "Gas Chamber (Original Mix)": hotcue 1 at the start, the
+      load cue (2) halfway, a 16-beat loop (3) right after it, hotcue 4 later.
+      That loop is where he mixes in, so the preview plays from the load cue to
+      the end instead of stopping a few seconds in.
+    -->
+    <ENTRY MODIFIED_DATE="2026/8/1" TITLE="Gas Chamber" ARTIST="Gig Artist">
+      <LOCATION DIR="/:Music/:Gig/:" FILE="gig-gas-chamber.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO BITRATE="320000" PLAYTIME="240" PLAYTIME_FLOAT="240.0" FILESIZE="3750"></INFO>
+      <TEMPO BPM="140.000000"></TEMPO>
+      <CUE_V2 NAME="AutoGrid" DISPL_ORDER="0" TYPE="4" START="500.0" LEN="0.0" REPEATS="-1" HOTCUE="-1"><GRID BPM="140.0"></GRID></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="0" START="500.0" LEN="0.0" REPEATS="-1" HOTCUE="0"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="3" START="120000.0" LEN="0.0" REPEATS="-1" HOTCUE="1"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="5" START="121714.0" LEN="6857.14" REPEATS="-1" HOTCUE="2"></CUE_V2>
+      <CUE_V2 NAME="n.n." DISPL_ORDER="0" TYPE="0" START="180000.0" LEN="0.0" REPEATS="-1" HOTCUE="3"></CUE_V2>
     </ENTRY>
 
     <!--
@@ -231,12 +266,14 @@
         </NODE>
 
         <NODE TYPE="PLAYLIST" NAME="Gig Prep">
-          <PLAYLIST ENTRIES="5" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f66">
+          <PLAYLIST ENTRIES="7" TYPE="LIST" UUID="0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f66">
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-one.mp3"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-two.flac"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-local.mp3"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-three.mp3"></PRIMARYKEY></ENTRY>
             <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-four.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-exit.mp3"></PRIMARYKEY></ENTRY>
+            <ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Music/:Gig/:gig-gas-chamber.mp3"></PRIMARYKEY></ENTRY>
           </PLAYLIST>
         </NODE>
 
