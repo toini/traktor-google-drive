@@ -76,6 +76,11 @@ the text below still says "recommended", the decisions list is what settles it.
     read cross-origin) and reloads once on a failed stream with a good probe, which
     is what an expired signed URL looks like.
   - **Cast** refuses a preview with a message; the TV cannot use our cookie.
+- **The collection** is read through `CollectionService.GetCollectionAsync`, so seeds
+  and owned-track detection use PR 20's cached `CollectionSnapshot` rather than
+  parsing the NML again. The snapshot's extras gained `PlayCount` and `LastPlayed`
+  (for seed ranking), which bumps `CollectionSnapshot.CurrentVersion` to 2: the
+  first load after deploy re-parses once.
 - **Limits of the first cut**: "heard through" is offered only after a refresh has
   read the seed's whole list down to its watermark in this session, because the walk
   reads newest first and anything unread is older (a watermark above it would hide it
