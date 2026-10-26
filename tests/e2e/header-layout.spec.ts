@@ -98,16 +98,13 @@ test('every data header keeps its resize handle, and dragging one still widens i
 
   const header = page.locator('#playlist-table th[data-col="comment2"]');
   const before = await header.evaluate((el) => (el as HTMLElement).offsetWidth);
-  await page.evaluate(() => {
-    const th = document.querySelector('#playlist-table th[data-col="comment2"]') as HTMLElement;
-    const resizer = th.querySelector('.column-resizer') as HTMLElement;
-    const r = resizer.getBoundingClientRect();
-    const opts = { bubbles: true, cancelable: true, clientX: r.x + 2, clientY: r.y + 2 };
-    resizer.dispatchEvent(new MouseEvent('mousedown', opts));
-    document.dispatchEvent(new MouseEvent('mousemove', { ...opts, clientX: r.x + 60 }));
-    document.dispatchEvent(new MouseEvent('mouseup', { ...opts, clientX: r.x + 60 }));
-    resizer.dispatchEvent(new MouseEvent('click', { ...opts, clientX: r.x + 60 }));
-  });
+  // Real input: synthetic events in one evaluate hid a drag that sorted.
+  const box = (await header.locator('.column-resizer').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(400); // let a wrongly delivered sort click land
   await expect(header).toHaveAttribute('aria-sort', 'none');
   const after = await header.evaluate((el) => (el as HTMLElement).offsetWidth);
   expect(after).toBeGreaterThan(before + 20);
