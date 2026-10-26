@@ -36,14 +36,16 @@ public class CollectionService
     private readonly AuthService _auth;
     private readonly AppErrors _errors;
     private readonly IJSRuntime _js;
+    private readonly LocalCache _cache;
 
     private Collection? _collection;
     private Task<Collection>? _inFlight;
-    private Dictionary<string, TrackExtras> _extrasByPath = [];
+    private Dictionary<string, CollectionSnapshot.ExtrasData> _extrasByPath = [];
     private Dictionary<string, List<Models.PlaylistEntry>> _entriesByUuid = [];
 
-    public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js)
+    public CollectionService(DriveService drive, AuthService auth, AppErrors errors, IJSRuntime js, LocalCache cache)
     {
+        _cache = cache;
         _drive = drive;
         _auth = auth;
         _errors = errors;
@@ -79,31 +81,58 @@ public class CollectionService
             var token = await _auth.GetTokenAsync()
                 ?? throw new DriveAuthException("No access token — sign in again.");
 
+            // The Drive file index does not depend on the collection, so it
+            // loads alongside it rather than after it.
+            _drive.StartIndex(token);
+
+            var fetchWatch = System.Diagnostics.Stopwatch.StartNew();
+            _toCache = null;
+            _cached = null;
             var content = await FetchCollectionTextAsync(token);
 
-            // The old code fed Drive's JSON error body straight into the XML
-            // parser, so a 404 surfaced as an unhandled XmlException and a blank
-            // page. Check the shape before parsing.
-            if (!LooksLikeNml(content))
-                throw new DriveRequestException(
-                    $"{CollectionFileName} (id {ResolvedFileId}) is not Traktor XML. "
-                  + $"First bytes: {Truncate(content, 200)}");
+            if (_cached is { } snapshot)
+            {
+                // Traktor has not synced since the last visit: the parsed
+                // collection from then, no download and no XML.
+                var restoreWatch = System.Diagnostics.Stopwatch.StartNew();
+                (_collection, _entriesByUuid, _extrasByPath) = snapshot.Restore();
+                _cached = null;
+                Perf.Log("nml.restore", restoreWatch, $"{_collection.Tracks.Count} tracks");
+            }
+            else
+            {
+                Perf.Log("nml.fetch", fetchWatch, $"{content.Length} chars");
+                var parseWatch = System.Diagnostics.Stopwatch.StartNew();
 
-            // The same two calls NmlParser.Load makes, done here so the document
-            // can be read again for what the package does not model, without
-            // parsing a multi-MB file twice.
-            var doc = XDocument.Parse(content, LoadOptions.None);
-            _collection = Collection.FromXml(doc);
-            _extrasByPath = ReadTrackExtras(doc);
-            _entriesByUuid = Models.PlaylistEntries.Read(doc, _collection.Tracks);
+                // The old code fed Drive's JSON error body straight into the XML
+                // parser, so a 404 surfaced as an unhandled XmlException and a blank
+                // page. Check the shape before parsing.
+                if (!LooksLikeNml(content))
+                    throw new DriveRequestException(
+                        $"{CollectionFileName} (id {ResolvedFileId}) is not Traktor XML. "
+                      + $"First bytes: {Truncate(content, 200)}");
+
+                // The same two calls NmlParser.Load makes, done here so the document
+                // can be read again for what the package does not model, without
+                // parsing a multi-MB file twice.
+                var doc = XDocument.Parse(content, LoadOptions.None);
+                Perf.Log("nml.parse.xml", parseWatch);
+                _collection = Collection.FromXml(doc);
+                Perf.Log("nml.parse.collection", parseWatch);
+                _extrasByPath = ReadTrackExtras(doc);
+                _entriesByUuid = Models.PlaylistEntries.Read(doc, _collection.Tracks);
+                Perf.Log("nml.parse", parseWatch, $"{_collection.Tracks.Count} tracks");
+
+                // Only once it parsed: a cached file that cannot be read would fail
+                // every load after this one too.
+                if (_toCache is { } fresh)
+                    _ = WriteCacheAsync(fresh.FileId, fresh.ModifiedTime, _collection, _entriesByUuid, _extrasByPath);
+            }
 
             LastAdded = _collection.Tracks
                 .Where(t => Models.TrackDate.Parse(t.ImportDate) is not null)
                 .OrderByDescending(t => Models.TrackDate.Parse(t.ImportDate))
                 .FirstOrDefault();
-
-            if (ResolvedFileId is { } id)
-                LastSyncedAt = (await _drive.GetMetadataAsync(id, token))?.ModifiedTime;
 
             return _collection;
         }
@@ -115,10 +144,21 @@ public class CollectionService
 
     private async Task<string> FetchCollectionTextAsync(string token)
     {
-        // 1. A file the user explicitly picked always wins.
+        // 1. A file the user explicitly picked always wins. Its modifiedTime
+        //    says whether the copy from the last visit is still current.
         var pinned = await GetStoredIdAsync();
-        if (!string.IsNullOrEmpty(pinned) && await TryFetchAsync(pinned, token) is { } fromPinned)
-            return fromPinned;
+        if (!string.IsNullOrEmpty(pinned))
+        {
+            var meta = await _drive.GetMetadataAsync(pinned, token);
+            if (meta?.ModifiedTime is { } modified && await ReadCacheAsync(pinned, modified))
+            {
+                ResolvedFileId = pinned;
+                LastSyncedAt = modified;
+                return "";
+            }
+            if (await TryFetchAsync(pinned, token, meta?.ModifiedTime) is { } fromPinned)
+                return fromPinned;
+        }
 
         // 2. Otherwise resolve fresh, every time. Discovery is one name query,
         //    and skipping it to reuse a cached id is how the app ended up stuck
@@ -148,26 +188,38 @@ public class CollectionService
                     string.Join("\n", Candidates.Select((c, i) => $"{(i == 0 ? "->" : "  ")} {c.Describe()}")));
             }
 
-            var content = await _drive.DownloadTextAsync(chosen.Id, token);
+            // Discovery already says when Drive last got a new version, so that
+            // is the sync time, and whether the cached copy is still this file.
             ResolvedFileId = chosen.Id;
+            LastSyncedAt = chosen.ModifiedTime;
+            if (chosen.ModifiedTime is { } modified && await ReadCacheAsync(chosen.Id, modified))
+                return "";
+
+            var content = await _drive.DownloadTextAsync(chosen.Id, token);
+            if (chosen.ModifiedTime is { } m) _toCache = (chosen.Id, m);
             return content;
         }
 
         // 3. Nothing found by name — fall back to the id this app shipped with.
-        if (await TryFetchAsync(LegacyCollectionFileId, token) is { } fromLegacy)
+        if (await TryFetchAsync(LegacyCollectionFileId, token, null) is { } fromLegacy)
+        {
+            LastSyncedAt = (await _drive.GetMetadataAsync(LegacyCollectionFileId, token))?.ModifiedTime;
             return fromLegacy;
+        }
 
         throw new DriveRequestException(
             $"No file named {CollectionFileName} found in this Drive account. "
           + "Check you signed in with the account that holds the Traktor collection.");
     }
 
-    private async Task<string?> TryFetchAsync(string fileId, string token)
+    private async Task<string?> TryFetchAsync(string fileId, string token, DateTimeOffset? modified)
     {
         try
         {
             var content = await _drive.DownloadTextAsync(fileId, token);
             ResolvedFileId = fileId;
+            LastSyncedAt = modified;
+            if (modified is { } m) _toCache = (fileId, m);
             return content;
         }
         catch (DriveAuthException)
@@ -178,6 +230,45 @@ public class CollectionService
         {
             return null; // 404 / gone — fall through to discovery
         }
+    }
+
+    // The collection parsed on the last visit (CollectionSnapshot), so a reload
+    // neither downloads megabytes nor parses XML when Traktor has not synced
+    // since. It carries the Drive file id and modifiedTime it was made from: a
+    // new sync, or a different file picked, is a miss.
+    private const string SnapshotKey = "collection-snapshot:v1";
+
+    /// <summary>Set when this load downloaded a file worth caching once it parses.</summary>
+    private (string FileId, DateTimeOffset ModifiedTime)? _toCache;
+
+    /// <summary>Set when the cache had this very file: FetchCollectionTextAsync then returns no text.</summary>
+    private CollectionSnapshot? _cached;
+
+    private async Task<bool> ReadCacheAsync(string fileId, DateTimeOffset modified)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        if (await _cache.GetBytesAsync(SnapshotKey) is not { Length: > 0 } bytes) return false;
+
+        var snapshot = CollectionSnapshot.FromUtf8(bytes);
+        var hit = snapshot is { V: CollectionSnapshot.CurrentVersion }
+               && snapshot.FileId == fileId && snapshot.ModifiedTime == modified;
+        Perf.Log("nml.cache", watch, $"{(hit ? "hit" : "miss")}, {bytes.Length / 1024} KB");
+        if (hit) _cached = snapshot;
+        return hit;
+    }
+
+    private async Task WriteCacheAsync(
+        string fileId, DateTimeOffset modified, Collection collection,
+        Dictionary<string, List<Models.PlaylistEntry>> entries,
+        Dictionary<string, CollectionSnapshot.ExtrasData> extras)
+    {
+        // Later, not now: serializing costs a few hundred ms of the one thread,
+        // and right now that thread is rendering the page the user is waiting for.
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var bytes = CollectionSnapshot.Capture(fileId, modified, collection, entries, extras).ToUtf8();
+        var stored = await _cache.SetBytesAsync(SnapshotKey, bytes);
+        Perf.Log("nml.cache.write", watch, $"{bytes.Length / 1024} KB{(stored ? "" : ", not stored")}");
     }
 
     /// <summary>
@@ -195,17 +286,15 @@ public class CollectionService
     /// <summary>The release (album) title, ENTRY/ALBUM TITLE. Null when the track has none.</summary>
     public string? AlbumOf(Track? track) => ExtrasOf(track)?.Album;
 
-    private TrackExtras? ExtrasOf(Track? track) =>
+    private CollectionSnapshot.ExtrasData? ExtrasOf(Track? track) =>
         track is not null && _extrasByPath.TryGetValue(track.Path, out var extras) ? extras : null;
-
-    private sealed record TrackExtras(int? Color, int? Ranking, string? Album);
 
     // TraktorNmlParser (0.0.11) reads none of COLOR, RANKING or ALBUM. Keyed by
     // the path normalised exactly as Track.FromXml does it, since that is the
     // Track.Path playlists hold.
-    private static Dictionary<string, TrackExtras> ReadTrackExtras(XDocument doc)
+    private static Dictionary<string, CollectionSnapshot.ExtrasData> ReadTrackExtras(XDocument doc)
     {
-        var extras = new Dictionary<string, TrackExtras>();
+        var extras = new Dictionary<string, CollectionSnapshot.ExtrasData>();
         var entries = doc.Root?.Element("COLLECTION")?.Elements("ENTRY") ?? [];
 
         foreach (var entry in entries)
@@ -223,7 +312,7 @@ public class CollectionService
             var path = $"{location?.Attribute("DIR")?.Value}{location?.Attribute("FILE")?.Value}"
                 .Replace("Macintosh HD/", "").Replace(":", "").TrimStart('/');
 
-            if (path.Length > 0) extras[path] = new TrackExtras(color, ranking, album);
+            if (path.Length > 0) extras[path] = new CollectionSnapshot.ExtrasData(color, ranking, album);
         }
 
         return extras;

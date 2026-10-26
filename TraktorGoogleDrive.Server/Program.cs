@@ -29,19 +29,19 @@ var app = builder.Build();
 
 app.UseForwardedHeaders();
 
-app.UseBlazorFrameworkFiles();
-
-// Blazor fingerprints everything under /_framework, so those may be cached
-// hard. Our own root scripts (auth.js, table-resize.js, player.js) are NOT
-// fingerprinted, and with no Cache-Control at all browsers fall back to
-// heuristic caching — which served a stale auth.js against new WASM and left
-// the app stuck on "Checking authentication...". Force revalidation; the ETag
-// makes that a cheap 304.
-app.UseStaticFiles(new StaticFileOptions
-{
-    OnPrepareResponse = ctx =>
-        ctx.Context.Response.Headers[HeaderNames.CacheControl] = "no-cache",
-});
+// Every static file, _framework included, from the build's asset manifest:
+// - the precompressed .br / .gz the publish already produces, picked by
+//   Accept-Encoding. UseStaticFiles served none of them, so bootstrap.min.css
+//   went out as 160 KB instead of ~20 KB, and every script and stylesheet raw.
+// - fingerprinted names (the runtime's System.Private.CoreLib.<hash>.wasm etc.)
+//   as "max-age=31536000, immutable": a new build has new names, so they never
+//   need asking about again. Before, everything was "no-cache", i.e. a
+//   revalidation round trip per file on every start.
+// - our own unfingerprinted scripts (auth.js, player.js, …) still "no-cache"
+//   with an ETag: a heuristically cached stale auth.js against new WASM once
+//   left the app stuck on "Checking authentication...".
+// This replaces UseBlazorFrameworkFiles + UseStaticFiles.
+app.MapStaticAssets();
 
 // No UseHttpsRedirection: Cloud Run (and any CDN in front) terminates TLS and
 // forwards plain HTTP to the container, so redirecting here only risks a loop.

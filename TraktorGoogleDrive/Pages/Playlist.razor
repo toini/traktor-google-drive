@@ -197,6 +197,7 @@ else
     string? Name;
     string? shownUuid;
     List<FileEntry>? files;
+    Stopwatch? renderWatch;
     string? token;
     string? loadError;
     // Collection tracks with no Drive file; the existing "missing" list.
@@ -290,7 +291,23 @@ else
 
     protected override void OnInitialized() => Player.Changed += OnPlayerChanged;
 
-    void OnPlayerChanged() => InvokeAsync(StateHasChanged);
+    // Changed fires every second while a track plays (its progress), and a full
+    // re-render of a 200-row table each time kept a tablet's main thread ~40%
+    // busy. The page only shows which rows are the current one and where a
+    // preview would start, so it re-renders when one of those moves.
+    string? renderedPlayerState;
+
+    string PlayerStateKey()
+    {
+        var current = files is null ? "" : string.Join(",",
+            files.Select((f, i) => (f, i)).Where(x => Player.IsCurrentRow(x.f)).Select(x => x.i));
+        return $"{current}|{Player.CurrentFileId}|{Player.PreviewStartEntry?.PlaylistIndex}";
+    }
+
+    void OnPlayerChanged()
+    {
+        if (PlayerStateKey() != renderedPlayerState) InvokeAsync(StateHasChanged);
+    }
 
     // The row, not the file: a playlist can list the same track twice.
     string RowClass(FileEntry file) => Player.IsCurrentRow(file) ? "currently-playing" : "";
@@ -599,6 +616,7 @@ else
         files = null;
         loadError = null;
         missingCount = separatorCount = streamingCount = notInCollectionCount = 0;
+        var total = Stopwatch.StartNew();
         await LoadSortStateAsync();
         await LoadColumnStateAsync();
         await FallBackFromHiddenSortAsync();
@@ -607,7 +625,9 @@ else
 
         try
         {
+            Perf.Log("switch.prefs", total);
             var playlist = await CollectionService.GetPlaylistByUuid(Uuid);
+            Perf.Log("switch.collection", watch);
             if (playlist is null)
             {
                 loadError = "Playlist not found.";
@@ -623,7 +643,10 @@ else
                 return;
             }
 
+            var rowsWatch = Stopwatch.StartNew();
             files = await BuildRowsAsync(playlist, token);
+            Perf.Log("switch.rows", rowsWatch, $"{files.Count} entries");
+            renderWatch = Stopwatch.StartNew();
             missingCount = files.Count(f => f.Kind == EntryKind.Track && !f.IsPlayable);
             separatorCount = files.Count(f => f.Kind == EntryKind.Separator);
             streamingCount = files.Count(f => f.Kind == EntryKind.Streaming);
@@ -682,6 +705,12 @@ else
         // NOT gated on firstRender: tracks load asynchronously, so on the first
         // render files is still null and the resizers were never created at all.
         // initResizableTable is idempotent (it marks the table it has wired up).
+        renderedPlayerState = PlayerStateKey();
+        if (renderWatch is not null && files is not null)
+        {
+            Perf.Log("switch.render", renderWatch, $"{files.Count} rows");
+            renderWatch = null;
+        }
         if (files?.Count > 0)
         {
             await JS.InvokeVoidAsync("initResizableTable", "playlist-table");
