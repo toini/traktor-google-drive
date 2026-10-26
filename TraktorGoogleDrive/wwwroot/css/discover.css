@@ -195,6 +195,10 @@
 .discover-track-artist { color: #c9d1d9; }
 .discover-track-length { color: #8b949e; font-variant-numeric: tabular-nums; }
 
+.discover-play { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.discover-play-button { min-width: 7em; min-height: 40px; font-size: 15px; }
+.discover-play-button.on { border-color: #ff6600; color: #ff8833; }
+
 .discover-verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 
 .discover-verdict {

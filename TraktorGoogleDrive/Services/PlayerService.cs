@@ -213,7 +213,8 @@ public class PlayerService : IAsyncDisposable
     /// whether the next one is ready offline. Null for a remote player or the TV,
     /// which fetch for themselves.
     /// </summary>
-    public BufferStatus? Buffer => Remote is null && !_cast.IsConnected && _localFileId is not null ? _buffer : null;
+    public BufferStatus? Buffer =>
+        Remote is null && !_cast.IsConnected && _localFileId is not null && _file?.External is null ? _buffer : null;
 
     private BufferStatus _buffer = BufferStatus.None;
     // Whether this tab is playing for real (not just showing a restored track),
@@ -343,14 +344,18 @@ public class PlayerService : IAsyncDisposable
     {
         if (_module is null || _localFileId is null || _cast.IsConnected) return;
         _prefetching = true;
+        var loaded = _file is not null && _file.DriveFileId == _localFileId ? _file : null;
+        // A store stream (Discover) cannot be downloaded for offline play: its CDN
+        // sends no CORS headers. It is planned as stream-only, so prefetch.js leaves it alone.
         var current = new PrefetchItem(_localFileId,
-            _file is not null && _file.DriveFileId == _localFileId ? DriveAudio.EstimatedBytes(_file) : null, null, null);
+            loaded is not null ? DriveAudio.EstimatedBytes(loaded) : null, null, null, loaded is { CanCache: false });
         // The next track is also primed in a second element, at the place it
         // will start: its load cue in gig preview, the top otherwise. Same
         // arithmetic as PlayEntryAsync, so player.js can tell the primed copy fits.
+        // Priming is only a src on the spare element, so a store stream gets it too.
         var next = NextEntry is { } n
-            ? new PrefetchItem(n.DriveFileId, DriveAudio.EstimatedBytes(n), DriveAudio.UrlFor(n.DriveFileId),
-                _preview ? GigPreview.RangeFor(n.Track, n.Track?.PlaytimeFloat ?? 0).Start : 0)
+            ? new PrefetchItem(n.DriveFileId, DriveAudio.EstimatedBytes(n), UrlFor(n),
+                _preview ? GigPreview.RangeFor(n.Track, n.Track?.PlaytimeFloat ?? 0).Start : 0, !n.CanCache)
             : null;
         try { await _module.InvokeVoidAsync("plan", current, next); }
         catch (JSException) { /* playback goes on streaming */ }
@@ -371,7 +376,11 @@ public class PlayerService : IAsyncDisposable
         [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id,
         [property: System.Text.Json.Serialization.JsonPropertyName("bytes")] long? Bytes,
         [property: System.Text.Json.Serialization.JsonPropertyName("url")] string? Url,
-        [property: System.Text.Json.Serialization.JsonPropertyName("start")] double? Start);
+        [property: System.Text.Json.Serialization.JsonPropertyName("start")] double? Start,
+        [property: System.Text.Json.Serialization.JsonPropertyName("stream")] bool StreamOnly = false);
+
+    /// <summary>The audio element's URL for a row: Drive through our proxy, or a store stream's redirect.</summary>
+    private static string UrlFor(FileEntry file) => file.External?.StreamUrl ?? DriveAudio.UrlFor(file.DriveFileId);
 
     [JSInvokable]
     public void OnBufferChanged(string state, double fraction, bool nextReady, string? network)
@@ -655,14 +664,23 @@ public class PlayerService : IAsyncDisposable
             return;
         }
 
+        if (_cast.IsConnected && !file.CanCast)
+        {
+            // The TV fetches by itself and has no cookie of ours; a store stream
+            // stays on this device (ADR 20261025-54 §2.5).
+            _errors.Info("Discover previews play on this device only", "Disconnect the TV to listen here.");
+            if (_preview) EndPreview("a Discover preview cannot be cast");
+            return;
+        }
+
         var fileId = file.DriveFileId;
         var index = IndexOf(file);
         if (index >= 0) _lastIndex = index;
 
         _file = file;
         _title = file.Track?.Title ?? Path.GetFileName(file.Track?.Path ?? "");
-        CurrentUrl = DriveAudio.UrlFor(fileId);
-        _isWav = DriveAudio.IsUncompressed(file);
+        CurrentUrl = UrlFor(file);
+        _isWav = file.CanWaveform && DriveAudio.IsUncompressed(file);
         _localTime = 0;
         // Traktor's PLAYTIME until the player reports its own; with sliced
         // range responses that can take a while.

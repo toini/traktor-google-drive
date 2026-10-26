@@ -270,7 +270,9 @@ function sourceFor(fileId, streamUrl) {
 export function plan(current, next) {
     nextId = next?.id ?? null;
     plannedCurrent = current?.id ?? null;
-    cache.setPlan([current, next].filter(Boolean).map(({ id, bytes }) => ({ id, bytes })));
+    // `stream` marks a store stream (Discover): its CDN sends no CORS headers, so
+    // it can never be downloaded whole. It is played and primed by src only.
+    cache.setPlan([current, next].filter((x) => x && !x.stream).map(({ id, bytes }) => ({ id, bytes })));
     primeTarget = next?.id && next.url ? { id: next.id, url: next.url, start: next.start ?? 0 } : null;
     // PlayerService plans before it plays: the primed track may be the one
     // about to start, which play() then takes.
@@ -397,6 +399,13 @@ export function bufferState() {
  */
 async function probe(url) {
     try {
+        // A Discover preview's URL answers with a redirect to a store's CDN, which
+        // fetch() cannot read cross-origin; ?probe=1 makes our server answer the
+        // status itself instead (ADR 20261025-54 §2.3).
+        if (isStoreStream(url)) {
+            const res = await fetch(url + (url.includes('?') ? '&' : '?') + 'probe=1', { cache: 'no-store' });
+            return res.status;
+        }
         const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
         res.body?.cancel?.();
         return res.status;
@@ -404,6 +413,14 @@ async function probe(url) {
         return 0;
     }
 }
+
+function isStoreStream(url) {
+    return typeof url === 'string' && url.startsWith('/api/proxy/discover/');
+}
+
+// A store stream's signed URL can expire under a paused track: our endpoint then
+// redirects to a fresh one, so the first failure of a load gets one reload.
+let retriedStream = false;
 
 /** Loads the same URL again at `at`. The preview bound (endAt) is left alone. */
 function reload(at, play, keepReconnect) {
@@ -454,6 +471,11 @@ async function onError() {
         scheduleReconnect(at);
         return;
     }
+    if (status === 200 && isStoreStream(url) && !retriedStream) {
+        retriedStream = true;
+        reload(at, wasPlaying);
+        return;
+    }
     if (status !== 401 && status !== 403) { report('error'); return; }
 
     if (!retriedAuth) {
@@ -501,6 +523,7 @@ export async function play(fileId, url, startAt, stopAt, rebound) {
         announceTrack();
         stalled = null;
         retriedAuth = false;
+        retriedStream = false;
         swapping = false;
         settleNetwork();
         if (primedNow) reportProgress(true);

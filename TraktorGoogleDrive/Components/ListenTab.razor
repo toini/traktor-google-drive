@@ -5,7 +5,9 @@
 @* Pass 1 (ADR 20261025-54 §5): one track at a time, oldest release first.
    Skip / Maybe / Like move on; a rating, Buy and a note stay on the track until
    one of those three. Keys: S skip, M maybe, L like, 1–5 rate, B buy,
-   N note, O open on Bandcamp, Shift+S skip the release, U undo. *@
+   N note, O open on Bandcamp, Shift+S skip the release, U undo, P play/pause.
+   While a preview plays, the card follows the player, and a verdict starts the
+   next track (DiscoverPage wires that through PlayingKey and OnCurrentChanged). *@
 <section class="discover-listen" tabindex="0" @ref="root" @onkeydown="OnKey" data-listen>
     <div class="discover-toolbar">
         <button class="discover-button" data-refresh-all disabled="@refreshing" @onclick="RefreshAllAsync">
@@ -80,7 +82,7 @@
         <ol class="discover-list discover-queue">
             @foreach (var q in Queue.Where(q => q != item).Take(40))
             {
-                <li class="discover-row" data-queued="@q.TrackKey" @onclick="() => current = q">
+                <li class="discover-row" data-queued="@q.TrackKey" @onclick="() => Select(q)">
                     <span class="discover-row-title">@q.Track.Artist – @q.Track.Title</span>
                     <span class="discover-row-meta">@q.Release.Label · @q.Release.Title @(q.Release.Date is { } qd ? $"({qd:yyyy-MM-dd})" : "")</span>
                 </li>
@@ -96,6 +98,11 @@
     /// <summary>Player controls for the current item, when playback is wired in.</summary>
     [Parameter] public RenderFragment<QueueItem>? PlayControls { get; set; }
     [Parameter] public EventCallback<QueueItem?> OnCurrentChanged { get; set; }
+    /// <summary>The queue item the player is on, if it is one of these; the card follows it.</summary>
+    [Parameter] public string? PlayingKey { get; set; }
+    [Parameter] public EventCallback<QueueItem> OnTogglePlay { get; set; }
+
+    string? lastPlayingKey;
 
     QueueItem? current;
     QueueItem? lastItem;
@@ -111,10 +118,37 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // The player moved on by itself (continuous play, Next in the bar, a remote): follow it.
+        if (PlayingKey != lastPlayingKey)
+        {
+            lastPlayingKey = PlayingKey;
+            if (Queue.FirstOrDefault(q => q.TrackKey == PlayingKey) is { } playing) current = playing;
+        }
         // The card's track left the queue elsewhere (other device, release skipped): move on.
         if (current is not null && !Queue.Contains(current) && !Discover.State.Tracks.ContainsKey(current.TrackKey))
             current = null;
-        await OnCurrentChanged.InvokeAsync(Current);
+        await Notify(Current);
+    }
+
+    string? lastNotified;
+
+    /// <summary>
+    /// Tells the page about a new card, once per change. Invoking an EventCallback
+    /// re-renders the page, which re-sets these parameters; notifying on every
+    /// parameter set would loop forever.
+    /// </summary>
+    async Task Notify(QueueItem? item)
+    {
+        if (item?.TrackKey == lastNotified) return;
+        lastNotified = item?.TrackKey;
+        await OnCurrentChanged.InvokeAsync(item);
+    }
+
+    async Task Select(QueueItem q)
+    {
+        current = q;
+        note = null;
+        await Notify(q);
     }
 
     async Task Next()
@@ -123,7 +157,7 @@
         current = Queue.Skip(at + 1).FirstOrDefault(q => !Discover.State.Tracks.ContainsKey(q.TrackKey))
                   ?? Queue.FirstOrDefault(q => !Discover.State.Tracks.ContainsKey(q.TrackKey));
         note = null;
-        await OnCurrentChanged.InvokeAsync(current);
+        await Notify(current);
     }
 
     async Task Verdict(Pass1 verdict)
@@ -172,7 +206,7 @@
         Discover.ClearVerdict(lastItem.TrackKey);
         current = lastItem;
         lastItem = null;
-        await OnCurrentChanged.InvokeAsync(current);
+        await Notify(current);
     }
 
     async Task RefreshAllAsync()
@@ -198,6 +232,7 @@
                 await JS.InvokeVoidAsync("open", item.Track.TrackUrl ?? item.Release.Url, "_blank", "noopener");
                 break;
             case "1" or "2" or "3" or "4" or "5": Rate(e.Key[0] - '0'); break;
+            case "p" when Current is { } playItem: await OnTogglePlay.InvokeAsync(playItem); break;
         }
     }
 }

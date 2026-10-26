@@ -44,7 +44,26 @@ export const RELEASES = {
   ]),
 };
 
+/** Where the mocked audio endpoint redirects: a stand-in for Bandcamp's stream CDN. */
+export const FIXTURE_CDN = 'https://stream.fixture.test';
+
+/**
+ * A silent MPEG-1 Layer III stream: mono, 44.1 kHz, 128 kbps, every frame's side
+ * information zeroed, so a decoder outputs silence. Generated rather than committed,
+ * like drive-mock's WAV. 1152 samples per 417-byte frame.
+ */
+export function makeSilentMp3(seconds = 4): Buffer {
+  const frames = Math.ceil((seconds * 44100) / 1152);
+  const frame = Buffer.alloc(417);
+  frame.set([0xff, 0xfb, 0x90, 0xc0]);
+  return Buffer.concat(Array.from({ length: frames }, () => frame));
+}
+
 export type DiscoverCalls = {
+  /** Requests to our audio endpoint (redirects and probes). */
+  audio: string[];
+  /** Requests that reached the stand-in CDN, by track id. */
+  cdn: string[];
   lists: string[];
   releases: string[];
   appDataCreates: { name: string; body: string }[];
@@ -59,6 +78,8 @@ export type DiscoverMockOptions = {
   appDataScopeMissing?: boolean;
   /** Serve the real wwwroot/discover/starter.json. Otherwise an empty one, so other tests start blank. */
   realStarter?: boolean;
+  /** Length of each preview's silent MP3. */
+  audioSeconds?: number;
 };
 
 /**
@@ -67,13 +88,40 @@ export type DiscoverMockOptions = {
  * Any request to a real store fails the test (no live calls in e2e, ADR §12).
  */
 export async function mockDiscover(page: Page, opts: DiscoverMockOptions = {}): Promise<DiscoverCalls> {
-  const calls: DiscoverCalls = { lists: [], releases: [], appDataCreates: [], appDataUpdates: [], storeRequests: [] };
+  const calls: DiscoverCalls = { audio: [], cdn: [], lists: [], releases: [], appDataCreates: [], appDataUpdates: [], storeRequests: [] };
+  const mp3 = makeSilentMp3(opts.audioSeconds ?? 4);
   const files = new Map<string, { id: string; body: string }>();
   for (const [name, body] of Object.entries(opts.appData ?? {})) files.set(name, { id: `app-${name}`, body });
 
   await page.route(/bandcamp\.com|bcbits\.com|beatport\.com|discogs\.com/, (route) => {
     calls.storeRequests.push(route.request().url());
     return route.abort();
+  });
+
+  // The audio endpoint answers 302 to the CDN, as the server does; the CDN serves
+  // a silent MP3 with ranges and no CORS headers, like Bandcamp's.
+  await page.route('**/api/proxy/discover/bandcamp/**', (route) => {
+    const u = new URL(route.request().url());
+    calls.audio.push(u.pathname + u.search);
+    if (!(route.request().headers()['cookie'] ?? '').includes('drive_token=')) return route.fulfill({ status: 401, body: '' });
+    const id = u.pathname.split('/').pop();
+    if (u.searchParams.get('probe') === '1') return route.fulfill({ status: 200, body: '' });
+    return route.fulfill({ status: 302, headers: { location: `${FIXTURE_CDN}/stream/${id}.mp3`, 'cache-control': 'no-store' } });
+  });
+  await page.route(`${FIXTURE_CDN}/**`, (route) => {
+    calls.cdn.push(new URL(route.request().url()).pathname.split('/').pop()!.replace('.mp3', ''));
+    const range = route.request().headers()['range'];
+    const m = range?.match(/bytes=(\d+)-(\d*)/);
+    if (!m) {
+      return route.fulfill({ status: 200, headers: { 'content-type': 'audio/mpeg', 'accept-ranges': 'bytes', 'content-length': String(mp3.length) }, body: mp3 });
+    }
+    const start = Number(m[1]);
+    const end = m[2] ? Math.min(Number(m[2]), mp3.length - 1) : mp3.length - 1;
+    return route.fulfill({
+      status: 206,
+      headers: { 'content-type': 'audio/mpeg', 'accept-ranges': 'bytes', 'content-length': String(end - start + 1), 'content-range': `bytes ${start}-${end}/${mp3.length}` },
+      body: mp3.subarray(start, end + 1),
+    });
   });
 
   if (!opts.realStarter) {
