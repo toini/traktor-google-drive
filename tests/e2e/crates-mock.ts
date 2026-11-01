@@ -11,6 +11,9 @@ export const PARVATI = 'https://beatspace-parvati.bandcamp.com';
 export const MUIMINA_ALBUM = 'https://muiminasounds.bandcamp.com/album/abyss';
 export const NOBOT_ALBUM = 'https://nobotmusic.bandcamp.com/album/the-future';
 export const CODEX_SC = 'https://soundcloud.com/codex-spiralis/something-different';
+/** Bioport's page, from the shipped research batch (2026-11-01.2). */
+export const BIOPORT_TRACK = 'https://muscaria1.bandcamp.com/track/bioport';
+export const RESEARCH_BATCH = '2026-11-01.2';
 
 /** The key the app gives a crate item: "crate:<id>:<artist slug>--<title slug>". */
 export const itemKey = (artist: string, title: string) => {
@@ -47,6 +50,9 @@ export const CRATE_RELEASES = [
     { trackId: 3010, title: 'Wail', artist: 'Into The Screaming Abyss' },
     { trackId: 3004, title: 'Ululation', artist: 'Into The Screaming Abyss' },
   ]),
+  { ...release('https://muscaria1.bandcamp.com/album/bioport', 'Blue Sangoma Sounds', 'Blue Hour Sounds', [
+    { trackId: 3020, title: 'Bioport', artist: 'Ianuaria & Muscaria' },
+  ]), url: BIOPORT_TRACK },
 ];
 
 const LISTS: Record<string, string[]> = {
@@ -100,8 +106,32 @@ window.SC = {
   }, { Events: { READY: 'ready', PLAY: 'play', PAUSE: 'pause', FINISH: 'finish', ERROR: 'error' } }),
 };`;
 
-export async function mockCrates(page: Page): Promise<CrateCalls> {
+export type CrateMockOptions = {
+  /** Keep the shipped research batch (buy links for the unresolved tracks). Off: the list starts unresolved. */
+  research?: boolean;
+  /** Switch SoundCloud on in this browser (DiscoverFeatures.SoundCloud). */
+  soundcloud?: boolean;
+  /** localStorage entries to set before the app starts. */
+  storage?: Record<string, string>;
+};
+
+export async function mockCrates(page: Page, opts: CrateMockOptions = {}): Promise<CrateCalls> {
   const calls: CrateCalls = { discogs: [], soundcloud: [], bandcamp: [], storeRequests: [] };
+
+  const storage = { ...(opts.storage ?? {}), ...(opts.soundcloud ? { 'discover.soundcloud': 'on' } : {}) };
+  if (Object.keys(storage).length > 0) {
+    await page.addInitScript((entries) => {
+      for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
+    }, storage);
+  }
+
+  // The real starter file (mockDiscover's realStarter), with or without the research batch.
+  await page.route('**/discover/starter.json', async (route) => {
+    const response = await route.fetch();
+    const starter = await response.json();
+    if (!opts.research) starter.batches = starter.batches.filter((b: { version: string }) => b.version !== RESEARCH_BATCH);
+    return route.fulfill({ response, body: JSON.stringify(starter) });
+  });
 
   // SoundCloud's own pages and API: never from the app (the widget below is the exception).
   await page.route(/soundcloud\.com/, (route) => {

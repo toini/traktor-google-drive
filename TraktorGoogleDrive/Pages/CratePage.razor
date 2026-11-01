@@ -10,9 +10,10 @@
 <PageTitle>@(crate?.Name ?? "List") · Discover @Genre · Traktor</PageTitle>
 
 @* A crate (ADR 20261025-54, "Crates"): a named list of tracks inside a genre, e.g.
-   P › "Looney Boon Hug Halloween 2026". Tracks: find each one's source. Listen:
-   pass 1 over what was found. Shortlist: pass 2 and the buy list. Kept apart from
-   the genre's seed queue, and saved in the same Discover log. *@
+   P › "Looney Boon Hug Halloween 2026". Tracks: one list to find, hear and judge
+   each track (it used to be two tabs, Tracks and Listen; /listen still opens it,
+   on "To hear"). Shortlist: pass 2 and the buy list. Kept apart from the genre's
+   seed queue, and saved in the same Discover log. *@
 <div class="discover crate" data-discover="@Genre" data-crate="@CrateId">
     <header class="discover-header">
         <div class="discover-heading">
@@ -90,22 +91,20 @@
         else
         {
             var queue = Crates.Queue(crate);
+            var toHear = crate.Items.Count(i => Crates.Matches(i, CrateFilter.ToHear));
             var liked = Crates.Liked(crate);
             var shortlist = Crates.Shortlist(crate);
             <nav class="discover-tabs" role="tablist">
                 <a role="tab" class="discover-tab @(TabIs("tracks") ? "active" : "")" aria-selected="@(TabIs("tracks") ? "true" : "false")"
-                   href="@($"discover/{Genre}/list/{CrateId}/tracks")" data-tab="tracks">Tracks <span class="discover-count" data-item-count="@crate.Items.Count">@crate.Items.Count</span></a>
-                <a role="tab" class="discover-tab @(TabIs("listen") ? "active" : "")" aria-selected="@(TabIs("listen") ? "true" : "false")"
-                   href="@($"discover/{Genre}/list/{CrateId}/listen")" data-tab="listen">Listen <span class="discover-count" data-queue-count="@queue.Count">@queue.Count</span></a>
+                   href="@($"discover/{Genre}/list/{CrateId}/tracks")" data-tab="tracks"
+                   title="@($"{toHear} to hear, {queue.Count} of them playable, of {crate.Items.Count}")">
+                    Tracks <span class="discover-count" data-item-count="@crate.Items.Count" data-queue-count="@queue.Count">@toHear to hear · @crate.Items.Count</span>
+                </a>
                 <a role="tab" class="discover-tab @(TabIs("shortlist") ? "active" : "")" aria-selected="@(TabIs("shortlist") ? "true" : "false")"
                    href="@($"discover/{Genre}/list/{CrateId}/shortlist")" data-tab="shortlist">Shortlist <span class="discover-count" data-shortlist-count="@(liked.Count + shortlist.Count)">@(liked.Count + shortlist.Count)</span></a>
             </nav>
 
-            @if (TabIs("listen"))
-            {
-                <CrateListenTab Crate="crate" Queue="queue" />
-            }
-            else if (TabIs("shortlist"))
+            @if (TabIs("shortlist"))
             {
                 <CrateShortlistTab Crate="crate" Liked="liked" Shortlist="shortlist" />
             }
@@ -130,13 +129,8 @@
 
     Crate? crate => Crates.Get(CrateId) is { } c && c.Genre == Genre ? c : null;
 
-    bool TabIs(string tab) => (Tab ?? (defaultTab ??= DefaultTab())) == tab;
-
-    // Chosen once per opened list, so finding a first track does not switch tabs under Toni:
-    // nothing to hear yet opens on Tracks, where finding starts; otherwise Listen.
-    string? defaultTab;
-    string? defaultFor;
-    string DefaultTab() => crate is { } c && Crates.Queue(c).Count > 0 ? "listen" : "tracks";
+    /// <summary>Tracks or Shortlist; the old "listen" address opens Tracks.</summary>
+    bool TabIs(string tab) => (Tab is "shortlist" ? "shortlist" : "tracks") == tab;
 
     protected override async Task OnInitializedAsync()
     {
@@ -160,7 +154,6 @@
     {
         renaming = false;
         confirmDelete = false;
-        if (defaultFor != CrateId) { defaultFor = CrateId; defaultTab = null; }
     }
 
     void StartRename()

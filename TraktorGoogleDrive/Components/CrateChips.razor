@@ -10,7 +10,7 @@
     <a class="crate-chip @(Active is null ? "active" : "")" href="@($"discover/{Genre}")" data-crate-chip="">@Genre seeds</a>
     @foreach (var crate in Crates.CratesOf(Genre))
     {
-        var toHear = Crates.Queue(crate).Count;
+        var toHear = crate.Items.Count(i => Crates.Matches(i, CrateFilter.ToHear));
         <a class="crate-chip @(Active == crate.Id ? "active" : "")" href="@($"discover/{Genre}/list/{crate.Id}")"
            data-crate-chip="@crate.Id" title="@crate.Note">
             @crate.Name <span class="discover-count" data-crate-chip-count="@toHear">@toHear to hear · @crate.Items.Count</span>

@@ -1,42 +1,72 @@
 @using TraktorGoogleDrive.Discover
+@using TraktorGoogleDrive.Models
+@implements IAsyncDisposable
 @inject CrateService Crates
+@inject PlayerService Player
+@inject AuthService Auth
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
 
-@* Finding a crate's tracks (ADR 20261025-54, "Crates"). Per item: Find (Discogs,
-   then Bandcamp by URL), "Find on Bandcamp ↗" (Bandcamp's own search in a new tab:
-   Toni searching, not our server), a paste box for a Bandcamp or SoundCloud URL,
-   and "Try SoundCloud" (its official oEmbed, on demand). "Find all" goes through
-   every item not looked up yet, one at a time, and reports each one. *@
-<div class="crate-tracks" data-crate-tracks>
+@* A crate's tracks in one list (ADR 20261025-54 §13.5, reworked 2026-11-01): what
+   used to be Tracks (finding) and Listen (pass 1) is one view. Each row shows its
+   verdict as a badge, which is also where the verdict is changed or undone. Chips
+   filter it, "To hear" by default, so a skipped track leaves the list. The row on
+   the card (the first track to hear, or the one Toni picked) opens inline with the
+   player, Skip / Maybe / Like, stars, Buy and a note; keys S M L B N O U P 1–5.
+   A row that has nothing to play offers Find ▾: the automatic lookup, Bandcamp's
+   and Beatport's own search in a new tab, and a paste box. Remove and Find again
+   sit in ⋯. SoundCloud is behind DiscoverFeatures.SoundCloud (off).
+   Every row takes a verdict at any time through its badge. When the player moved
+   on by itself before a verdict, "Just played" offers one for the track that
+   ended. "Wait for my verdict" (on unless switched off) gives the player only the
+   track on the card, so it stops at the end of each track instead. *@
+<section class="crate-tracks" data-crate-tracks tabindex="0" @onkeydown="OnKey" data-listen>
     @{
-        var states = Crate.Items.Select(i => (Item: i, State: Crates.StateOf(i))).ToList();
-        int Count(CrateItemState s) => states.Count(x => x.State == s);
-        var onBandcamp = states.Count(x => x.State == CrateItemState.Found && x.Item.Resolution?.Source == "bandcamp");
-        var onSoundCloud = states.Count(x => x.State == CrateItemState.Found && x.Item.Resolution?.Source == "soundcloud");
+        var all = Crate.Items.Select(i => (Item: i, State: Crates.StateOf(i), Verdict: Crates.VerdictOf(i))).ToList();
+        int Count(CrateFilter f) => all.Count(x => CrateVerdicts.Matches(f, x.State, x.Verdict));
+        var pending = all.Count(x => x.State == CrateItemState.Pending);
         var run = Crates.Run is { } r && r.CrateId == Crate.Id ? r : null;
+        var cur = Current;
     }
-    <p class="discover-hint crate-summary" data-crate-summary>
-        <span data-summary-found="@Count(CrateItemState.Found)">@Count(CrateItemState.Found) found</span>
-        (<span data-summary-bandcamp="@onBandcamp">@onBandcamp Bandcamp</span>, <span data-summary-soundcloud="@onSoundCloud">@onSoundCloud SoundCloud</span>) ·
-        <span data-summary-ambiguous="@Count(CrateItemState.Ambiguous)">@Count(CrateItemState.Ambiguous) to pick</span> ·
-        <span data-summary-notfound="@Count(CrateItemState.NotFound)">@Count(CrateItemState.NotFound) not found</span> ·
-        <span data-summary-owned="@Count(CrateItemState.Owned)">@Count(CrateItemState.Owned) already yours</span> ·
-        <span data-summary-pending="@Count(CrateItemState.Pending)">@Count(CrateItemState.Pending) not looked up</span>
-    </p>
+    <p class="crate-explainer" data-crate-explainer>Listen → skip or keep → rate the keepers → buy</p>
+
+    <nav class="crate-filters" aria-label="Show" data-crate-filters>
+        @foreach (var f in Enum.GetValues<CrateFilter>())
+        {
+            var n = Count(f);
+            <button type="button" class="crate-filter @(filter == f ? "active" : "")" aria-pressed="@(filter == f ? "true" : "false")"
+                    data-filter="@FilterId(f)" @onclick="() => SetFilter(f)">
+                @CrateVerdicts.Label(f) <span class="discover-count" data-filter-count="@n">@n</span>
+            </button>
+        }
+    </nav>
 
     <div class="discover-toolbar">
-        <button class="discover-button" data-find-all disabled="@(run?.Running == true)" @onclick="() => Crates.FindAllAsync(Crate)">
-            @(run?.Running == true ? "Finding…" : $"Find all ({Count(CrateItemState.Pending)})")
+        <button class="discover-button" data-find-all disabled="@(run?.Running == true)" @onclick="() => Crates.FindAllAsync(Crate)"
+                title="Look up every track not looked up yet, one at a time">
+            @(run?.Running == true ? "Finding…" : $"Find all ({pending})")
         </button>
         @if (run?.Running == true)
         {
             <button class="discover-button subtle" data-stop-find @onclick="Crates.StopFindAll">Stop</button>
         }
-        <label class="discover-hint"><input type="checkbox" data-hide-owned @bind="hideOwned" /> hide tracks already in your collection</label>
+        <label class="discover-hint" title="On: the player stops at the end of each track until you skip, keep or rate it. Off: continuous play moves on, and Just played asks about the track that ended.">
+            <input type="checkbox" data-wait-verdict checked="@waitForVerdict" @onchange="SetWaitAsync" /> wait for my verdict before the next track
+        </label>
     </div>
-    <p class="discover-hint">
-        Discogs first (one request every 2.6 s), then Bandcamp only at an address Discogs lists or a checked guess
-        of the artist's or uploader's page (one request every 2 s). Bandcamp's own search is never called by the app.
-    </p>
+
+    @if (JustPlayed is { } jp)
+    {
+        <div class="crate-just-played" role="status" data-just-played="@jp.Key">
+            <span>Just played: <strong>@jp.Artist – @jp.Title</strong></span>
+            <span class="crate-just-played-verdicts">
+                <button class="discover-verdict skip" data-just-played-verdict="skip" @onclick="() => JudgeJustPlayed(Pass1.Skip)">✗ Skip</button>
+                <button class="discover-verdict maybe" data-just-played-verdict="maybe" @onclick="() => JudgeJustPlayed(Pass1.Maybe)">? Maybe</button>
+                <button class="discover-verdict like" data-just-played-verdict="like" @onclick="() => JudgeJustPlayed(Pass1.Like)">♥ Like</button>
+                <button class="discover-button subtle" data-just-played-dismiss title="Leave it unheard" @onclick="() => justPlayedKey = null">✕</button>
+            </span>
+        </div>
+    }
 
     @if (run is not null)
     {
@@ -52,94 +82,207 @@
         </RunReport>
     }
 
+    @{ var visible = all.Where(x => CrateVerdicts.Matches(filter, x.State, x.Verdict) || x.Item.Key == stickyKey).ToList(); }
+    @if (visible.Count == 0)
+    {
+        <p class="discover-empty-why" data-filter-empty>@EmptyText(pending)</p>
+    }
     <ol class="discover-list crate-items">
-        @foreach (var (item, state) in states.Where(x => !hideOwned || x.State != CrateItemState.Owned))
+        @foreach (var (item, state, verdict) in visible)
         {
             var p = Crates.ProgressOf(item);
             var res = item.Resolution;
-            <li class="discover-row crate-item @StateClass(state)" data-crate-item="@item.Key" data-state="@(p.Busy ? "busy" : state.ToString().ToLowerInvariant())">
-                <div class="discover-row-main">
-                    <span class="crate-state" data-state-label>@StateLabel(state, res)</span>
-                    <span class="discover-row-title" data-item-title>@item.Artist – @item.Title</span>
-                    <span class="discover-row-meta">
-                        @if (item.Uploader is { } up) { <span>SoundCloud: @up</span> }
-                        @if (item.Release is { } rel) { <span> · @rel</span> }
-                        @if (item.Note is { } n) { <span> · @n</span> }
-                    </span>
-                    @if (state == CrateItemState.Found && res is not null)
-                    {
-                        <span class="discover-row-meta crate-found" data-found>
-                            <a class="discover-link" data-source-link data-source="@res.Source" href="@res.PageUrl" target="_blank" rel="noopener noreferrer">
-                                @(res.Source == "soundcloud" ? "SoundCloud" : "Bandcamp") ↗
-                            </a>
-                            @string.Join(" · ", new[] { res.Artist is null ? null : $"{res.Artist} – {res.Title}", res.Label, res.ReleaseTitle, res.Released }.Where(x => !string.IsNullOrWhiteSpace(x)))
-                            @(res.Via switch { "guess" => " · checked guess", "discogs" => " · via Discogs", "pasted" => " · pasted", "picked" => " · picked", "oembed" => " · SoundCloud oEmbed", "soundcloud-link" => " · linked from its SoundCloud page", _ => "" })
-                        </span>
-                    }
-                    @if (res?.DiscogsUrl is { } discogs && state != CrateItemState.Found)
-                    {
-                        <span class="discover-row-meta" data-discogs>
-                            On Discogs: <a class="discover-link" href="@discogs" target="_blank" rel="noopener noreferrer">@(res.DiscogsTitle ?? "release") ↗</a>
-                        </span>
-                    }
-                    @if (state is CrateItemState.NotFound or CrateItemState.Ambiguous && res?.Message is { } msg)
-                    {
-                        <span class="discover-row-meta" data-item-message>@msg</span>
-                    }
-                    @if (p.Busy)
-                    {
-                        <span class="discover-hint" data-item-progress>@p.Message</span>
-                    }
-                    @if (p.Error is { } err)
-                    {
-                        <span class="discover-warn" data-item-error>@err</span>
-                    }
-                    @if (state == CrateItemState.Ambiguous && res?.Candidates is { Count: > 0 } cands)
-                    {
-                        <ul class="crate-candidates" data-candidates>
-                            @foreach (var c in cands)
+            var track = Crates.TrackOf(item);
+            var isCurrent = cur == item;
+            <li class="discover-row crate-item @StateClass(state) @(isCurrent ? "current" : "")" data-crate-item="@item.Key"
+                data-state="@(p.Busy ? "busy" : state.ToString().ToLowerInvariant())" data-verdict-state="@verdict.ToString().ToLowerInvariant()">
+                <div class="crate-row-line">
+                    <button type="button" class="crate-badge verdict-@verdict.ToString().ToLowerInvariant()" data-verdict-badge="@verdict.ToString().ToLowerInvariant()"
+                            title="@CrateVerdicts.Explain(verdict): click to change or undo" aria-expanded="@(IsOpen(item, VerdictMenu) ? "true" : "false")"
+                            @onclick="() => Toggle(item, VerdictMenu)">@CrateVerdicts.Badge(verdict, track?.Rating)</button>
+                    <div class="discover-row-main">
+                        <span class="discover-row-title" data-item-title title="@(item.Uploader is { } up ? $"Uploaded by {up}" : null)">@item.Artist – @item.Title</span>
+                        <span class="discover-row-meta" data-item-meta>
+                            @if (state == CrateItemState.Found && res is not null)
                             {
-                                <li>
-                                    <button class="discover-button" data-pick="@(c.DiscogsId?.ToString() ?? c.TrackId?.ToString())" disabled="@p.Busy"
-                                            @onclick="() => Crates.PickAsync(item, c)">Use</button>
-                                    @(c.Artist is null ? "" : c.Artist + " – ")@c.Title
-                                    <span class="discover-row-meta">@string.Join(", ", new[] { c.Label, c.Year }.Where(x => !string.IsNullOrWhiteSpace(x)))</span>
-                                    @if (c.Url is { } cu) { <a class="discover-link" href="@cu" target="_blank" rel="noopener noreferrer">@(c.Kind == "discogs" ? "Discogs" : "Bandcamp") ↗</a> }
-                                </li>
+                                <a class="crate-store store-@res.Source" data-source-link data-source="@res.Source" href="@res.PageUrl" target="_blank" rel="noopener noreferrer"
+                                   title="Open on @StoreName(res.Source)">@StoreName(res.Source) ↗</a>
+                                @if (res.Source != "beatport" && res.BeatportUrl is { } bp)
+                                {
+                                    <a class="crate-store store-beatport" data-beatport-link href="@bp" target="_blank" rel="noopener noreferrer">Beatport ↗</a>
+                                }
+                                @if (res.Free == true) { <span class="crate-free" data-free title="Free or name-your-price">free</span> }
+                                <span data-found>@FoundText(item, res)</span>
+                                @if (res.Via == "research" && res.Message is { } unsure)
+                                {
+                                    <span class="crate-unsure" data-unverified title="@unsure">· unverified</span>
+                                }
                             }
-                        </ul>
-                    }
+                            else
+                            {
+                                <span class="crate-state" data-state-label title="@(state == CrateItemState.NotFound ? res?.Message : null)">@StateLabel(state)</span>
+                                @if (Meta(item) is { Length: > 0 } meta) { <span data-item-note> · @meta</span> }
+                            }
+                            @if (item.Link is { } link)
+                            {
+                                <a class="discover-link" data-item-link href="@link" target="_blank" rel="noopener noreferrer">↗</a>
+                            }
+                        </span>
+                        @if (state == CrateItemState.Ambiguous && res?.Candidates is { Count: > 0 } cands)
+                        {
+                            <span class="discover-row-meta" data-item-message>@res.Message</span>
+                            <ul class="crate-candidates" data-candidates>
+                                @foreach (var c in cands)
+                                {
+                                    <li>
+                                        <button class="discover-button" data-pick="@(c.DiscogsId?.ToString() ?? c.TrackId?.ToString())" disabled="@p.Busy"
+                                                @onclick="() => Crates.PickAsync(item, c)">Use</button>
+                                        @(c.Artist is null ? "" : c.Artist + " – ")@c.Title
+                                        <span class="discover-row-meta">@string.Join(", ", new[] { c.Label, c.Year }.Where(x => !string.IsNullOrWhiteSpace(x)))</span>
+                                        @if (c.Kind == "bandcamp" && c.Url is { } cu) { <a class="discover-link" href="@cu" target="_blank" rel="noopener noreferrer">Bandcamp ↗</a> }
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        @if (p.Busy) { <span class="discover-hint" data-item-progress>@p.Message</span> }
+                        @if (p.Error is { } err) { <span class="discover-warn" data-item-error>@err</span> }
+                    </div>
+                    <div class="discover-row-actions crate-actions">
+                        @if (state == CrateItemState.Found && res?.Source == "beatport")
+                        {
+                            <a class="discover-button" data-listen-beatport href="@res.PageUrl" target="_blank" rel="noopener noreferrer"
+                               title="Beatport's previews need its API: hear it on Beatport">Listen on Beatport ↗</a>
+                        }
+                        else if (state == CrateItemState.Found && !isCurrent)
+                        {
+                            <button class="discover-button" data-listen-button disabled="@p.Busy" @onclick="() => ListenAsync(item)">▶ Listen</button>
+                        }
+                        else if (state is CrateItemState.Pending or CrateItemState.NotFound or CrateItemState.Ambiguous)
+                        {
+                            <button class="discover-button" data-find-menu-toggle aria-expanded="@(IsOpen(item, FindMenu) ? "true" : "false")"
+                                    disabled="@p.Busy" @onclick="() => Toggle(item, FindMenu)">Find ▾</button>
+                        }
+                        <button class="discover-button subtle" data-more title="More" aria-expanded="@(IsOpen(item, MoreMenu) ? "true" : "false")"
+                                @onclick="() => Toggle(item, MoreMenu)">⋯</button>
+                    </div>
                 </div>
-                <div class="discover-row-actions crate-actions">
-                    @if (state == CrateItemState.Pending)
-                    {
-                        <button class="discover-button" data-find disabled="@(p.Busy || run?.Running == true)" @onclick="() => Crates.FindAsync(item)">Find</button>
-                    }
-                    else if (state != CrateItemState.Owned)
-                    {
-                        <button class="discover-button subtle" data-find-again disabled="@p.Busy" title="Look it up again"
-                                @onclick="() => FindAgainAsync(item)">Find again</button>
-                    }
-                    @if (state is not (CrateItemState.Found or CrateItemState.Owned))
-                    {
+
+                @if (IsOpen(item, VerdictMenu))
+                {
+                    <div class="crate-menu crate-verdict-menu" data-verdict-menu>
+                        <button class="discover-verdict skip @(track?.Pass1 == Pass1.Skip ? "on" : "")" data-set-verdict="skip" @onclick="() => SetVerdict(item, Pass1.Skip)">✗ Skip</button>
+                        <button class="discover-verdict maybe @(track?.Pass1 == Pass1.Maybe ? "on" : "")" data-set-verdict="maybe" @onclick="() => SetVerdict(item, Pass1.Maybe)">? Maybe</button>
+                        <button class="discover-verdict like @(track?.Pass1 == Pass1.Like ? "on" : "")" data-set-verdict="like" @onclick="() => SetVerdict(item, Pass1.Like)">♥ Like</button>
+                        <DiscoverStars Value="track?.Rating" OnRate="s => Crates.Judge(item, rating: s)" />
+                        <button class="discover-button buy @(track?.Decision == Decision.Buy ? "on" : "")" data-set-verdict="buy" @onclick="() => ToggleBuy(item)">🛒 Buy</button>
+                        <button class="discover-button @(track?.Bought == true ? "on" : "")" data-set-verdict="bought" @onclick="() => Crates.Judge(item, bought: track?.Bought != true)">✓ Bought</button>
+                        @if (verdict != CrateVerdict.Unheard)
+                        {
+                            <button class="discover-button subtle" data-verdict-clear title="Back to unheard" @onclick="() => Clear(item)">Undo: unheard</button>
+                        }
+                    </div>
+                }
+                @if (IsOpen(item, FindMenu))
+                {
+                    <div class="crate-menu crate-find-menu" data-find-menu>
+                        @if (state == CrateItemState.Pending)
+                        {
+                            <button class="discover-button" data-find disabled="@(p.Busy || run?.Running == true)" @onclick="() => FindAsync(item)"
+                                    title="Look for its Bandcamp page">Find it for me</button>
+                        }
+                        else
+                        {
+                            <button class="discover-button subtle" data-find-again disabled="@p.Busy" title="Look it up again" @onclick="() => FindAgainAsync(item)">Find again</button>
+                        }
                         <a class="discover-link" data-bandcamp-search href="@CrateMatch.BandcampSearchUrl(item)" target="_blank" rel="noopener noreferrer"
                            title="Bandcamp's own search, in a new tab">Find on Bandcamp ↗</a>
-                        <a class="discover-link" data-soundcloud-search href="@CrateMatch.SoundCloudSearchUrl(item)" target="_blank" rel="noopener noreferrer"
-                           title="SoundCloud's own search, in a new tab">Find on SoundCloud ↗</a>
-                        <button class="discover-button" data-try-soundcloud disabled="@p.Busy" @onclick="() => Crates.TrySoundCloudAsync(item)"
-                                title="Ask SoundCloud's oEmbed for the uploader's or the artist's track with this title">Try SoundCloud</button>
-                    }
-                    @if (state != CrateItemState.Owned)
-                    {
+                        <a class="discover-link" data-beatport-search href="@CrateMatch.BeatportSearchUrl(item)" target="_blank" rel="noopener noreferrer"
+                           title="Beatport's own search, in a new tab">Find on Beatport ↗</a>
+                        @if (Crates.Features.SoundCloud)
+                        {
+                            <a class="discover-link" data-soundcloud-search href="@CrateMatch.SoundCloudSearchUrl(item)" target="_blank" rel="noopener noreferrer"
+                               title="SoundCloud's own search, in a new tab">Find on SoundCloud ↗</a>
+                            <button class="discover-button" data-try-soundcloud disabled="@p.Busy" @onclick="() => Crates.TrySoundCloudAsync(item)"
+                                    title="Ask SoundCloud's oEmbed for the uploader's or the artist's track with this title">Try SoundCloud</button>
+                        }
                         <span class="crate-paste">
-                            <input class="discover-input" data-paste-url placeholder="Paste a Bandcamp or SoundCloud URL"
+                            <input class="discover-input" data-paste-url placeholder="@Crates.PasteHint"
                                    value="@pasted.GetValueOrDefault(item.Key)" @oninput="e => SetPasted(item, e)"
-                                   @onkeydown="e => OnPasteKey(e, item)" />
+                                   @onkeydown="e => OnPasteKey(e, item)" @onkeydown:stopPropagation />
                             <button class="discover-button" data-use-url disabled="@p.Busy" @onclick="() => UseUrlAsync(item)">Use</button>
                         </span>
-                    }
-                    <button class="discover-button subtle" data-remove-item title="Remove from this list" @onclick="() => Crates.RemoveItem(item)">✕</button>
-                </div>
+                    </div>
+                }
+                @if (IsOpen(item, MoreMenu))
+                {
+                    <div class="crate-menu crate-more-menu" data-more-menu>
+                        @if (state != CrateItemState.Owned && state != CrateItemState.Pending)
+                        {
+                            <button class="discover-button subtle" data-find-again disabled="@p.Busy" title="Forget this result and look it up again"
+                                    @onclick="() => FindAgainAsync(item)">Find again</button>
+                        }
+                        @if (state == CrateItemState.Found)
+                        {
+                            <span class="crate-paste">
+                                <input class="discover-input" data-paste-url placeholder="@Crates.PasteHint"
+                                       value="@pasted.GetValueOrDefault(item.Key)" @oninput="e => SetPasted(item, e)"
+                                       @onkeydown="e => OnPasteKey(e, item)" @onkeydown:stopPropagation />
+                                <button class="discover-button" data-use-url disabled="@p.Busy" @onclick="() => UseUrlAsync(item)">Use</button>
+                            </span>
+                        }
+                        <button class="discover-button subtle" data-remove-item title="Remove from this list" @onclick="() => Remove(item)">Remove from list</button>
+                    </div>
+                }
+
+                @if (isCurrent && res is not null)
+                {
+                    <article class="discover-card crate-card" data-current="@item.Key">
+                        <div class="discover-card-track">
+                            <span class="discover-track-title" data-track-title>@item.Title</span>
+                            <span class="discover-track-artist">@item.Artist</span>
+                            <span class="discover-track-length">@Length(res.Duration ?? 0)</span>
+                        </div>
+                        <div class="discover-play">
+                            @if (res.Source == "soundcloud")
+                            {
+                                <button class="discover-button discover-play-button @(WidgetPlaying(item) ? "on" : "")" data-play-preview data-play-source="soundcloud"
+                                        title="Play or pause (P)" @onclick="() => TogglePlayAsync(item)">
+                                    @(WidgetPlaying(item) ? "❚❚ Pause" : "▶ Play")
+                                </button>
+                                <span class="discover-hint" data-widget-note>SoundCloud widget: plays here, not in the player bar; no gapless, no waveform</span>
+                            }
+                            else
+                            {
+                                <button class="discover-button discover-play-button @(PlayingHere(item) ? "on" : "")" data-play-preview data-play-source="bandcamp"
+                                        title="Play or pause (P)" disabled="@p.Busy" @onclick="() => TogglePlayAsync(item)">
+                                    @(PlayingHere(item) ? "❚❚ Pause" : "▶ Play")
+                                </button>
+                                <span class="discover-hint">Bandcamp stream · plays in the player bar</span>
+                            }
+                        </div>
+                        @if (widgetKey == item.Key && widgetUrl is not null)
+                        {
+                            <iframe @key="widgetKey" @ref="widgetFrame" class="crate-widget" data-soundcloud-widget title="SoundCloud player"
+                                    src="@widgetUrl" allow="autoplay" scrolling="no" frameborder="no"></iframe>
+                        }
+                        @if (widgetError is not null) { <p class="discover-warn" data-widget-error>@widgetError</p> }
+                        <div class="discover-verdicts">
+                            <button class="discover-verdict skip" data-verdict="skip" title="Skip (S): heard, not for me" @onclick="() => Verdict(Pass1.Skip)">✗ Skip</button>
+                            <button class="discover-verdict maybe" data-verdict="maybe" title="Maybe (M)" @onclick="() => Verdict(Pass1.Maybe)">? Maybe</button>
+                            <button class="discover-verdict like" data-verdict="like" title="Like (L)" @onclick="() => Verdict(Pass1.Like)">♥ Like</button>
+                        </div>
+                        <div class="discover-card-extra">
+                            <DiscoverStars Value="track?.Rating" OnRate="Rate" />
+                            <button class="discover-button buy @(track?.Decision == Decision.Buy ? "on" : "")" data-buy title="Buy (B)" @onclick="Buy">Buy</button>
+                            <input class="discover-input discover-note" data-note placeholder="Note (N)" value="@(track?.Note ?? note)"
+                                   @ref="noteInput" @onchange="e => SetNote(e.Value?.ToString())" @onkeydown:stopPropagation />
+                            @if (lastItem is not null)
+                            {
+                                <button class="discover-button" data-undo title="Undo (U)" @onclick="Undo">Undo</button>
+                            }
+                        </div>
+                    </article>
+                }
             </li>
         }
     </ol>
@@ -147,21 +290,93 @@
     <section class="discover-section" data-section="add-tracks">
         <h2>Add tracks</h2>
         <p class="discover-hint">One per line, “Artist - Title”.</p>
-        <textarea class="discover-input crate-add" data-add-tracks rows="3" @bind="addText" @bind:event="oninput"></textarea>
+        <textarea class="discover-input crate-add" data-add-tracks rows="3" @bind="addText" @bind:event="oninput" @onkeydown:stopPropagation></textarea>
         <div class="discover-toolbar">
             <button class="discover-button" data-add-tracks-button disabled="@string.IsNullOrWhiteSpace(addText)" @onclick="Add">Add</button>
             @if (addResult is not null) { <span class="discover-hint" data-add-result>@addResult</span> }
         </div>
     </section>
-</div>
+</section>
 
 @code {
     [Parameter, EditorRequired] public Crate Crate { get; set; } = null!;
+    /// <summary>The chip to open on; "listen" links land on "To hear".</summary>
+    [Parameter] public CrateFilter InitialFilter { get; set; } = CrateFilter.ToHear;
 
-    bool hideOwned;
+    CrateFilter filter = CrateFilter.ToHear;
+    string? filterFor;
     string addText = "";
     string? addResult;
     readonly Dictionary<string, string> pasted = new();
+    (string Key, string Kind)? open;
+    const string VerdictMenu = "verdict", FindMenu = "find", MoreMenu = "more";
+
+    // The card: the row Toni picked, else the first track to hear. Rating, Buy and a
+    // note keep it on the card (and in the list, whatever the chip); a verdict moves on.
+    string? currentKey;
+    string? stickyKey;
+    CrateItem? lastItem;
+    string? note;
+    ElementReference noteInput;
+
+    // The SoundCloud widget on the card (only with DiscoverFeatures.SoundCloud).
+    string? widgetKey;
+    string? widgetUrl;
+    bool widgetAttached = true;
+    bool widgetPlaying;
+    string? widgetError;
+    ElementReference widgetFrame;
+    IJSObjectReference? widgetJs;
+    DotNetObjectReference<CrateTracksTab>? self;
+
+    // "Just played": the track the player left by itself, before a verdict.
+    string? justPlayedKey;
+    string? manualKey;
+    bool waitForVerdict = true;
+    const string WaitKey = "discover.crate.wait-for-verdict";
+
+    CrateItem? JustPlayed =>
+        justPlayedKey is { } k && Crate.Items.FirstOrDefault(i => i.Key == k) is { } i && Crates.VerdictOf(i) == CrateVerdict.Unheard ? i : null;
+
+    string QueueId => $"crate:{Crate.Id}";
+    string? offered;
+    string? lastPlayingKey;
+    string? lastPlayerState;
+    readonly Dictionary<string, FileEntry> entries = new();
+
+    static string FilterId(CrateFilter f) => f switch
+    {
+        CrateFilter.ToHear => "tohear",
+        CrateFilter.Skipped => "skipped",
+        CrateFilter.Maybe => "maybe",
+        CrateFilter.Liked => "liked",
+        CrateFilter.ToBuy => "tobuy",
+        CrateFilter.NotFound => "notfound",
+        _ => "all",
+    };
+
+    string EmptyText(int pending) => filter switch
+    {
+        CrateFilter.ToHear when pending > 0 => $"Nothing found to hear yet: {pending} tracks not looked up. Use Find all, or Find ▾ on a track under Not found.",
+        CrateFilter.ToHear => "Every track has a verdict. Rate the keepers under Liked, then buy them under To buy.",
+        _ => $"Nothing under {CrateVerdicts.Label(filter)}.",
+    };
+
+    bool Playable(CrateItem i) => Crates.StateOf(i) == CrateItemState.Found && i.Resolution?.Source != "beatport";
+
+    /// <summary>The track on the card. Only one that can play here: a Beatport find is heard on Beatport.</summary>
+    CrateItem? Current
+    {
+        get
+        {
+            if (currentKey is not null && Crate.Items.FirstOrDefault(i => i.Key == currentKey) is { } picked && Playable(picked)
+                && (picked.Key == stickyKey || Crates.Matches(picked, filter)))
+                return picked;
+            return Crate.Items.FirstOrDefault(i => Playable(i) && Crates.VerdictOf(i) == CrateVerdict.Unheard && Crates.Matches(i, filter));
+        }
+    }
+
+    static string Length(double seconds) => seconds <= 0 ? "" : TimeSpan.FromSeconds(seconds).ToString(@"m\:ss");
 
     static IReadOnlyList<RunReport.Line> Lines(CrateService.FindAllRun run) =>
         run.Results.Select(o => new RunReport.Line(o.Name, o.Kind, o.Text, o.Kind == "found" ? "good" : o.Kind == "error" ? "bad" : "")).ToList();
@@ -174,19 +389,367 @@
         _ => "",
     };
 
-    static string StateLabel(CrateItemState s, CrateResolution? r) => s switch
+    static string StateLabel(CrateItemState s) => s switch
     {
-        CrateItemState.Found => r?.Source == "soundcloud" ? "SoundCloud" : "Bandcamp",
         CrateItemState.Ambiguous => "Pick one",
-        CrateItemState.NotFound => "Not found",
+        CrateItemState.NotFound => "Not found yet",
         CrateItemState.Owned => "Already yours",
         _ => "Not looked up",
     };
 
+    static string StoreName(string? source) => source switch
+    {
+        "soundcloud" => "SoundCloud",
+        "beatport" => "Beatport",
+        _ => "Bandcamp",
+    };
+
+    static string Meta(CrateItem item) =>
+        string.Join(" · ", new[] { item.Release, item.Note }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+    /// <summary>A Bandcamp album page, the track not picked on it yet: it is, the first time it plays.</summary>
+    static bool OnAlbumOnly(CrateResolution r) =>
+        r is { Source: "bandcamp", TrackId: null } && r.PageUrl?.Contains("/album/", StringComparison.OrdinalIgnoreCase) == true;
+
+    static string FoundText(CrateItem item, CrateResolution r)
+    {
+        var release = OnAlbumOnly(r) ? $"on album {r.ReleaseTitle ?? "(its page)"}" : r.ReleaseTitle;
+        var bits = new[] { r.Label, release, r.Released, item.Note }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        if (r.Via is "pasted" or "picked") bits.Add(r.Via);
+        return bits.Count == 0 ? "" : "· " + string.Join(" · ", bits);
+    }
+
+    bool IsOpen(CrateItem item, string kind) => open is { } o && o.Key == item.Key && o.Kind == kind;
+
+    void Toggle(CrateItem item, string kind) => open = IsOpen(item, kind) ? null : (item.Key, kind);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Player.Changed += OnPlayerChanged;
+        try { waitForVerdict = await JS.InvokeAsync<string?>("localStorage.getItem", WaitKey) != "0"; }
+        catch (JSException) { waitForVerdict = true; }
+    }
+
+    async Task SetWaitAsync(ChangeEventArgs e)
+    {
+        waitForVerdict = e.Value is true;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", WaitKey, waitForVerdict ? "1" : "0"); }
+        catch (JSException) { }
+        OfferToPlayer();
+    }
+
+    void JudgeJustPlayed(Pass1 verdict)
+    {
+        if (JustPlayed is { } item) Crates.Judge(item, pass1: verdict);
+        justPlayedKey = null;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (filterFor != Crate.Id)
+        {
+            filterFor = Crate.Id;
+            filter = InitialFilter;
+            currentKey = stickyKey = null;
+        }
+        OfferToPlayer();
+        FollowPlayer();
+    }
+
+    void SetFilter(CrateFilter f)
+    {
+        filter = f;
+        open = null;
+        stickyKey = null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        OfferToPlayer();
+        if (widgetAttached || widgetUrl is null) return;
+        widgetAttached = true;
+        try
+        {
+            widgetJs ??= await JS.InvokeAsync<IJSObjectReference>("import", "./soundcloud-widget.js");
+            self ??= DotNetObjectReference.Create(this);
+            await widgetJs.InvokeVoidAsync("attach", widgetFrame, self);
+        }
+        catch (JSException e)
+        {
+            widgetError = e.Message;
+            StateHasChanged();
+        }
+    }
+
+    /* ---------- playback ---------- */
+
+    FileEntry EntryFor(CrateItem i)
+    {
+        var r = i.Resolution!;
+        var id = $"{i.Key}|{r.TrackId}";
+        if (!entries.TryGetValue(id, out var e))
+        {
+            entries[id] = e = PlayableItem.Discover(i.Key, r.Title ?? i.Title, r.Artist ?? i.Artist, r.Duration ?? 0,
+                DiscoverApi.AudioUrl(r.TrackId ?? 0, r.ReleaseUrl ?? r.PageUrl ?? ""), r.PageUrl, r.Label, r.ReleaseTitle);
+            e.External = e.External! with { Source = "bandcamp" };
+        }
+        return e;
+    }
+
+    static bool IsBandcamp(CrateItem i) => i.Resolution is { Source: "bandcamp", TrackId: not null };
+
+    /// <summary>
+    /// The crate's Bandcamp tracks to hear are the player's queue, like a playlist
+    /// page's rows. Waiting for a verdict, the queue is the card's track alone, so
+    /// continuous play and Next stop there until it is judged.
+    /// </summary>
+    void OfferToPlayer()
+    {
+        var playable = waitForVerdict
+            ? (Current is { } c && IsBandcamp(c) ? [c] : new List<CrateItem>())
+            : Crates.Queue(Crate).Where(IsBandcamp).ToList();
+        var signature = (waitForVerdict ? "1|" : "0|") + string.Join(",", playable.Select(q => q.Key + q.Resolution!.TrackId));
+        if (signature == offered) return;
+        offered = signature;
+        var rows = playable.Select(EntryFor).ToList();
+        _ = InvokeAsync(() => Player.OfferQueue(QueueId, rows));
+    }
+
+    string? PlayingKey =>
+        PlayableItem.IsDiscoverId(Player.CurrentFileId) ? Player.CurrentFileId![PlayableItem.DiscoverPrefix.Length..] : null;
+
+    bool PlayingHere(CrateItem i) => PlayingKey == i.Key && Player.State is PlaybackState.Playing or PlaybackState.Loading;
+
+    bool WidgetPlaying(CrateItem i) => widgetKey == i.Key && widgetPlaying;
+
+    bool AnythingPlaying =>
+        widgetPlaying || (PlayingKey is { } k && k.StartsWith(CrateMatch.KeyPrefix + Crate.Id + ":", StringComparison.Ordinal)
+                          && Player.State is PlaybackState.Playing or PlaybackState.Loading);
+
+    /// <summary>
+    /// The player moved on by itself (continuous play, Next in the bar, a remote):
+    /// the card follows, and the track it left without a verdict is "Just played".
+    /// A track Toni started himself clears it.
+    /// </summary>
+    void FollowPlayer()
+    {
+        if (PlayingKey == lastPlayingKey) return;
+        var left = lastPlayingKey;
+        lastPlayingKey = PlayingKey;
+        if (Crate.Items.FirstOrDefault(q => q.Key == PlayingKey) is not { } playing) return;
+        currentKey = stickyKey = playing.Key;
+        if (playing.Key == manualKey) { justPlayedKey = null; manualKey = null; return; }
+        if (left is not null && Crate.Items.FirstOrDefault(i => i.Key == left) is { } before && Crates.VerdictOf(before) == CrateVerdict.Unheard)
+            justPlayedKey = before.Key;
+    }
+
+    async Task ListenAsync(CrateItem item)
+    {
+        open = null;
+        await MoveAsync(item, play: true);
+    }
+
+    async Task TogglePlayAsync(CrateItem i)
+    {
+        if (i.Resolution?.Source == "soundcloud")
+        {
+            if (!Crates.Features.SoundCloud) return;
+            if (widgetKey == i.Key && widgetJs is not null && widgetUrl is not null)
+            {
+                await widgetJs.InvokeVoidAsync(widgetPlaying ? "pause" : "play", widgetFrame);
+                return;
+            }
+            if (Player.State is PlaybackState.Playing or PlaybackState.Loading) await Player.PauseAsync();
+            widgetKey = i.Key;
+            widgetUrl = CrateMatch.SoundCloudWidgetUrl(i.Resolution.PageUrl!);
+            widgetError = null;
+            widgetPlaying = false;
+            widgetAttached = false;
+            StateHasChanged();
+            return;
+        }
+        // A Bandcamp link known without its track (a shipped research result): read its page first.
+        if (CrateService.NeedsReading(i) && !await Crates.CompleteAsync(i)) return;
+        if (!IsBandcamp(i)) return;
+        await StopWidgetAsync();
+        manualKey = i.Key;
+        var token = await Auth.GetTokenAsync();
+        if (token is null) { await Auth.HandleExpiredAsync(Navigation.ToBaseRelativePath(Navigation.Uri)); return; }
+        OfferToPlayer();
+        await Player.ToggleAsync(EntryFor(i), token);
+    }
+
+    async Task StopWidgetAsync()
+    {
+        if (widgetJs is not null && widgetUrl is not null && widgetPlaying)
+        {
+            try { await widgetJs.InvokeVoidAsync("pause", widgetFrame); } catch (JSException) { }
+        }
+        widgetPlaying = false;
+        widgetKey = null;
+        widgetUrl = null;
+    }
+
+    /// <summary>From soundcloud-widget.js: ready, play, pause, finish, error.</summary>
+    [JSInvokable]
+    public async Task OnWidget(string evt)
+    {
+        switch (evt)
+        {
+            case "play":
+                widgetPlaying = true;
+                if (Player.State is PlaybackState.Playing or PlaybackState.Loading) await Player.PauseAsync();
+                break;
+            case "pause":
+                widgetPlaying = false;
+                break;
+            case "finish":
+                widgetPlaying = false;
+                await MoveAsync(NextAfter(Current), play: true);
+                break;
+            case "error":
+                widgetPlaying = false;
+                widgetError = "SoundCloud would not play it (private, removed or not available here). Skip it, or find it on Bandcamp or Beatport.";
+                break;
+        }
+        StateHasChanged();
+    }
+
+    void OnPlayerChanged()
+    {
+        var key = $"{Player.CurrentFileId}|{Player.State}";
+        if (key == lastPlayerState) return;
+        lastPlayerState = key;
+        FollowPlayer();
+        // The bar started playing something: the widget gives way.
+        if (Player.State == PlaybackState.Playing && widgetPlaying) _ = InvokeAsync(StopWidgetAsync);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /* ---------- verdicts ---------- */
+
+    CrateItem? NextAfter(CrateItem? at)
+    {
+        var list = Crate.Items.Where(i => Playable(i) && Crates.VerdictOf(i) == CrateVerdict.Unheard).ToList();
+        var all = Crate.Items.ToList();
+        var from = at is null ? -1 : all.IndexOf(at);
+        return list.FirstOrDefault(q => all.IndexOf(q) > from && q != at) ?? list.FirstOrDefault(q => q != at);
+    }
+
+    async Task MoveAsync(CrateItem? to, bool play)
+    {
+        currentKey = to?.Key;
+        stickyKey = to?.Key;
+        note = null;
+        if (to is null) { await StopWidgetAsync(); return; }
+        if (play) await TogglePlayAsync(to);
+        else if (widgetKey is not null && widgetKey != to.Key) await StopWidgetAsync();
+    }
+
+    async Task Verdict(Pass1 verdict)
+    {
+        if (Current is not { } item) return;
+        // Waiting for a verdict, the track ended on the card: the verdict starts the next one.
+        var playing = AnythingPlaying || (waitForVerdict && PlayingKey == item.Key);
+        var next = NextAfter(item);
+        Crates.Judge(item, pass1: verdict);
+        lastItem = item;
+        await MoveAsync(next, playing);
+    }
+
+    void Rate(int stars)
+    {
+        if (Current is not { } item) return;
+        stickyKey = currentKey = item.Key;
+        Crates.Judge(item, rating: stars);
+        lastItem = item;
+    }
+
+    void Buy()
+    {
+        if (Current is not { } item) return;
+        stickyKey = currentKey = item.Key;
+        ToggleBuy(item);
+        lastItem = item;
+    }
+
+    void ToggleBuy(CrateItem item)
+    {
+        var already = Crates.TrackOf(item)?.Decision == Decision.Buy;
+        Crates.Judge(item, pass1: Pass1.Like, decision: already ? Decision.Skip : Decision.Buy);
+    }
+
+    void SetNote(string? text)
+    {
+        if (Current is not { } item) return;
+        stickyKey = currentKey = item.Key;
+        note = text;
+        Crates.Judge(item, note: text ?? "");
+        lastItem = item;
+    }
+
+    /// <summary>A verdict from a row's badge: the row stays where it is, the card does not move.</summary>
+    void SetVerdict(CrateItem item, Pass1 verdict)
+    {
+        Crates.Judge(item, pass1: verdict);
+        if (item.Key == justPlayedKey) justPlayedKey = null;
+        open = null;
+    }
+
+    void Clear(CrateItem item)
+    {
+        Crates.ClearVerdict(item);
+        open = null;
+    }
+
+    async Task Undo()
+    {
+        if (lastItem is null) return;
+        Crates.ClearVerdict(lastItem);
+        var back = lastItem;
+        lastItem = null;
+        await MoveAsync(back, false);
+    }
+
+    async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.CtrlKey || e.MetaKey || e.AltKey) return;
+        switch (e.Key)
+        {
+            case "s" or "x": await Verdict(Pass1.Skip); break;
+            case "m": await Verdict(Pass1.Maybe); break;
+            case "l" or "+": await Verdict(Pass1.Like); break;
+            case "b": Buy(); break;
+            case "u": await Undo(); break;
+            case "n" when Current is not null: await noteInput.FocusAsync(); break;
+            case "o" when Current?.Resolution?.PageUrl is { } url:
+                await JS.InvokeVoidAsync("open", url, "_blank", "noopener");
+                break;
+            case "1" or "2" or "3" or "4" or "5": Rate(e.Key[0] - '0'); break;
+            case "p" when Current is { } playItem: await TogglePlayAsync(playItem); break;
+            case "Escape": open = null; break;
+        }
+    }
+
+    /* ---------- finding ---------- */
+
+    async Task FindAsync(CrateItem item)
+    {
+        await Crates.FindAsync(item);
+        if (Crates.StateOf(item) != CrateItemState.Pending) open = null;
+    }
+
     async Task FindAgainAsync(CrateItem item)
     {
+        open = null;
         Crates.ClearResolution(item);
         await Crates.FindAsync(item);
+    }
+
+    void Remove(CrateItem item)
+    {
+        open = null;
+        Crates.RemoveItem(item);
     }
 
     void SetPasted(CrateItem item, ChangeEventArgs e) => pasted[item.Key] = e.Value?.ToString() ?? "";
@@ -194,7 +757,11 @@
     async Task UseUrlAsync(CrateItem item)
     {
         await Crates.PasteAsync(item, pasted.GetValueOrDefault(item.Key) ?? "");
-        if (Crates.StateOf(item) == CrateItemState.Found) pasted.Remove(item.Key);
+        if (Crates.ProgressOf(item).Error is null && Crates.StateOf(item) is CrateItemState.Found or CrateItemState.Ambiguous)
+        {
+            pasted.Remove(item.Key);
+            open = null;
+        }
     }
 
     async Task OnPasteKey(KeyboardEventArgs e, CrateItem item)
@@ -207,5 +774,16 @@
         var (added, skipped) = Crates.AddItems(Crate, addText);
         addResult = $"Added {added}" + (skipped > 0 ? $", skipped {skipped} (no “ - ” between artist and title, or already in the list)" : "") + ".";
         if (added > 0) addText = "";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Player.Changed -= OnPlayerChanged;
+        Player.WithdrawOffer(QueueId);
+        if (widgetJs is not null)
+        {
+            try { await widgetJs.DisposeAsync(); } catch (JSDisconnectedException) { }
+        }
+        self?.Dispose();
     }
 }

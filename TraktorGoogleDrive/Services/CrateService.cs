@@ -18,9 +18,12 @@ public sealed partial class CrateService
 
     public event Action? Changed;
 
-    public CrateService(DiscoverService discover, ICrateLookup lookup)
+    public DiscoverFeatures Features { get; }
+
+    public CrateService(DiscoverService discover, ICrateLookup lookup, DiscoverFeatures features)
     {
         _discover = discover;
+        Features = features;
         _resolver = new CrateResolver(lookup);
         _discover.Changed += () => Changed?.Invoke();
     }
@@ -63,7 +66,11 @@ public sealed partial class CrateService
 
     public DiscoverState State => _discover.State;
     public DiscoverStore Store => _discover.Store;
-    public Task EnsureLoadedAsync() => _discover.EnsureLoadedAsync();
+    public async Task EnsureLoadedAsync()
+    {
+        await Features.EnsureLoadedAsync();
+        await _discover.EnsureLoadedAsync();
+    }
 
     public IReadOnlyList<Crate> CratesOf(string genre) => State.CratesOf(genre).ToList();
     public Crate? Get(string id) => State.Crates.GetValueOrDefault(id);
@@ -73,10 +80,12 @@ public sealed partial class CrateService
 
     public bool Owns(CrateItem item) => _discover.Owned.Owns(item.Artist, CrateMatch.SearchTitle(item.Title));
 
+    /// <summary>A SoundCloud find while SoundCloud is off counts as not found: kept in the log, not shown.</summary>
     public CrateItemState StateOf(CrateItem item) =>
         Owns(item) ? CrateItemState.Owned
         : item.Resolution?.Status switch
         {
+            CrateStatus.Found when item.Resolution.Source == "soundcloud" && !Features.SoundCloud => CrateItemState.NotFound,
             CrateStatus.Found => CrateItemState.Found,
             CrateStatus.Ambiguous => CrateItemState.Ambiguous,
             CrateStatus.NotFound => CrateItemState.NotFound,
@@ -175,11 +184,53 @@ public sealed partial class CrateService
         catch (CrateLimitException) { /* shown on the row */ }
     }
 
+    /// <summary>What the paste box takes: Bandcamp and Beatport, and SoundCloud only with its flag on.</summary>
+    public string PasteHint => Features.SoundCloud ? "Paste a Bandcamp, Beatport or SoundCloud URL" : "Paste a Bandcamp or Beatport URL";
+
     public async Task PasteAsync(CrateItem item, string url)
     {
-        if (string.IsNullOrWhiteSpace(url)) { ProgressOf(item).Error = "Paste a Bandcamp or SoundCloud URL first"; Changed?.Invoke(); return; }
-        try { await RunAsync(item, (progress, ct) => _resolver.FromUrlAsync(item, url, progress, ct)!); }
+        if (string.IsNullOrWhiteSpace(url)) { ProgressOf(item).Error = PasteHint + " first"; Changed?.Invoke(); return; }
+        if (!Features.SoundCloud && url.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase))
+        {
+            ProgressOf(item).Error = PasteHint;
+            Changed?.Invoke();
+            return;
+        }
+        var beatport = item.Resolution?.BeatportUrl;
+        try
+        {
+            await RunAsync(item, async (progress, ct) =>
+            {
+                var r = await _resolver.FromUrlAsync(item, url, progress, ct, Features.SoundCloud);
+                // A Bandcamp page pasted onto a Beatport find keeps the Beatport link beside it.
+                return r.BeatportUrl is null && beatport is not null && r.Status == CrateStatus.Found ? r with { BeatportUrl = beatport } : r;
+            });
+        }
         catch (CrateLimitException) { }
+    }
+
+    /// <summary>
+    /// A Bandcamp link known without its track id (a shipped research result):
+    /// read that one page, by its URL, so the track plays in the player bar. Its
+    /// Beatport link and its origin stay.
+    /// </summary>
+    public static bool NeedsReading(CrateItem item) =>
+        item.Resolution is { Status: CrateStatus.Found, Source: "bandcamp", TrackId: null, PageUrl: not null };
+
+    public async Task<bool> CompleteAsync(CrateItem item)
+    {
+        if (!NeedsReading(item)) return true;
+        var known = item.Resolution!;
+        try
+        {
+            await RunAsync(item, async (progress, ct) =>
+            {
+                var r = await _resolver.FromUrlAsync(item, known.PageUrl!, progress, ct, soundCloud: false);
+                return r with { Via = known.Via, BeatportUrl = r.BeatportUrl ?? known.BeatportUrl, Message = r.Message ?? known.Message };
+            });
+        }
+        catch (CrateLimitException) { }
+        return !NeedsReading(item) && StateOf(item) == CrateItemState.Found;
     }
 
     public async Task PickAsync(CrateItem item, CrateCandidate candidate)
@@ -191,6 +242,7 @@ public sealed partial class CrateService
     /// <summary>The SoundCloud fallback, on Toni's click for this one item.</summary>
     public async Task TrySoundCloudAsync(CrateItem item)
     {
+        if (!Features.SoundCloud) return;
         try
         {
             await RunAsync(item, async (progress, ct) =>
@@ -265,20 +317,28 @@ public sealed partial class CrateService
         {
             CrateItemState.Owned => new(name, "owned", "already in your collection"),
             CrateItemState.Found when r!.Source == "soundcloud" => new(name, "found", "on SoundCloud (plays in its widget)"),
+            CrateItemState.Found when r!.Source == "beatport" => new(name, "found", "on Beatport"),
             CrateItemState.Found => new(name, "found",
                 $"on Bandcamp: {string.Join(" – ", new[] { r!.Label, r.ReleaseTitle }.Where(x => !string.IsNullOrWhiteSpace(x)))}"
-                + (r.Via == "guess" ? " (checked guess)" : r.Via == "discogs" ? " (via Discogs)" : "")),
+                + (r.Via == "guess" ? " (checked guess)" : "")),
             CrateItemState.Ambiguous => new(name, "ambiguous", r!.Message ?? "more than one match: pick one"),
-            CrateItemState.NotFound => new(name, "notfound", r!.Message ?? "not found"),
+            CrateItemState.NotFound => new(name, "notfound", "not found yet"),
             _ => new(name, "error", "not looked up"),
         };
     }
 
     // ---------- listening ----------
 
-    /// <summary>Found, not owned and not yet heard, in list order. Never mixed with the genre's seed queue.</summary>
+    /// <summary>What Toni made of an item by ear; Unheard until a verdict, and again after Undo.</summary>
+    public CrateVerdict VerdictOf(CrateItem item) => CrateVerdicts.Of(State.Tracks.GetValueOrDefault(item.Key));
+
+    public TrackState? TrackOf(CrateItem item) => State.Tracks.GetValueOrDefault(item.Key);
+
+    public bool Matches(CrateItem item, CrateFilter filter) => CrateVerdicts.Matches(filter, StateOf(item), VerdictOf(item));
+
+    /// <summary>Found, not owned and without a verdict, in list order. Never mixed with the genre's seed queue.</summary>
     public IReadOnlyList<CrateItem> Queue(Crate crate) =>
-        crate.Items.Where(i => StateOf(i) == CrateItemState.Found && !State.Tracks.ContainsKey(i.Key)).ToList();
+        crate.Items.Where(i => StateOf(i) == CrateItemState.Found && VerdictOf(i) == CrateVerdict.Unheard).ToList();
 
     public void Judge(CrateItem item, Pass1? pass1 = null, int? rating = null, Decision? decision = null, string? note = null, bool? bought = null)
     {
@@ -287,7 +347,7 @@ public sealed partial class CrateService
         {
             Type = "track", At = default, TrackKey = item.Key,
             Artist = r?.Artist ?? item.Artist, Title = r?.Title ?? item.Title,
-            Url = r?.PageUrl, ReleaseUrl = r?.ReleaseUrl ?? r?.PageUrl, Label = r?.Label, ReleaseTitle = r?.ReleaseTitle,
+            Url = r?.PageUrl, ReleaseUrl = r?.ReleaseUrl ?? r?.PageUrl ?? r?.BeatportUrl, Label = r?.Label, ReleaseTitle = r?.ReleaseTitle,
             ReleaseDate = DateOnly.TryParse(r?.Released, out var d) ? d : null,
             // No genre: crate tracks stay out of the genre's own Shortlist.
             Pass1 = pass1, Rating = rating, Decision = decision, Note = note, Bought = bought,
@@ -297,8 +357,9 @@ public sealed partial class CrateService
     public void Judge(TrackState track, int? rating = null, Decision? decision = null, bool? bought = null) =>
         Store.Append(new DiscoverEvent { Type = "track", At = default, TrackKey = track.Key, Rating = rating, Decision = decision, Bought = bought });
 
+    /// <summary>Undo: back to Unheard, so it is in "To hear" again (and off the buy list).</summary>
     public void ClearVerdict(CrateItem item) =>
-        Store.Append(new DiscoverEvent { Type = "track", At = default, TrackKey = item.Key, Clear = true });
+        Store.Append(new DiscoverEvent { Type = "track", At = default, TrackKey = item.Key, Clear = true, Bought = false });
 
     private IEnumerable<TrackState> TracksOf(Crate crate) =>
         State.Tracks.Values.Where(t => CrateMatch.CrateOf(t.Key) == crate.Id);

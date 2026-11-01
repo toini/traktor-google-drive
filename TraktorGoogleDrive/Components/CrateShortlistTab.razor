@@ -9,7 +9,7 @@
     <h2>Liked and maybe <span class="discover-count">@Liked.Count</span></h2>
     @if (Liked.Count == 0)
     {
-        <p class="discover-hint">Tracks you like or mark "maybe" in Listen wait here for a rating and a buy-or-skip.</p>
+        <p class="discover-hint">Tracks you like or mark "maybe" under Tracks wait here for a rating and a buy-or-skip.</p>
     }
     else
     {
@@ -62,7 +62,7 @@
                         @if (t.ReleaseUrl is { } url)
                         {
                             <a class="discover-link" href="@url" target="_blank" rel="noopener noreferrer" data-buy-link>
-                                @(Store(url) == "SoundCloud" ? "Open on SoundCloud ↗" : "Buy on Bandcamp ↗")
+                                @(Store(url) == "SoundCloud" ? "Open on SoundCloud ↗" : $"Buy on {Store(url)} ↗")
                             </a>
                         }
                         <button class="discover-button" data-bought @onclick="() => Crates.Judge(t, bought: true)">Bought</button>
@@ -81,7 +81,10 @@
 
     bool copied;
 
-    static string Store(string url) => url.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase) ? "SoundCloud" : "Bandcamp";
+    static string Store(string url) =>
+        url.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase) ? "SoundCloud"
+        : url.Contains("beatport.com", StringComparison.OrdinalIgnoreCase) ? "Beatport"
+        : "Bandcamp";
 
     static string Meta(TrackState t) =>
         string.Join(" · ", new[] { t.Label, t.ReleaseTitle, t.Note }.Where(x => !string.IsNullOrWhiteSpace(x)));

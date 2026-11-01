@@ -1294,6 +1294,83 @@ match their display names.
   bar on FINISH; rate, buy and skip with the crate's own shortlist; Find all's report;
   create, rename, delete. Store and widget hosts are aborted and recorded; none is called.
 
+### 13.8 One list, Bandcamp and Beatport only (2026-11-01, after first use)
+
+Toni, after using the crate: *"I listened to Tengri & Jahbo – Patch Hell. It wasn't that
+good, so I clicked skip. How do we now indicate that the track was listened to once and
+deemed not fit? It feels a bit confusing."* *"A lot of real estate goes to SoundCloud
+stuff. I don't use SoundCloud, as you can't buy tracks there."* *"It's Bandcamp or
+Beatport in 99% of cases."* And, from real use: continuous play moved past Atriohm –
+Shesharka before he could skip it, and the Listen card no longer offered a verdict for it.
+
+| Option | Gives | Gives up |
+|---|---|---|
+| Keep Tracks / Listen / Shortlist, add badges and filters to Tracks | Smallest change; the focused one-card Listen stays | Two places show the same tracks; the verdict is still given on one tab and read on another; a track the player left is out of reach on the card |
+| **One list** (chosen, Toni: "ok combine views"): Tracks and Listen merged, Shortlist kept as its tab | One place for state and verdicts; any row takes a verdict at any time; no switching | Finding (Find ▾, paste) sits beside listening; the one-at-a-time card becomes the playing row, expanded in the list |
+| One list, Shortlist folded in as filters too | Fewest tabs | Copy links, Bought and Don't buy would crowd the rows; pass 2 is a different task |
+
+What the list is now:
+
+- **A badge per row** for its listening state, read from the same `track` events: Unheard,
+  ✗ Skipped (heard once, not for me), ? Maybe, ♥ Liked, ★n, 🛒 Buy, ✓ Bought. The badge
+  opens the row's verdict menu (Skip, Maybe, Like, stars, Buy, Bought, **Undo: unheard**),
+  so a verdict is given, changed or undone from any row. Undo clears the verdict and the
+  buy, and the track is to hear again ("heard" alone no longer keeps a crate track out).
+- **Filter chips with counts**: To hear (default) / Skipped / Maybe / Liked / To buy /
+  Not found / All. A skipped track leaves "To hear". The row on the card stays in view
+  while it is being rated, bought or noted, whatever the chip, and goes with a verdict.
+- **One line on top**: "Listen → skip or keep → rate the keepers → buy".
+- **The card is a row**: the track playing (or the first to hear) opens inline with the
+  player, large Skip / Maybe / Like, stars, Buy, a note and Undo; keys S M L B N O U P
+  1–5 as before. Other found rows show **▶ Listen**; rows without a find show **Find ▾**
+  (Find it for me or Find again, Find on Bandcamp ↗, Find on Beatport ↗, a paste box);
+  Remove and Find again are in **⋯**. "Not found yet" replaces the detail line, with what
+  was tried as a tooltip.
+- **Just played**: when the player moves on by itself and leaves a track without a
+  verdict, a strip asks "Just played: <track> — ✗ Skip / ? Maybe / ♥ Like" until it is
+  answered, dismissed, or Toni starts another track himself.
+- **Wait for my verdict** (a checkbox, **on by default**, kept per browser): the player is
+  given only the track on the card, so it stops at the end of each track instead of moving
+  on; the verdict then starts the next one. On by default because pass 1 exists to get a
+  verdict per track, and a track that ends unjudged is exactly what went wrong with
+  Shesharka. Off, continuous play walks the list and Just played catches what it left.
+
+**SoundCloud is hidden behind a flag, off** (`DiscoverFeatures.SoundCloud`,
+`localStorage["discover.soundcloud"] = "on"` to bring it back in a browser): Try
+SoundCloud, Find on SoundCloud, the widget and SoundCloud URLs in the paste box are gone,
+and the uploader is a tooltip on the title. The code, the endpoints and the resolutions
+already in the log stay; a SoundCloud find shows as not found while the flag is off. Find
+all never called SoundCloud, and still does not.
+
+**Discogs stays, silently.** It found 13 of the 17 Bandcamp pages (§13.6), so it remains
+the index the lookup starts from, but no text names it: "via Discogs", "Not on Discogs…"
+and the Discogs release link are gone. Removing it would have cost those 13 finds.
+
+**Beatport** joins Bandcamp as a store, by link only. "Find on Beatport ↗" opens
+Beatport's own search in Toni's tab; the paste box takes a Beatport track or release URL,
+which is never fetched. It becomes the buy link (a `bp` field on the resolution, or the
+source "beatport" when there is no Bandcamp page), with a Beatport badge and **Listen on
+Beatport ↗**: its previews need API access, so the track is heard there. Pasted onto a
+Bandcamp find, it is added beside it.
+
+**The research batch** (`2026-11-01.2` in `starter.json`, made by
+`scripts/crate_research_to_starter.py` from a web search over the 53 tracks Find left
+unresolved): a `resolutions` list, each turned into a `crate-resolve` with via "research"
+(53 entries: 46 with a Bandcamp link, 4 of them also on Beatport and 2 free; 1 on
+Beatport only; 6 with nothing to buy: 3 not found, 2 SoundCloud-only edits whose originals
+are for sale, 1 free on Ektoplazm; those 6 are "not found" with the search's words). Applied once like any batch, and **never over Toni's own**: an item
+he resolved, pasted, picked or gave a verdict keeps it, both when the batch is applied
+and in the fold (a research event that reaches a log after his paste loses). Items the
+screenshots cut off or misspelled get their real artist or title ("Self Realization",
+"Swamp Encounter", "The Cosmos Welcomes You", "Not Your Kind!", Pepe's Bodega for
+"Into The Screaming Abyss - Ululation") through a `crate-item` update; the key stays, and
+the screenshot's text goes into the note. A Bandcamp link known only by its page (an album
+page for some) is read the first time it plays, and the track is picked on it then; until
+then the row says "on album <name>". Free or name-your-price finds say "free"; search
+results not checked by hand say "unverified" with the note as a tooltip; for tracks with
+nothing to buy the row shows the search's note and its link ("Gidra's own edit, not for
+sale. The original for sale ↗").
+
 ## Consequences
 
 **Positive**
