@@ -17,6 +17,8 @@ builder.Services.AddRemoteControl();
 builder.Services.AddCastTickets();
 // Track discovery (ADR 20261025-54): Bandcamp, fetched only when Toni acts.
 builder.Services.AddDiscover();
+// Crates: finding a named list's tracks on Discogs, Bandcamp (by URL only) and SoundCloud (oEmbed).
+builder.Services.AddDiscoverCrates();
 
 // Cloud Run sits in front as a TLS-terminating proxy, so without this the app
 // sees scheme=http and the load balancer's IP for every request.
@@ -268,6 +270,7 @@ app.MapCastTickets();
 app.MapRemoteControl();
 
 app.MapDiscover();
+app.MapDiscoverCrates();
 
 // index.html names the non-fingerprinted scripts, so it must never be served
 // from cache without revalidating either.

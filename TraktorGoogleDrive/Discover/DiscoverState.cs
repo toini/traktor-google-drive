@@ -46,6 +46,12 @@ public sealed record DiscoverEvent
     [JsonPropertyName("bought")] public bool? Bought { get; init; }
     /// <summary>Clears pass1, rating and decision: the undo of a mis-tap. "Heard" stays (ADR §4.3).</summary>
     [JsonPropertyName("clear")] public bool? Clear { get; init; }
+
+    // Crates (crate-add, crate-rename, crate-remove, crate-item, crate-item-remove, crate-resolve)
+    [JsonPropertyName("crate")] public string? CrateId { get; init; }
+    [JsonPropertyName("uploader")] public string? Uploader { get; init; }
+    [JsonPropertyName("pos")] public int? Pos { get; init; }
+    [JsonPropertyName("res")] public CrateResolution? Resolution { get; init; }
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<Pass1>))]
@@ -117,6 +123,12 @@ public sealed class DiscoverState
         HeardReleases.Contains(url)
         || (HeardReleaseMatches.Count > 0 && ReleaseMatch.From(title, label, artist, null) is { } m
             && HeardReleaseMatches.Any(h => h.Matches(m)));
+
+    /// <summary>Named lists of tracks inside a genre, apart from its seed queue (ADR "Crates").</summary>
+    public Dictionary<string, Crate> Crates { get; } = new(StringComparer.Ordinal);
+
+    public IEnumerable<Crate> CratesOf(string genre) =>
+        Crates.Values.Where(c => c.Genre == genre).OrderBy(c => c.CreatedAt).ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Versions of the starter list already applied to this log (never applied twice).</summary>
     public HashSet<string> StarterVersions { get; } = new(StringComparer.Ordinal);
@@ -192,6 +204,49 @@ public sealed class DiscoverState
 
             case "stop-name" when e.Name is not null:
                 StopNames.Add(Names.Normalize(e.Name));
+                break;
+
+            case "crate-add" when e.CrateId is not null && e.Name is not null && e.Genre is not null:
+                if (!Crates.ContainsKey(e.CrateId))
+                    Crates[e.CrateId] = new Crate { Id = e.CrateId, Name = e.Name, Genre = e.Genre, Note = e.Note, CreatedAt = e.At };
+                break;
+
+            case "crate-rename" when e.CrateId is not null && !string.IsNullOrWhiteSpace(e.Name) && Crates.TryGetValue(e.CrateId, out var renamed):
+                renamed.Name = e.Name.Trim();
+                break;
+
+            case "crate-remove" when e.CrateId is not null:
+                Crates.Remove(e.CrateId);
+                break;
+
+            case "crate-item" when e.CrateId is not null && e.TrackKey is not null && Crates.TryGetValue(e.CrateId, out var crate):
+                if (crate.Items.FirstOrDefault(i => i.Key == e.TrackKey) is { } item)
+                {
+                    item.Artist = e.Artist ?? item.Artist;
+                    item.Title = e.Title ?? item.Title;
+                    item.Uploader = e.Uploader ?? item.Uploader;
+                    item.Release = e.ReleaseTitle ?? item.Release;
+                    item.Note = e.Note ?? item.Note;
+                }
+                else if (e.Artist is not null && e.Title is not null)
+                {
+                    crate.Items.Add(new CrateItem
+                    {
+                        Key = e.TrackKey, CrateId = e.CrateId, Artist = e.Artist, Title = e.Title, Uploader = e.Uploader,
+                        Release = e.ReleaseTitle, Note = e.Note, Pos = e.Pos ?? crate.Items.Count,
+                    });
+                    crate.Items.Sort((a, b) => a.Pos.CompareTo(b.Pos));
+                }
+                break;
+
+            case "crate-item-remove" when e.CrateId is not null && e.TrackKey is not null && Crates.TryGetValue(e.CrateId, out var from):
+                from.Items.RemoveAll(i => i.Key == e.TrackKey);
+                break;
+
+            case "crate-resolve" when e.TrackKey is not null && CrateMatch.CrateOf(e.TrackKey) is { } crateId
+                                      && Crates.TryGetValue(crateId, out var owner)
+                                      && owner.Items.FirstOrDefault(i => i.Key == e.TrackKey) is { } resolved:
+                resolved.Resolution = e.Clear == true ? null : e.Resolution;
                 break;
 
             case "track" when e.TrackKey is not null:

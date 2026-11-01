@@ -1,0 +1,31 @@
+{
+  "pagination": {
+    "page": 1,
+    "pages": 1,
+    "per_page": 10,
+    "items": 1
+  },
+  "results": [
+    {
+      "id": 28419343,
+      "type": "release",
+      "title": "Purist (3) - Paradox Manipulation",
+      "year": "2023",
+      "label": [
+        "Sangoma Records"
+      ],
+      "format": [
+        "File",
+        "WAV",
+        "Album"
+      ],
+      "catno": "SANGCD033",
+      "uri": "/release/28419343-Purist-Paradox-Manipulation",
+      "master_id": 0,
+      "country": "Germany",
+      "style": [
+        "Psy-Trance"
+      ]
+    }
+  ]
+}

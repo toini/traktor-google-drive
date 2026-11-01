@@ -112,6 +112,12 @@ the text below still says "recommended", the decisions list is what settles it.
   unheard). Owned matching is exact on the normalised title plus one shared artist; near
   matches are not flagged yet.
 
+### Crates as built (2026-11-01)
+
+Named lists of tracks inside a genre, kept apart from the genre's seed queue: the first
+is P → **Looney Boon Hug Halloween 2026**, a friend's set. The model, how a track is
+found, the SoundCloud widget decision and the first real run are in §13.
+
 ## Decisions Toni made
 
 1. **Bandcamp: B2, fetched only when Toni acts** (§1.2). A label's release list is
@@ -133,6 +139,11 @@ the text below still says "recommended", the decisions list is what settles it.
    without the umlauts) seeds its artist **and** its label in its genre, ahead of
    every rating-based seed. The first concrete seed is **Obwigszyh + Carnivor
    Records (H)**, from "1616 (Original Mix)", 5★, comment "KOVA LOPPU. eti lisaa".
+8. **Crates** (2026-11-01, §13): a friend's set goes into its genre (P) as a
+   separate, named list, "so things don't get mixed up", and its tracks are found so
+   that each can be heard and rated. **SoundCloud is allowed as a fallback player**
+   through its official widget, since these sets come from SoundCloud: decision 5
+   rejected YouTube and Spotify, not SoundCloud.
 
 ## Context
 
@@ -452,7 +463,7 @@ so the fetch must be server-side, from Cloud Run. The audio is the exception: an
 | **Beatport partner API** | An application through Beatport's [partner portal](https://partnerportal.beatport.com/hc/en-us/categories/13076449714580-Developers). OAuth client credentials in Secret Manager. No self-serve keys, and Beatport can refuse or revoke. The default grant covers non-commercial informational use | The best H source: label/artist releases with exact dates, genres, 2-min sample MP3s, ISRCs, buy links | **Apply now (spike S2), build when granted.** Using the public client id lifted from Beatport's docs page, as many hobby tools do, is against its API terms. Not that |
 | Scraping beatport.com pages (`__NEXT_DATA__` JSON) | A parser | The same data without access | Against Beatport's terms, and it breaks with their frontend. **Rejected** |
 | **Discogs API** | A personal access token (Secret Manager), 60 requests/min | Release lists with year or date, styles, label profile URLs (incl. Bandcamp) | **Recommended** as the H release-list source and for resolving seeds to URLs. No audio of its own (fallbacks in §1.4). Coverage of digital-only techno is the open question (S3) |
-| **SoundCloud** Widget API | None | Premieres, often a buy link | Optional, later: paste-a-URL only, since no discovery API |
+| **SoundCloud** Widget API | None | Premieres, often a buy link | **Built for crates (§13.4)**: oEmbed checks and pasted URLs, played in its widget; no discovery API |
 | **MusicBrainz** | A User-Agent with contact, 1 request/s | Open ids, ISRCs for some releases | Optional, for dedupe (§6). Underground digital coverage is thin |
 | **Juno, Traxsource** | URL templates | A search page per track | **Link out only** ("search on Juno" for a track found elsewhere) |
 
@@ -518,7 +529,7 @@ next/previous, continuous play, and keyboard and remote control.
 |---|---|---|---|
 | Bandcamp | The `mp3-128` stream URL from the release page | **Yes**, via the redirect endpoint | URLs are signed and expire (lifetime unknown: S1). Whether `bcbits.com` checks `Referer` is unknown: S1. Full-length tracks. Bandcamp may limit repeated full plays of an unbought track (unverified, S1); triage plays each track once or twice |
 | Beatport (if granted) | `sample_url`, a 2-minute MP3 | **Yes** | Samples start mid-track, which already skips the intro |
-| SoundCloud (optional, later) | Widget API iframe | **No** | Scriptable (play, pause, `seekTo`, `FINISH` event) |
+| SoundCloud (crates, §13.4) | Widget API iframe | **No** | Scriptable (play, pause, `seekTo`, `FINISH` event) |
 | Bandcamp fallback | EmbeddedPlayer iframe | **No** | **Not scriptable**: no auto-advance, no skim, no remote control |
 | Discogs, MusicBrainz | nothing of their own | — | Via a Bandcamp URL or a Beatport preview when one is found, else link-out only (§1.4) |
 | Juno, Traxsource | nothing | — | Link out only |
@@ -930,9 +941,13 @@ IndexedDB, so it survives a reload without asking the server.
   `bandcamp.com`, `api.discogs.com`, `api.beatport.com`, `musicbrainz.org`), over
   HTTPS, following redirects only within them. URLs Toni pastes are parsed into
   source refs, never fetched as given. The audio endpoint redirects only to the
-  adapter's CDN hosts (`*.bcbits.com`, Beatport's sample host).
+  adapter's CDN hosts (`*.bcbits.com`, Beatport's sample host). Crates (§13) add
+  four Discogs URL shapes (`/database/search`, `/releases/{id}`, `/labels/{id}`,
+  `/artists/{id}`, built from parts) and SoundCloud's `soundcloud.com/oembed` only, for
+  a `soundcloud.com/<user>/<track>` URL rebuilt from its two parts. The widget itself
+  (`w.soundcloud.com`) runs in Toni's browser, not through the server.
 - **Outbound rate limits**, enforced in the server, per host: Bandcamp 1 request per
-  2 s, burst 3, 500 per day; Discogs 50 per minute; MusicBrainz 1 per second, as its
+  2 s, burst 3, 500 per day; Discogs 1 per 2.6 s and 1,000 a day (as built, §13.3); SoundCloud oEmbed 1 per 2 s, 300 a day; MusicBrainz 1 per second, as its
   policy requires. Hitting a cap
   returns 429 to the app, which says so, rather than queueing silently.
 - **User-Agent**: `traktor-google-drive/1.0 (+https://github.com/toini/traktor-google-drive)`,
@@ -1122,6 +1137,162 @@ and the first real check is Toni's re-consent on the branch.
 - The xUnit project is `tests/server-unit/TraktorGoogleDrive.Server.Tests.csproj`,
   beside `tests/unit` (the client's gig-preview rules), which landed on master
   meanwhile.
+
+## 13. Crates: named lists inside a genre (2026-11-01)
+
+Toni, lightly cleaned: *"My friend played a set; I asked for the tracklist and he
+shared screenshots of his SoundCloud 'Forest' list. Add them to Discover. They belong
+to P, but maybe sub-views so things don't get mixed up. Call it 'Looney Boon Hug
+Halloween 2026'. Then find the actual tracks, so I can listen to each and rate them."*
+
+A seed answers "what did this label release since I last looked"; a set's tracklist
+answers "which of these 70 tracks do I want". The second is a list of known tracks, not
+a watch list, so it gets its own model.
+
+### 13.1 Options considered
+
+| Option | Gives | Gives up |
+|---|---|---|
+| **Seeds for every artist** in the list, in P | Reuses everything | 60-odd new P seeds whose whole catalogues flood P's queue; the 70 tracks themselves are lost among them. Exactly the mixing Toni asked to avoid |
+| **A new genre** "Looney" beside Z/H/P/C | Separate by construction | It *is* P; a genre per set multiplies genres and breaks the per-genre routing (§3.3) |
+| **A crate** (chosen): a named list inside a genre, with its own Listen and Shortlist | Separate queue, same triage, same log; any number per genre | A third item model next to seeds and releases (below) |
+
+### 13.2 The crate model
+
+- **A crate** has an id, a name, a genre and a note ("friend's set, SoundCloud
+  Forest"). **An item** has artist, title, the SoundCloud uploader shown under the
+  title, an optional release hint and note, and its position. Its key is
+  `crate:<crate id>:<artist slug>--<title slug>`.
+- **Events in the same appDataFolder log** (§8), so a crate works across devices
+  like the rest of Discover: `crate-add`, `crate-rename`, `crate-remove`, `crate-item`,
+  `crate-item-remove`, and `crate-resolve` (the item's resolution: found / ambiguous
+  / not found, with the source, page, Bandcamp track id, label, release, date, Discogs
+  link, candidates and a message). "Owned" is not stored: it is the collection's answer
+  (§6.2), asked every time.
+- **Triage reuses the `track` event**, keyed by the item's key, with **no genre**.
+  The genre's Listen queue is built only from its seeds' releases, and its Shortlist
+  filters on the genre, so nothing from a crate reaches P's own views. A crate's
+  Shortlist filters on the key's crate id.
+- **Shipped as a starter batch** (`2026-11-01.1` in `wwwroot/discover/starter.json`,
+  §4.3's apply-once mechanism): the 70 transcribed tracks appear on first load, applied
+  once per log, never again.
+- **UI**: chips on the genre's page ("P seeds", "Looney Boon Hug Halloween 2026 · N
+  to hear · 70", "+ New list"), the crates in the sidebar under the genre letters, and
+  `/discover/{genre}/list/{id}` with **Tracks** (find), **Listen** (pass 1) and
+  **Shortlist** (pass 2, buy list, Copy links). Create, rename (✎) and delete (with a
+  confirmation) in the UI; tracks are added as "Artist - Title" lines.
+
+### 13.3 Finding the tracks (resolution order)
+
+Per item, only on Toni's action ("Find", "Find all", a paste, a pick, "Try
+SoundCloud"); nothing in the background:
+
+1. **Owned?** Matched against the collection (§6.2); an owned item is marked
+   "already yours", skipped by Find all at no cost, and never queued.
+2. **Discogs search** (`/database/search?type=release&artist=<first artist>&track=<title>`),
+   unauthenticated (a personal token in Secret Manager as `Discover__DiscogsToken` is
+   used if set), **one request per 2.6 s** (25/min is Discogs' unauthenticated limit),
+   1,000 a day, cached a week. Results are ranked (`DiscogsRanking`): every artist
+   credited 4, some 3, a compilation 2, a stranger dropped; +1 a single named after the
+   track, +1 digital; newer first. Two equal results credited to *different Discogs
+   identities with the same name* ("Nobot" and "Nobot (2)") are **ambiguous**: Toni
+   picks one, and the lookup continues through that release. Otherwise the best
+   release is read for its tracklist, date and labels, and its **labels' and artists'
+   profiles for Bandcamp links** (as S3 found, that is where Discogs keeps them).
+3. **Bandcamp by URL only**: a page Discogs lists, then **checked guesses** of the first
+   artist's and the uploader's subdomain (`<slug>.bandcamp.com`). A label page is read
+   for its release list (§1.2's adapter, 2 s spacing, the 500/day cap), and at most three
+   releases whose title fits the track (or the Discogs release) are opened; the track
+   must be on one of them, by title ("Artist - Title" as compilations write it counts,
+   and a title cut off in the screenshot matches by its start). A guess that 404s, 303s
+   to a custom domain, or lacks the track is simply not a match. **Bandcamp's
+   `/search` is never called by the app** (robots.txt, §1.2).
+4. **Not found**: the row says what was tried ("not on Discogs, and no Bandcamp page
+   had it (ianuaria.bandcamp.com)"), shows the Discogs release if there was one, and
+   offers:
+   - **Find on Bandcamp ↗** and **Find on SoundCloud ↗**: the stores' own search pages,
+     opened in a **new tab in Toni's browser**. That is Toni searching, not our server.
+   - **a paste box** for a Bandcamp track, album or label URL (an album's track is
+     picked by title, or offered as a choice), or a SoundCloud track URL.
+   - **Try SoundCloud** (§13.4).
+5. **Find all** walks every item not yet looked up, one at a time, with the shared run
+   report (`RunReport`, also behind the seed refresh's report): the item it is on, the
+   step ("Searching Discogs…", "Reading skogarna.bandcamp.com…"), a lookup count, an
+   upper bound on the time left, then one line per item. A spent cap or a 429 stops the
+   run and says so; running it with nothing left says "Nothing left to look up", never
+   a silent no-op. Stop is offered while it runs.
+
+### 13.4 SoundCloud as a fallback player
+
+These lists come from SoundCloud, so a track that is on SoundCloud and not on Bandcamp
+should still be playable for triage. Decision 5 rejected YouTube and Spotify, not
+SoundCloud.
+
+| Option | Gives | Gives up |
+|---|---|---|
+| **Official widget + oEmbed** (chosen) | SoundCloud's sanctioned embed (`w.soundcloud.com/player`), scriptable through its Widget API (play, pause, `FINISH`), no API key | Plays in an iframe on the card, not in our `<audio>`: no gapless, no waveform, no player-bar queue, no remote control, no Cast |
+| SoundCloud API (search, stream URLs) | Search and our player bar | New API registrations are effectively closed (§1.1), and stream URLs outside the widget are against its terms |
+| Scraping soundcloud.com | Search | Against its terms. Rejected |
+
+- **Finding**: "Try SoundCloud" (per item, on demand only) asks the server, which calls
+  **only SoundCloud's oEmbed endpoint** (`soundcloud.com/oembed?url=…`) for at most three
+  permalinks: the uploader's names under the title, then the first artist, with the
+  title's slug. A 404 is "not there". The track page is never fetched, nothing is
+  searched, and requests are spaced 2 s, 300 a day. A pasted `soundcloud.com/<user>/<track>`
+  URL is checked the same way; sets, profiles and short links are refused.
+- **A Bandcamp link in the track's description wins**: oEmbed returns the uploader's
+  description, which often is the buy link. When it names a Bandcamp page with the
+  track, the item resolves to Bandcamp instead, and plays in the player bar.
+- **Playing**: a SoundCloud find shows ▶ on the card; the widget loads there with
+  `auto_play`, and `soundcloud-widget.js` loads the Widget API script only on that first
+  play. Its PLAY pauses the player bar and vice versa; FINISH moves the card on and plays
+  the next item (in the widget or in the bar). The bar's own queue for a crate is its
+  Bandcamp finds, so the bar's Next and continuous play skip SoundCloud items.
+
+### 13.5 Listening and rating
+
+The same pass-1 / pass-2 flow as a genre's (§5): Skip / Maybe / Like move on, stars,
+Buy and a note stay on the card, Undo, keys S M L B N O U P 1–5; Bandcamp finds play in
+the player bar through the redirect endpoint (§2.2), with the crate's Bandcamp items as
+the bar's queue. The crate's Shortlist decides liked tracks and lists the buy links
+(Bandcamp release, or the SoundCloud page).
+
+### 13.6 The first real run (2026-11-01)
+
+One rate-limited pass over the 70 tracks, by hand, with the same resolver and server
+sources as the app (Discogs 2.6 s, Bandcamp 2 s, SoundCloud 2 s apart). A local DNS
+outage cut 31 items off part-way; those 31 were run once more afterwards, and nothing
+else was repeated. In total: **Discogs 123 requests, Bandcamp 103, SoundCloud oEmbed 73**.
+
+| Result | Tracks |
+|---|---|
+| **Found on Bandcamp** | **17**: 13 through a Bandcamp page Discogs lists (mostly Parvati's `beatspace-parvati`, also Sangoma, Simbiose Sounds, Kandiszucker, Kali Earth), 4 by a checked guess (Skogarna ×2, SiShiva, Vibralium) |
+| **SoundCloud only** | **4** by oEmbed guess (Faeyan, Nargun, Codex Spiralis, Gidra). Codex Spiralis' description links its Parvati album, so with §13.4's link rule it now resolves to Bandcamp |
+| **Not found** | **49**; Discogs knew a release for 2 of them (a remix EP without the original, an album without the track) |
+| Ambiguous | 0 |
+| Already owned | 0 (against the collection export of 2026-10-25) |
+
+Discogs knew a release for only 15 of the 70: this forest scene is mostly SoundCloud
+and small Bandcamp pages under names the artists' own don't predict. For the 49, the
+row's Bandcamp/SoundCloud search tabs and the paste box are the path. The SoundCloud
+permalink guess found 4 of the 53 tracks it was tried on: uploaders' permalinks rarely
+match their display names.
+
+### 13.7 Tests
+
+- **xUnit**: the Discogs parser on recorded answers (`tests/fixtures/discover/discogs/`,
+  from the run above, trimmed to the fields read; no Discogs user data), the ranking
+  and ambiguity rule, the lookup's request sequence and cache, SoundCloud's URL rules,
+  permalink guesses and oEmbed parsing (`tests/fixtures/discover/soundcloud/`), the
+  endpoints' allowlist and input refusal, the crate fold and log round trip, the shipped
+  crate (70 items, applied once, nothing in P's seeds or shortlist), and the resolver
+  against a fake lookup (via Discogs, by guess, not found, ambiguous and picked, pasted
+  album, SoundCloud on demand, a Bandcamp buy link preferred, a spent limit stopping).
+- **e2e** (`crates.spec.ts`, `crates-mock.ts`): the crate under P with 70 items and none
+  of it in P's queue; found / not found / ambiguous with a pick; a pasted URL; the
+  SoundCloud widget (a stand-in Widget API) playing on the card and handing over to the
+  bar on FINISH; rate, buy and skip with the crate's own shortlist; Find all's report;
+  create, rename, delete. Store and widget hosts are aborted and recorded; none is called.
 
 ## Consequences
 

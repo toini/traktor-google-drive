@@ -59,6 +59,8 @@
         var liked = Discover.Liked(Genre);
         var seeds = Discover.SeedsOf(Genre);
 
+        @* The genre's crates (named lists such as a friend's set), kept apart from this seed queue. *@
+        <CrateChips Genre="@Genre" />
         <nav class="discover-tabs" role="tablist">
             <a role="tab" class="discover-tab @(TabIs("listen") ? "active" : "")" aria-selected="@(TabIs("listen") ? "true" : "false")"
                href="@($"discover/{Genre}/listen")" data-tab="listen">Listen <span class="discover-count" data-queue-count="@queue.Count">@queue.Count</span></a>

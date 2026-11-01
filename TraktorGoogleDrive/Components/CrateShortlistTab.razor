@@ -1,0 +1,101 @@
+@using TraktorGoogleDrive.Discover
+@inject CrateService Crates
+@inject IJSRuntime JS
+
+@* Pass 2 for a crate (ADR 20261025-54, "Crates"): liked and maybe tracks to rate
+   and decide, then the buy list with its links. Same flow as a genre's Shortlist,
+   kept to this crate. *@
+<section class="discover-section" data-section="to-decide">
+    <h2>Liked and maybe <span class="discover-count">@Liked.Count</span></h2>
+    @if (Liked.Count == 0)
+    {
+        <p class="discover-hint">Tracks you like or mark "maybe" in Listen wait here for a rating and a buy-or-skip.</p>
+    }
+    else
+    {
+        <ul class="discover-list">
+            @foreach (var t in Liked)
+            {
+                <li class="discover-row" data-liked="@t.Key">
+                    <div class="discover-row-main">
+                        <span class="discover-badge">@(t.Pass1 == Pass1.Like ? "♥" : "?")</span>
+                        <span class="discover-row-title" data-liked-title>@t.Artist – @t.Title</span>
+                        <span class="discover-row-meta">@Meta(t)</span>
+                    </div>
+                    <div class="discover-row-actions">
+                        <DiscoverStars Value="t.Rating" OnRate="r => Crates.Judge(t, rating: r)" />
+                        <button class="discover-button buy" data-buy @onclick="() => Crates.Judge(t, decision: Decision.Buy)">Buy</button>
+                        <button class="discover-button" data-dont-buy @onclick="() => Crates.Judge(t, decision: Decision.Skip)">Don't buy</button>
+                        @if ((t.TrackUrl ?? t.ReleaseUrl) is { } link)
+                        {
+                            <a class="discover-link" href="@link" target="_blank" rel="noopener noreferrer">@Store(link) ↗</a>
+                        }
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+<section class="discover-section" data-section="to-buy">
+    <h2>To buy <span class="discover-count">@Shortlist.Count</span></h2>
+    @if (Shortlist.Count == 0)
+    {
+        <p class="discover-hint">Nothing to buy yet from “@Crate.Name”.</p>
+    }
+    else
+    {
+        <div class="discover-toolbar">
+            <button class="discover-button" data-copy-links @onclick="CopyAsync">Copy links</button>
+            @if (copied) { <span class="discover-hint" data-copied>Copied.</span> }
+        </div>
+        <ul class="discover-list">
+            @foreach (var t in Shortlist)
+            {
+                <li class="discover-row" data-shortlisted="@t.Key">
+                    <div class="discover-row-main">
+                        <span class="discover-stars-static">@(t.Rating is { } r ? new string('★', r) : "")</span>
+                        <span class="discover-row-title">@t.Artist – @t.Title</span>
+                        <span class="discover-row-meta">@Meta(t)</span>
+                    </div>
+                    <div class="discover-row-actions">
+                        @if (t.ReleaseUrl is { } url)
+                        {
+                            <a class="discover-link" href="@url" target="_blank" rel="noopener noreferrer" data-buy-link>
+                                @(Store(url) == "SoundCloud" ? "Open on SoundCloud ↗" : "Buy on Bandcamp ↗")
+                            </a>
+                        }
+                        <button class="discover-button" data-bought @onclick="() => Crates.Judge(t, bought: true)">Bought</button>
+                        <button class="discover-button" data-remove @onclick="() => Crates.Judge(t, decision: Decision.Skip)">Remove</button>
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Crate Crate { get; set; } = null!;
+    [Parameter, EditorRequired] public IReadOnlyList<TrackState> Liked { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<TrackState> Shortlist { get; set; } = [];
+
+    bool copied;
+
+    static string Store(string url) => url.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase) ? "SoundCloud" : "Bandcamp";
+
+    static string Meta(TrackState t) =>
+        string.Join(" · ", new[] { t.Label, t.ReleaseTitle, t.Note }.Where(x => !string.IsNullOrWhiteSpace(x)));
+
+    async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", DiscoverService.ShortlistText(Shortlist));
+            copied = true;
+        }
+        catch (JSException)
+        {
+            copied = false;
+        }
+    }
+}

@@ -151,7 +151,7 @@ public static class DiscoverEndpoints
     /// The allowlisted user only (ADR §9). Without this the service, which Cloud Run
     /// exposes to everyone, would be an open proxy fetching Bandcamp under our IPs.
     /// </summary>
-    private static async Task<IResult?> Authorize(HttpRequest request, RemoteAuth auth, CancellationToken ct)
+    internal static async Task<IResult?> Authorize(HttpRequest request, RemoteAuth auth, CancellationToken ct)
     {
         var header = request.Headers.Authorization.ToString();
         var token = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..].Trim() : null;

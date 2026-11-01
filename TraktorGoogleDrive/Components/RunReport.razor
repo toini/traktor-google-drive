@@ -1,0 +1,39 @@
+@* What a long run is doing and what it found, one line per thing it checked, so a
+   press is never a silent no-op. Shared by a genre's seed refresh (RefreshReport)
+   and a crate's "Find all" (CrateTracksTab). *@
+<div class="discover-report" data-refresh-report data-running="@(Running ? "true" : "false")" role="status" aria-live="polite">
+    @if (Running)
+    {
+        <p class="discover-report-now" data-refresh-progress>@Now</p>
+        @if (Meter is not null)
+        {
+            <p class="discover-hint" data-refresh-meter>@Meter</p>
+        }
+    }
+    else if (Done is not null)
+    {
+        <p class="discover-hint" data-refresh-done>@Done</p>
+    }
+    @if (Results.Count > 0)
+    {
+        <ul class="discover-results" data-refresh-results>
+            @foreach (var r in Results)
+            {
+                <li class="discover-result @r.Css" data-result="@r.Name" data-result-kind="@r.Kind">
+                    <strong>@r.Name</strong>: @r.Text
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    /// <param name="Css">"good", "bad" or "".</param>
+    public sealed record Line(string Name, string Kind, string Text, string Css = "");
+
+    [Parameter] public bool Running { get; set; }
+    [Parameter] public string? Now { get; set; }
+    [Parameter] public RenderFragment? Meter { get; set; }
+    [Parameter] public string? Done { get; set; }
+    [Parameter] public IReadOnlyList<Line> Results { get; set; } = [];
+}

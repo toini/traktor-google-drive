@@ -1,0 +1,104 @@
+/* Crates: named lists inside a Discover genre (ADR 20261025-54, "Crates"). */
+
+/* Sidebar: under the genre letters. */
+.crate-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 12px 8px 16px;
+    border-bottom: 1px solid #30363d;
+}
+
+.crate-nav-link {
+    color: #c9d1d9;
+    font-size: 12px;
+    text-decoration: none;
+    padding: 4px 6px;
+    border-radius: 4px;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.crate-nav-link:hover { background: #21262d; color: #fff; }
+.crate-nav-link.active { background: #ff6600; color: #1a1a1a; }
+.crate-nav-genre { color: #ff6600; font-weight: 600; }
+.crate-nav-link.active .crate-nav-genre { color: #1a1a1a; }
+
+/* Chips on a genre's page: its seed queue and its crates. */
+.crate-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 10px;
+}
+
+.crate-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 4px 10px;
+    border: 1px solid #30363d;
+    border-radius: 16px;
+    background: #161b22;
+    color: #c9d1d9;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+.crate-chip:hover { border-color: #ff6600; color: #fff; }
+.crate-chip.active { border-color: #ff6600; color: #fff; background: #2a1c10; }
+.crate-chip.new { border-style: dashed; color: #8b949e; }
+.crate-new { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* A crate's page. */
+.crate-up { color: inherit; text-decoration: none; }
+.crate-up:hover { text-decoration: underline; }
+.crate-sep { color: #8b949e; margin: 0 6px; }
+.crate-name { color: #fff; }
+.crate-rename { font-size: 16px; min-width: 16em; }
+.crate-confirm { border-color: #ff7b72; }
+
+.crate-summary span[data-summary-found] { color: #7ee787; }
+
+.crate-items .crate-item { align-items: flex-start; }
+.crate-item.owned { opacity: 0.6; }
+.crate-state {
+    display: inline-block;
+    min-width: 7.5em;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #8b949e;
+}
+.crate-item.good .crate-state { color: #7ee787; }
+.crate-item.bad .crate-state { color: #ff7b72; }
+.crate-item[data-state="busy"] .crate-state { color: #ff6600; }
+
+.crate-actions { flex-wrap: wrap; justify-content: flex-end; }
+.crate-paste { display: inline-flex; gap: 4px; align-items: center; }
+.crate-paste .discover-input { width: 18em; }
+.crate-candidates { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.crate-candidates li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 2px 0; }
+.crate-add { width: 100%; max-width: 40em; }
+
+/* SoundCloud's widget on the Listen card. */
+.crate-widget {
+    width: 100%;
+    height: 120px;
+    border: 0;
+    margin: 8px 0;
+    border-radius: 4px;
+    background: #0d1117;
+}
+
+@media (max-width: 700px) {
+    .crate-paste .discover-input { width: 100%; }
+    .crate-actions { justify-content: flex-start; }
+}

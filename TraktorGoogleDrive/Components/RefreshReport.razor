@@ -4,48 +4,30 @@
 
 @* What a refresh (or "Add & search") is doing and what it found, per seed, so a
    press is never a silent no-op: progress while it runs, with the request count
-   and a time estimate from the server's 2 s spacing, then one line per seed. *@
+   and a time estimate from the server's 2 s spacing, then one line per seed.
+   Rendered by RunReport, which a crate's "Find all" shares. *@
 @if (Discover.RunOf(Genre) is { } run)
 {
-    <div class="discover-report" data-refresh-report data-running="@(run.Running ? "true" : "false")" role="status" aria-live="polite">
-        @if (run.Running)
-        {
-            <p class="discover-report-now" data-refresh-progress>@(run.Detail ?? $"Checking {run.Current}…")</p>
-            <p class="discover-hint" data-refresh-meter>
-                @run.Title · seed @Math.Min(run.Done + 1, run.Total) of @run.Total ·
-                <span data-request-count>@run.Requests</span> request@(run.Requests == 1 ? "" : "s") so far ·
-                up to about @Eta(DiscoverService.RequestsLeft(run)) left (one Bandcamp request every @DiscoverService.SecondsPerRequest s)
-            </p>
-        }
-        else
-        {
-            <p class="discover-hint" data-refresh-done>
-                @run.Title, @run.StartedAt.ToLocalTime().ToString("HH:mm"): @run.Requests request@(run.Requests == 1 ? "" : "s").
-            </p>
-        }
-        @if (run.Results.Count > 0)
-        {
-            <ul class="discover-results" data-refresh-results>
-                @foreach (var r in run.Results)
-                {
-                    <li class="discover-result @KindClass(r.Kind)" data-result="@r.Name" data-result-kind="@r.Kind">
-                        <strong>@r.Name</strong>: @r.Text
-                    </li>
-                }
-            </ul>
-        }
-    </div>
+    <RunReport Running="run.Running"
+               Now="@(run.Detail ?? $"Checking {run.Current}…")"
+               Done="@($"{run.Title}, {run.StartedAt.ToLocalTime():HH:mm}: {run.Requests} request{(run.Requests == 1 ? "" : "s")}.")"
+               Results="run.Results.Select(r => new RunReport.Line(r.Name, r.Kind.ToString(), r.Text, KindClass(r.Kind))).ToList()">
+        <Meter>
+            @run.Title · seed @Math.Min(run.Done + 1, run.Total) of @run.Total ·
+            <span data-request-count>@run.Requests</span> request@(run.Requests == 1 ? "" : "s") so far ·
+            up to about @Eta(DiscoverService.RequestsLeft(run)) left (one Bandcamp request every @DiscoverService.SecondsPerRequest s)
+        </Meter>
+    </RunReport>
 }
 
 @code {
     [Parameter, EditorRequired] public string Genre { get; set; } = "";
 
     /// <summary>"40 s" or "4 min": requests × the server's spacing.</summary>
-    public static string Eta(int requests)
-    {
-        var seconds = requests * DiscoverService.SecondsPerRequest;
-        return seconds < 90 ? $"{seconds} s" : $"{(int)Math.Ceiling(seconds / 60.0)} min";
-    }
+    public static string Eta(int requests) => Duration(requests * DiscoverService.SecondsPerRequest);
+
+    public static string Duration(double seconds) =>
+        seconds < 90 ? $"{(int)Math.Ceiling(seconds)} s" : $"{(int)Math.Ceiling(seconds / 60.0)} min";
 
     static string KindClass(DiscoverService.OutcomeKind k) => k switch
     {
