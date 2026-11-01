@@ -5,6 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "test:remote": "playwright test -c playwright.remote.config.ts",
+    "test:auth": "playwright test -c playwright.auth.config.ts",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
     "report": "playwright show-report"
