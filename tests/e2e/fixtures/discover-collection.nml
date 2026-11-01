@@ -9,11 +9,16 @@
     Compilation Cut        Various Artists, RAW., 4 stars                     -> the artist is stop-listed
     Low Burn               Noseda, Erebos Records, 3 stars                    -> below the 4-star default
     Tetrakis               Dragon, 2TO6 Records (Z), "lisää luuppi!"          -> not a search marker
+    Viral Virus            Gidra, in no playlist                              -> already owned in the P crate
 -->
 <NML VERSION="19">
   <HEAD COMPANY="www.native-instruments.com" PROGRAM="Traktor"></HEAD>
   <MUSICFOLDERS></MUSICFOLDERS>
-  <COLLECTION ENTRIES="6">
+  <COLLECTION ENTRIES="7">
+    <ENTRY TITLE="Viral Virus (Original Mix)" ARTIST="Gidra">
+      <LOCATION DIR="/:Music/:P/:" FILE="gidra-viral-virus.mp3" VOLUME="Macintosh HD"></LOCATION>
+      <INFO LABEL="Parvati Records" PLAYTIME="460" IMPORT_DATE="2024/7/29"></INFO>
+    </ENTRY>
     <ENTRY TITLE="1616 (Original Mix)" ARTIST="Obwigszyh">
       <LOCATION DIR="/:Music/:H/:" FILE="obwigszyh-1616.mp3" VOLUME="Macintosh HD"></LOCATION>
       <ALBUM TITLE="Internal Motion"></ALBUM>

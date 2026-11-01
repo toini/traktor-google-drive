@@ -26,8 +26,15 @@ public sealed record StarterBatch(
     string Version,
     IReadOnlyList<StarterBatch.SeedEntry>? Seeds,
     IReadOnlyList<StarterBatch.ReleaseEntry>? ReleasesHeard,
-    IReadOnlyList<StarterBatch.TrackEntry>? Tracks)
+    IReadOnlyList<StarterBatch.TrackEntry>? Tracks,
+    IReadOnlyList<StarterBatch.CrateEntry>? Crates = null)
 {
+    /// <summary>A crate shipped with its tracks (ADR "Crates"): a friend's set, say.</summary>
+    public sealed record CrateEntry(string Id, string Name, string Genre, string? Note, IReadOnlyList<CrateTrackEntry>? Tracks);
+
+    public sealed record CrateTrackEntry(string Artist, string Title, string? Uploader, string? Release = null,
+        string? TrackNumber = null, int? Bpm = null, string? Note = null);
+
     /// <param name="Watermark">"Heard through", a month or a day.</param>
     public sealed record SeedEntry(SeedKind Kind, string Name, string Genre, string? Url, string? Watermark,
         SeedOrigin? Origin, string? Reason);
@@ -89,6 +96,25 @@ public sealed record StarterBatch(
                 Decision = t.Decision,
                 Note = t.Note,
             });
+        }
+        foreach (var c in Crates ?? [])
+        {
+            events.Add(new DiscoverEvent { Type = "crate-add", At = default, CrateId = c.Id, Name = c.Name, Genre = c.Genre, Note = c.Note });
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            var pos = 0;
+            foreach (var t in c.Tracks ?? [])
+            {
+                var key = CrateMatch.ItemKey(c.Id, t.Artist, t.Title);
+                for (var n = 2; !keys.Add(key); n++) key = CrateMatch.ItemKey(c.Id, t.Artist, t.Title) + "-" + n;
+                var notes = new[] { t.Note, t.Bpm is { } bpm ? $"{bpm} BPM" : null, t.TrackNumber is { } no ? $"track {no}" : null }
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+                events.Add(new DiscoverEvent
+                {
+                    Type = "crate-item", At = default, CrateId = c.Id, TrackKey = key, Artist = t.Artist, Title = t.Title,
+                    Uploader = t.Uploader, ReleaseTitle = t.Release, Note = notes.Count > 0 ? string.Join(" · ", notes) : null,
+                    Pos = pos++,
+                });
+            }
         }
         events.Add(new DiscoverEvent { Type = "starter", At = default, Name = Version });
         return events;

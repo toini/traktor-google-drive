@@ -1,0 +1,211 @@
+@using TraktorGoogleDrive.Discover
+@inject CrateService Crates
+
+@* Finding a crate's tracks (ADR 20261025-54, "Crates"). Per item: Find (Discogs,
+   then Bandcamp by URL), "Find on Bandcamp ↗" (Bandcamp's own search in a new tab:
+   Toni searching, not our server), a paste box for a Bandcamp or SoundCloud URL,
+   and "Try SoundCloud" (its official oEmbed, on demand). "Find all" goes through
+   every item not looked up yet, one at a time, and reports each one. *@
+<div class="crate-tracks" data-crate-tracks>
+    @{
+        var states = Crate.Items.Select(i => (Item: i, State: Crates.StateOf(i))).ToList();
+        int Count(CrateItemState s) => states.Count(x => x.State == s);
+        var onBandcamp = states.Count(x => x.State == CrateItemState.Found && x.Item.Resolution?.Source == "bandcamp");
+        var onSoundCloud = states.Count(x => x.State == CrateItemState.Found && x.Item.Resolution?.Source == "soundcloud");
+        var run = Crates.Run is { } r && r.CrateId == Crate.Id ? r : null;
+    }
+    <p class="discover-hint crate-summary" data-crate-summary>
+        <span data-summary-found="@Count(CrateItemState.Found)">@Count(CrateItemState.Found) found</span>
+        (<span data-summary-bandcamp="@onBandcamp">@onBandcamp Bandcamp</span>, <span data-summary-soundcloud="@onSoundCloud">@onSoundCloud SoundCloud</span>) ·
+        <span data-summary-ambiguous="@Count(CrateItemState.Ambiguous)">@Count(CrateItemState.Ambiguous) to pick</span> ·
+        <span data-summary-notfound="@Count(CrateItemState.NotFound)">@Count(CrateItemState.NotFound) not found</span> ·
+        <span data-summary-owned="@Count(CrateItemState.Owned)">@Count(CrateItemState.Owned) already yours</span> ·
+        <span data-summary-pending="@Count(CrateItemState.Pending)">@Count(CrateItemState.Pending) not looked up</span>
+    </p>
+
+    <div class="discover-toolbar">
+        <button class="discover-button" data-find-all disabled="@(run?.Running == true)" @onclick="() => Crates.FindAllAsync(Crate)">
+            @(run?.Running == true ? "Finding…" : $"Find all ({Count(CrateItemState.Pending)})")
+        </button>
+        @if (run?.Running == true)
+        {
+            <button class="discover-button subtle" data-stop-find @onclick="Crates.StopFindAll">Stop</button>
+        }
+        <label class="discover-hint"><input type="checkbox" data-hide-owned @bind="hideOwned" /> hide tracks already in your collection</label>
+    </div>
+    <p class="discover-hint">
+        Discogs first (one request every 2.6 s), then Bandcamp only at an address Discogs lists or a checked guess
+        of the artist's or uploader's page (one request every 2 s). Bandcamp's own search is never called by the app.
+    </p>
+
+    @if (run is not null)
+    {
+        <RunReport Running="run.Running"
+                   Now="@($"Finding {run.Current}… {run.Detail}")"
+                   Done="@(run.Message ?? "")"
+                   Results="@Lines(run)">
+            <Meter>
+                Find all · track @Math.Min(run.Done + 1, run.Total) of @run.Total ·
+                <span data-request-count>@run.Lookups</span> lookup@(run.Lookups == 1 ? "" : "s") so far ·
+                up to about @RefreshReport.Duration((run.Total - run.Done) * CrateService.WorstSecondsPerTrack) left
+            </Meter>
+        </RunReport>
+    }
+
+    <ol class="discover-list crate-items">
+        @foreach (var (item, state) in states.Where(x => !hideOwned || x.State != CrateItemState.Owned))
+        {
+            var p = Crates.ProgressOf(item);
+            var res = item.Resolution;
+            <li class="discover-row crate-item @StateClass(state)" data-crate-item="@item.Key" data-state="@(p.Busy ? "busy" : state.ToString().ToLowerInvariant())">
+                <div class="discover-row-main">
+                    <span class="crate-state" data-state-label>@StateLabel(state, res)</span>
+                    <span class="discover-row-title" data-item-title>@item.Artist – @item.Title</span>
+                    <span class="discover-row-meta">
+                        @if (item.Uploader is { } up) { <span>SoundCloud: @up</span> }
+                        @if (item.Release is { } rel) { <span> · @rel</span> }
+                        @if (item.Note is { } n) { <span> · @n</span> }
+                    </span>
+                    @if (state == CrateItemState.Found && res is not null)
+                    {
+                        <span class="discover-row-meta crate-found" data-found>
+                            <a class="discover-link" data-source-link data-source="@res.Source" href="@res.PageUrl" target="_blank" rel="noopener noreferrer">
+                                @(res.Source == "soundcloud" ? "SoundCloud" : "Bandcamp") ↗
+                            </a>
+                            @string.Join(" · ", new[] { res.Artist is null ? null : $"{res.Artist} – {res.Title}", res.Label, res.ReleaseTitle, res.Released }.Where(x => !string.IsNullOrWhiteSpace(x)))
+                            @(res.Via switch { "guess" => " · checked guess", "discogs" => " · via Discogs", "pasted" => " · pasted", "picked" => " · picked", "oembed" => " · SoundCloud oEmbed", "soundcloud-link" => " · linked from its SoundCloud page", _ => "" })
+                        </span>
+                    }
+                    @if (res?.DiscogsUrl is { } discogs && state != CrateItemState.Found)
+                    {
+                        <span class="discover-row-meta" data-discogs>
+                            On Discogs: <a class="discover-link" href="@discogs" target="_blank" rel="noopener noreferrer">@(res.DiscogsTitle ?? "release") ↗</a>
+                        </span>
+                    }
+                    @if (state is CrateItemState.NotFound or CrateItemState.Ambiguous && res?.Message is { } msg)
+                    {
+                        <span class="discover-row-meta" data-item-message>@msg</span>
+                    }
+                    @if (p.Busy)
+                    {
+                        <span class="discover-hint" data-item-progress>@p.Message</span>
+                    }
+                    @if (p.Error is { } err)
+                    {
+                        <span class="discover-warn" data-item-error>@err</span>
+                    }
+                    @if (state == CrateItemState.Ambiguous && res?.Candidates is { Count: > 0 } cands)
+                    {
+                        <ul class="crate-candidates" data-candidates>
+                            @foreach (var c in cands)
+                            {
+                                <li>
+                                    <button class="discover-button" data-pick="@(c.DiscogsId?.ToString() ?? c.TrackId?.ToString())" disabled="@p.Busy"
+                                            @onclick="() => Crates.PickAsync(item, c)">Use</button>
+                                    @(c.Artist is null ? "" : c.Artist + " – ")@c.Title
+                                    <span class="discover-row-meta">@string.Join(", ", new[] { c.Label, c.Year }.Where(x => !string.IsNullOrWhiteSpace(x)))</span>
+                                    @if (c.Url is { } cu) { <a class="discover-link" href="@cu" target="_blank" rel="noopener noreferrer">@(c.Kind == "discogs" ? "Discogs" : "Bandcamp") ↗</a> }
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+                <div class="discover-row-actions crate-actions">
+                    @if (state == CrateItemState.Pending)
+                    {
+                        <button class="discover-button" data-find disabled="@(p.Busy || run?.Running == true)" @onclick="() => Crates.FindAsync(item)">Find</button>
+                    }
+                    else if (state != CrateItemState.Owned)
+                    {
+                        <button class="discover-button subtle" data-find-again disabled="@p.Busy" title="Look it up again"
+                                @onclick="() => FindAgainAsync(item)">Find again</button>
+                    }
+                    @if (state is not (CrateItemState.Found or CrateItemState.Owned))
+                    {
+                        <a class="discover-link" data-bandcamp-search href="@CrateMatch.BandcampSearchUrl(item)" target="_blank" rel="noopener noreferrer"
+                           title="Bandcamp's own search, in a new tab">Find on Bandcamp ↗</a>
+                        <a class="discover-link" data-soundcloud-search href="@CrateMatch.SoundCloudSearchUrl(item)" target="_blank" rel="noopener noreferrer"
+                           title="SoundCloud's own search, in a new tab">Find on SoundCloud ↗</a>
+                        <button class="discover-button" data-try-soundcloud disabled="@p.Busy" @onclick="() => Crates.TrySoundCloudAsync(item)"
+                                title="Ask SoundCloud's oEmbed for the uploader's or the artist's track with this title">Try SoundCloud</button>
+                    }
+                    @if (state != CrateItemState.Owned)
+                    {
+                        <span class="crate-paste">
+                            <input class="discover-input" data-paste-url placeholder="Paste a Bandcamp or SoundCloud URL"
+                                   value="@pasted.GetValueOrDefault(item.Key)" @oninput="e => SetPasted(item, e)"
+                                   @onkeydown="e => OnPasteKey(e, item)" />
+                            <button class="discover-button" data-use-url disabled="@p.Busy" @onclick="() => UseUrlAsync(item)">Use</button>
+                        </span>
+                    }
+                    <button class="discover-button subtle" data-remove-item title="Remove from this list" @onclick="() => Crates.RemoveItem(item)">✕</button>
+                </div>
+            </li>
+        }
+    </ol>
+
+    <section class="discover-section" data-section="add-tracks">
+        <h2>Add tracks</h2>
+        <p class="discover-hint">One per line, “Artist - Title”.</p>
+        <textarea class="discover-input crate-add" data-add-tracks rows="3" @bind="addText" @bind:event="oninput"></textarea>
+        <div class="discover-toolbar">
+            <button class="discover-button" data-add-tracks-button disabled="@string.IsNullOrWhiteSpace(addText)" @onclick="Add">Add</button>
+            @if (addResult is not null) { <span class="discover-hint" data-add-result>@addResult</span> }
+        </div>
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Crate Crate { get; set; } = null!;
+
+    bool hideOwned;
+    string addText = "";
+    string? addResult;
+    readonly Dictionary<string, string> pasted = new();
+
+    static IReadOnlyList<RunReport.Line> Lines(CrateService.FindAllRun run) =>
+        run.Results.Select(o => new RunReport.Line(o.Name, o.Kind, o.Text, o.Kind == "found" ? "good" : o.Kind == "error" ? "bad" : "")).ToList();
+
+    static string StateClass(CrateItemState s) => s switch
+    {
+        CrateItemState.Found => "good",
+        CrateItemState.NotFound => "bad",
+        CrateItemState.Owned => "owned",
+        _ => "",
+    };
+
+    static string StateLabel(CrateItemState s, CrateResolution? r) => s switch
+    {
+        CrateItemState.Found => r?.Source == "soundcloud" ? "SoundCloud" : "Bandcamp",
+        CrateItemState.Ambiguous => "Pick one",
+        CrateItemState.NotFound => "Not found",
+        CrateItemState.Owned => "Already yours",
+        _ => "Not looked up",
+    };
+
+    async Task FindAgainAsync(CrateItem item)
+    {
+        Crates.ClearResolution(item);
+        await Crates.FindAsync(item);
+    }
+
+    void SetPasted(CrateItem item, ChangeEventArgs e) => pasted[item.Key] = e.Value?.ToString() ?? "";
+
+    async Task UseUrlAsync(CrateItem item)
+    {
+        await Crates.PasteAsync(item, pasted.GetValueOrDefault(item.Key) ?? "");
+        if (Crates.StateOf(item) == CrateItemState.Found) pasted.Remove(item.Key);
+    }
+
+    async Task OnPasteKey(KeyboardEventArgs e, CrateItem item)
+    {
+        if (e.Key == "Enter") await UseUrlAsync(item);
+    }
+
+    void Add()
+    {
+        var (added, skipped) = Crates.AddItems(Crate, addText);
+        addResult = $"Added {added}" + (skipped > 0 ? $", skipped {skipped} (no “ - ” between artist and title, or already in the list)" : "") + ".";
+        if (added > 0) addText = "";
+    }
+}

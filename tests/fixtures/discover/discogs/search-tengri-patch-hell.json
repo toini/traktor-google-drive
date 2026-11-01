@@ -1,0 +1,51 @@
+{
+  "pagination": {
+    "page": 1,
+    "pages": 1,
+    "per_page": 10,
+    "items": 2
+  },
+  "results": [
+    {
+      "id": 29681248,
+      "type": "release",
+      "title": "Tengri - Testimony 20",
+      "year": "2024",
+      "label": [
+        "Parvati Records"
+      ],
+      "format": [
+        "File",
+        "WAV",
+        "Album"
+      ],
+      "catno": "PRVCD37",
+      "uri": "/release/29681248-Tengri-Testimony-20",
+      "master_id": 3384877,
+      "country": "Denmark",
+      "style": [
+        "Psy-Trance"
+      ]
+    },
+    {
+      "id": 29681497,
+      "type": "release",
+      "title": "Tengri - Testimony 20",
+      "year": "2024",
+      "label": [
+        "Parvati Records"
+      ],
+      "format": [
+        "CD",
+        "Album"
+      ],
+      "catno": "PRVCD37",
+      "uri": "/release/29681497-Tengri-Testimony-20",
+      "master_id": 3384877,
+      "country": "Denmark",
+      "style": [
+        "Psy-Trance"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,228 @@
+{
+  "id": 29681248,
+  "title": "Testimony 20",
+  "year": 2024,
+  "released": "2024-02-02",
+  "uri": "https://www.discogs.com/release/29681248-Tengri-Testimony-20",
+  "artists": [
+    {
+      "name": "Tengri",
+      "anv": "",
+      "join": "",
+      "id": 3106525
+    }
+  ],
+  "labels": [
+    {
+      "name": "Parvati Records",
+      "catno": "PRVCD37",
+      "id": 10916
+    }
+  ],
+  "formats": [
+    {
+      "name": "File",
+      "qty": "8",
+      "descriptions": [
+        "WAV",
+        "Album"
+      ]
+    }
+  ],
+  "styles": [
+    "Psy-Trance"
+  ],
+  "tracklist": [
+    {
+      "position": "1",
+      "type_": "track",
+      "title": "Tropical Fog",
+      "duration": "7:28",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "The Verge (5)",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 6480519,
+          "resource_url": "https://api.discogs.com/artists/6480519"
+        }
+      ]
+    },
+    {
+      "position": "2",
+      "type_": "track",
+      "title": "Dream Converter (Tengri RMX)",
+      "duration": "9:10",
+      "artists": [
+        {
+          "name": "Atriohm",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 331427,
+          "resource_url": "https://api.discogs.com/artists/331427"
+        }
+      ]
+    },
+    {
+      "position": "3",
+      "type_": "track",
+      "title": "A Thousand Year Journey",
+      "duration": "7:20",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        }
+      ]
+    },
+    {
+      "position": "4",
+      "type_": "track",
+      "title": "Goreiju",
+      "duration": "8:34",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "Egon's Embrace",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 6491158,
+          "resource_url": "https://api.discogs.com/artists/6491158"
+        }
+      ]
+    },
+    {
+      "position": "5",
+      "type_": "track",
+      "title": "Patch Hell",
+      "duration": "7:05",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "Jahbo",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 83182,
+          "resource_url": "https://api.discogs.com/artists/83182"
+        }
+      ]
+    },
+    {
+      "position": "6",
+      "type_": "track",
+      "title": "Sphere",
+      "duration": "8:33",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "Yudhisthira",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 372675,
+          "resource_url": "https://api.discogs.com/artists/372675"
+        }
+      ]
+    },
+    {
+      "position": "7",
+      "type_": "track",
+      "title": "Armonika",
+      "duration": "7:14",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "Hermit (21)",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 12546356,
+          "resource_url": "https://api.discogs.com/artists/12546356"
+        }
+      ]
+    },
+    {
+      "position": "8",
+      "type_": "track",
+      "title": "Flying Circus Of The Awaken",
+      "duration": "8:05",
+      "artists": [
+        {
+          "name": "Tengri",
+          "anv": "",
+          "join": "&",
+          "role": "",
+          "tracks": "",
+          "id": 3106525,
+          "resource_url": "https://api.discogs.com/artists/3106525"
+        },
+        {
+          "name": "Foggy (5)",
+          "anv": "",
+          "join": "",
+          "role": "",
+          "tracks": "",
+          "id": 6501293,
+          "resource_url": "https://api.discogs.com/artists/6501293"
+        }
+      ]
+    }
+  ],
+  "notes": ""
+}

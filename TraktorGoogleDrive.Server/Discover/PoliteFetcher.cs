@@ -31,9 +31,16 @@ public sealed class PoliteFetcher
     public TimeSpan MinSpacing { get; }
     public int DailyCap { get; }
 
+    private readonly string _accept;
+    private readonly string? _authorization;
+
+    /// <param name="accept">What to ask for: Bandcamp pages are HTML, Discogs and SoundCloud oEmbed JSON.</param>
+    /// <param name="authorization">An optional Authorization header (a Discogs personal token from Secret Manager).</param>
     public PoliteFetcher(HttpClient http, TimeProvider clock, ILogger log, TimeSpan minSpacing, int dailyCap,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null, string accept = "text/html", string? authorization = null)
     {
+        _accept = accept;
+        _authorization = authorization;
         _http = http;
         _clock = clock;
         _log = log;
@@ -71,7 +78,8 @@ public sealed class PoliteFetcher
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-            request.Headers.TryAddWithoutValidation("Accept", "text/html");
+            request.Headers.TryAddWithoutValidation("Accept", _accept);
+            if (_authorization is not null) request.Headers.TryAddWithoutValidation("Authorization", _authorization);
             using var response = await _http.SendAsync(request, ct);
 
             // Path only: these are public catalogue pages, but nothing else belongs in a log.

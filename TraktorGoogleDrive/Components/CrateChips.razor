@@ -1,0 +1,62 @@
+@using TraktorGoogleDrive.Discover
+@implements IDisposable
+@inject CrateService Crates
+@inject NavigationManager Navigation
+
+@* A genre's own queue and its crates, side by side (ADR 20261025-54, "Crates"):
+   [P queue] [Looney Boon Hug Halloween 2026 · 12] [+ New list]. A crate is a
+   separate list, so its tracks never mix into the seed queue. *@
+<nav class="crate-chips" aria-label="@($"Lists in {Genre}")" data-crate-chips>
+    <a class="crate-chip @(Active is null ? "active" : "")" href="@($"discover/{Genre}")" data-crate-chip="">@Genre seeds</a>
+    @foreach (var crate in Crates.CratesOf(Genre))
+    {
+        var toHear = Crates.Queue(crate).Count;
+        <a class="crate-chip @(Active == crate.Id ? "active" : "")" href="@($"discover/{Genre}/list/{crate.Id}")"
+           data-crate-chip="@crate.Id" title="@crate.Note">
+            @crate.Name <span class="discover-count" data-crate-chip-count="@toHear">@toHear to hear · @crate.Items.Count</span>
+        </a>
+    }
+    @if (creating)
+    {
+        <span class="crate-new">
+            <input class="discover-input" data-new-crate-name placeholder="List name, e.g. a friend's set" @bind="newName" @bind:event="oninput"
+                   @onkeydown="OnNewKey" />
+            <button class="discover-button" data-create-crate disabled="@string.IsNullOrWhiteSpace(newName)" @onclick="Create">Create</button>
+            <button class="discover-button subtle" @onclick="() => creating = false">Cancel</button>
+        </span>
+    }
+    else
+    {
+        <button class="crate-chip new" data-new-crate @onclick="() => creating = true">+ New list</button>
+    }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public string Genre { get; set; } = "";
+    /// <summary>The crate on screen; null on the genre's own page.</summary>
+    [Parameter] public string? Active { get; set; }
+
+    bool creating;
+    string newName = "";
+
+    void Create()
+    {
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        var id = Crates.Create(Genre, newName);
+        creating = false;
+        newName = "";
+        Navigation.NavigateTo($"discover/{Genre}/list/{id}/tracks");
+    }
+
+    void OnNewKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Create();
+        else if (e.Key == "Escape") creating = false;
+    }
+
+    protected override void OnInitialized() => Crates.Changed += OnChanged;
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Crates.Changed -= OnChanged;
+}

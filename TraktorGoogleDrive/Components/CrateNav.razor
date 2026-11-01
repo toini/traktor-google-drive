@@ -1,0 +1,28 @@
+@using TraktorGoogleDrive.Discover
+@implements IDisposable
+@inject CrateService Crates
+
+@* The crates under each Discover genre in the sidebar (ADR 20261025-54, "Crates"):
+   P › Looney Boon Hug Halloween 2026. Shown once Discover has read the log; the
+   sidebar never loads it on its own. *@
+@{ var any = Genres.All.SelectMany(g => Crates.CratesOf(g)).ToList(); }
+@if (any.Count > 0)
+{
+    <nav class="crate-nav" aria-label="Discover lists">
+        @foreach (var crate in any)
+        {
+            <NavLink class="crate-nav-link" href="@($"discover/{crate.Genre}/list/{crate.Id}")" Match="NavLinkMatch.Prefix"
+                     data-crate-nav="@crate.Id" title="@crate.Note">
+                <span class="crate-nav-genre">@crate.Genre ›</span> @crate.Name
+            </NavLink>
+        }
+    </nav>
+}
+
+@code {
+    protected override void OnInitialized() => Crates.Changed += OnChanged;
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Crates.Changed -= OnChanged;
+}

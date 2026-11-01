@@ -1,0 +1,200 @@
+@page "/discover/{Genre}/list/{CrateId}"
+@page "/discover/{Genre}/list/{CrateId}/{Tab}"
+@implements IDisposable
+@inject CrateService Crates
+@inject AuthService Auth
+@inject NavigationManager Navigation
+
+@using TraktorGoogleDrive.Discover
+
+<PageTitle>@(crate?.Name ?? "List") · Discover @Genre · Traktor</PageTitle>
+
+@* A crate (ADR 20261025-54, "Crates"): a named list of tracks inside a genre, e.g.
+   P › "Looney Boon Hug Halloween 2026". Tracks: find each one's source. Listen:
+   pass 1 over what was found. Shortlist: pass 2 and the buy list. Kept apart from
+   the genre's seed queue, and saved in the same Discover log. *@
+<div class="discover crate" data-discover="@Genre" data-crate="@CrateId">
+    <header class="discover-header">
+        <div class="discover-heading">
+            <h1 class="discover-title">
+                <a class="crate-up" href="@($"discover/{Genre}")">Discover <span class="discover-genre">@Genre</span></a>
+                <span class="crate-sep">›</span>
+                @if (renaming && crate is not null)
+                {
+                    <input class="discover-input crate-rename" data-rename-input @bind="newName" @bind:event="oninput" @onkeydown="OnRenameKey" />
+                    <button class="discover-button" data-rename-save @onclick="SaveName">Save</button>
+                    <button class="discover-button subtle" @onclick="() => renaming = false">Cancel</button>
+                }
+                else
+                {
+                    <span class="crate-name" data-crate-name>@(crate?.Name ?? CrateId)</span>
+                    @if (crate is not null)
+                    {
+                        <button class="discover-button subtle" data-rename title="Rename" @onclick="StartRename">✎</button>
+                        <button class="discover-button subtle" data-delete-crate title="Delete this list" @onclick="() => confirmDelete = true">🗑</button>
+                    }
+                }
+            </h1>
+            @if (crate?.Note is { } note) { <span class="discover-subtitle" data-crate-note>@note</span> }
+        </div>
+        <div class="discover-save" data-save-status="@Crates.Store.Status">
+            @switch (Crates.Store.Status)
+            {
+                case DiscoverStore.SaveStatus.Saved: <span>Saved to Drive</span> break;
+                case DiscoverStore.SaveStatus.Saving: <span>Saving…</span> break;
+                case DiscoverStore.SaveStatus.Pending: <span>Not saved yet</span> break;
+                case DiscoverStore.SaveStatus.Loading: <span>Loading…</span> break;
+                case DiscoverStore.SaveStatus.NeedsConsent:
+                    <span class="discover-warn">Saved on this device only.</span>
+                    <button class="discover-button" data-grant-appdata @onclick="GrantAsync">Allow saving to Drive</button>
+                    break;
+                case DiscoverStore.SaveStatus.Failed:
+                    <span class="discover-warn" title="@Crates.Store.StatusDetail">Could not save to Drive.</span>
+                    <button class="discover-button" @onclick="() => Crates.Store.RetryAsync()">Retry</button>
+                    break;
+            }
+        </div>
+    </header>
+
+    @if (confirmDelete && crate is not null)
+    {
+        <div class="discover-report crate-confirm" role="alertdialog" data-confirm-delete>
+            <p>Delete “@crate.Name” and its @crate.Items.Count tracks? Verdicts you gave stay in the log, but the list is gone on every device.</p>
+            <button class="discover-button" data-confirm-delete-yes @onclick="Delete">Delete</button>
+            <button class="discover-button subtle" @onclick="() => confirmDelete = false">Keep it</button>
+        </div>
+    }
+
+    @if (!Genres.IsGenre(Genre))
+    {
+        <p class="state-message">Unknown genre "@Genre". Discover has Z, H, P and C.</p>
+    }
+    else if (loadError is not null)
+    {
+        <p class="state-message error" role="alert">@loadError</p>
+    }
+    else if (!loaded)
+    {
+        <p class="state-message">Loading the collection…</p>
+    }
+    else
+    {
+        <CrateChips Genre="@Genre" Active="@CrateId" />
+        @if (crate is null)
+        {
+            <p class="state-message" data-crate-missing>
+                There is no list “@CrateId” in @Genre: it may have been deleted on another device.
+                <a href="@($"discover/{Genre}")">Back to @Genre</a>
+            </p>
+        }
+        else
+        {
+            var queue = Crates.Queue(crate);
+            var liked = Crates.Liked(crate);
+            var shortlist = Crates.Shortlist(crate);
+            <nav class="discover-tabs" role="tablist">
+                <a role="tab" class="discover-tab @(TabIs("tracks") ? "active" : "")" aria-selected="@(TabIs("tracks") ? "true" : "false")"
+                   href="@($"discover/{Genre}/list/{CrateId}/tracks")" data-tab="tracks">Tracks <span class="discover-count" data-item-count="@crate.Items.Count">@crate.Items.Count</span></a>
+                <a role="tab" class="discover-tab @(TabIs("listen") ? "active" : "")" aria-selected="@(TabIs("listen") ? "true" : "false")"
+                   href="@($"discover/{Genre}/list/{CrateId}/listen")" data-tab="listen">Listen <span class="discover-count" data-queue-count="@queue.Count">@queue.Count</span></a>
+                <a role="tab" class="discover-tab @(TabIs("shortlist") ? "active" : "")" aria-selected="@(TabIs("shortlist") ? "true" : "false")"
+                   href="@($"discover/{Genre}/list/{CrateId}/shortlist")" data-tab="shortlist">Shortlist <span class="discover-count" data-shortlist-count="@(liked.Count + shortlist.Count)">@(liked.Count + shortlist.Count)</span></a>
+            </nav>
+
+            @if (TabIs("listen"))
+            {
+                <CrateListenTab Crate="crate" Queue="queue" />
+            }
+            else if (TabIs("shortlist"))
+            {
+                <CrateShortlistTab Crate="crate" Liked="liked" Shortlist="shortlist" />
+            }
+            else
+            {
+                <CrateTracksTab Crate="crate" />
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string Genre { get; set; } = "P";
+    [Parameter] public string CrateId { get; set; } = "";
+    [Parameter] public string? Tab { get; set; }
+
+    bool loaded;
+    string? loadError;
+    bool renaming;
+    bool confirmDelete;
+    string newName = "";
+
+    Crate? crate => Crates.Get(CrateId) is { } c && c.Genre == Genre ? c : null;
+
+    bool TabIs(string tab) => (Tab ?? (defaultTab ??= DefaultTab())) == tab;
+
+    // Chosen once per opened list, so finding a first track does not switch tabs under Toni:
+    // nothing to hear yet opens on Tracks, where finding starts; otherwise Listen.
+    string? defaultTab;
+    string? defaultFor;
+    string DefaultTab() => crate is { } c && Crates.Queue(c).Count > 0 ? "listen" : "tracks";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Crates.Changed += OnChanged;
+        try
+        {
+            await Crates.EnsureLoadedAsync();
+            loaded = true;
+        }
+        catch (DriveAuthException)
+        {
+            await Auth.HandleExpiredAsync(Navigation.ToBaseRelativePath(Navigation.Uri));
+        }
+        catch (Exception e)
+        {
+            loadError = "Could not load Discover: " + e.Message;
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        renaming = false;
+        confirmDelete = false;
+        if (defaultFor != CrateId) { defaultFor = CrateId; defaultTab = null; }
+    }
+
+    void StartRename()
+    {
+        newName = crate?.Name ?? "";
+        renaming = true;
+    }
+
+    void SaveName()
+    {
+        if (crate is not null && !string.IsNullOrWhiteSpace(newName)) Crates.Rename(crate, newName);
+        renaming = false;
+    }
+
+    void OnRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") SaveName();
+        else if (e.Key == "Escape") renaming = false;
+    }
+
+    void Delete()
+    {
+        if (crate is null) return;
+        Crates.Delete(crate);
+        confirmDelete = false;
+        Navigation.NavigateTo($"discover/{Genre}");
+    }
+
+    async Task GrantAsync()
+    {
+        if (await Auth.SignInAsync() is not null) await Crates.Store.RetryAsync();
+    }
+
+    void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Crates.Changed -= OnChanged;
+}
