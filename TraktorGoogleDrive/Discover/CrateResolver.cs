@@ -30,8 +30,8 @@ public sealed class CrateLimitException(string message) : Exception(message);
 /// Finds a playable source for a crate item (ADR 20261025-54, "Crates"), in this
 /// order: Discogs by artist and title (release, label, date and any Bandcamp page
 /// it lists); Bandcamp by URL only, from Discogs or a checked guess of the
-/// artist's or uploader's subdomain, never Bandcamp's search; else not found,
-/// with the Discogs release if there was one. SoundCloud is a separate, on-demand
+/// artist's or uploader's subdomain, never Bandcamp's search; else not found.
+/// Discogs is a silent index here: the UI names only Bandcamp and Beatport. SoundCloud is a separate, on-demand
 /// step (<see cref="SoundCloudAsync"/>), and so is a URL Toni pastes.
 /// </summary>
 public sealed class CrateResolver(ICrateLookup lookup)
@@ -71,7 +71,7 @@ public sealed class CrateResolver(ICrateLookup lookup)
                 Status = CrateStatus.Ambiguous,
                 Candidates = discogs.Candidates.Take(5).Select(c => new CrateCandidate("discogs", c.Title, c.Artist,
                     c.Labels.FirstOrDefault(), c.Year, c.WebUrl, DiscogsId: c.Id)).ToList(),
-                Message = "Discogs has more than one artist by that name: pick the release",
+                Message = "More than one artist by that name: pick the release",
             };
 
         return new CrateResolution
@@ -82,21 +82,35 @@ public sealed class CrateResolver(ICrateLookup lookup)
             Released = best?.Released,
             DiscogsUrl = best?.WebUrl,
             DiscogsTitle = Describe(best),
-            Message = (best, discogsError) switch
-            {
-                (null, { } err) => $"Discogs: {err}. No Bandcamp page had it ({Tried(tried)}).",
-                (null, _) => $"Not on Discogs, and no Bandcamp page had it ({Tried(tried)}).",
-                ({ BandcampUrls.Count: 0 }, _) => $"On Discogs without a Bandcamp link; no guessed page had it ({Tried(tried)}).",
-                _ => $"Not on the Bandcamp pages Discogs lists or guessed ({Tried(tried)}).",
-            },
+            // Discogs is only an index for finding Bandcamp pages, so the words name what was tried on Bandcamp.
+            Message = discogsError is null
+                ? $"Not found yet. Tried {Tried(tried)}."
+                : $"Not found yet ({discogsError}). Tried {Tried(tried)}.",
         };
     }
 
-    /// <summary>A Bandcamp or SoundCloud URL Toni pasted (or a label or artist page to look through).</summary>
-    public async Task<CrateResolution> FromUrlAsync(CrateItem item, string url, Action<string> progress, CancellationToken ct)
+    /// <summary>
+    /// A Bandcamp, Beatport or (with its flag) SoundCloud URL Toni pasted, or a
+    /// Bandcamp label or artist page to look through. A Beatport URL is never
+    /// fetched: it is the buy link, heard on Beatport. Pasted onto a track already
+    /// found on Bandcamp, it is added beside the Bandcamp link.
+    /// </summary>
+    public async Task<CrateResolution> FromUrlAsync(CrateItem item, string url, Action<string> progress, CancellationToken ct, bool soundCloud = true)
     {
         var text = url.Trim();
-        if (text.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase))
+        if (text.Contains("beatport.com", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!CrateMatch.IsBeatportUrl(text))
+                throw new DiscoverApiException(400, "Paste a Beatport track URL: https://www.beatport.com/track/…/123");
+            if (item.Resolution is { Status: CrateStatus.Found, Source: "bandcamp" } onBandcamp)
+                return onBandcamp with { BeatportUrl = text };
+            return new CrateResolution
+            {
+                Status = CrateStatus.Found, Source = "beatport", PageUrl = text, BeatportUrl = text,
+                Title = item.Title, Artist = item.Artist, Via = "pasted",
+            };
+        }
+        if (soundCloud && text.Contains("soundcloud.com", StringComparison.OrdinalIgnoreCase))
         {
             progress("Checking SoundCloud…");
             var sc = await lookup.SoundCloudAsync(text, item.Artist, item.Title, item.Uploader, ct)
@@ -105,7 +119,7 @@ public sealed class CrateResolver(ICrateLookup lookup)
             return r.Source == "bandcamp" ? r : r with { Via = "pasted" };
         }
         if (!text.Contains(".bandcamp.com", StringComparison.OrdinalIgnoreCase))
-            throw new DiscoverApiException(400, "Paste a Bandcamp or SoundCloud URL");
+            throw new DiscoverApiException(400, soundCloud ? "Paste a Bandcamp, Beatport or SoundCloud URL" : "Paste a Bandcamp or Beatport URL");
 
         var isRelease = text.Contains("/album/", StringComparison.OrdinalIgnoreCase) || text.Contains("/track/", StringComparison.OrdinalIgnoreCase);
         if (isRelease)

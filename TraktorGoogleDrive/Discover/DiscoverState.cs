@@ -227,13 +227,14 @@ public sealed class DiscoverState
                     item.Uploader = e.Uploader ?? item.Uploader;
                     item.Release = e.ReleaseTitle ?? item.Release;
                     item.Note = e.Note ?? item.Note;
+                    item.Link = e.Url ?? item.Link;
                 }
                 else if (e.Artist is not null && e.Title is not null)
                 {
                     crate.Items.Add(new CrateItem
                     {
                         Key = e.TrackKey, CrateId = e.CrateId, Artist = e.Artist, Title = e.Title, Uploader = e.Uploader,
-                        Release = e.ReleaseTitle, Note = e.Note, Pos = e.Pos ?? crate.Items.Count,
+                        Release = e.ReleaseTitle, Note = e.Note, Link = e.Url, Pos = e.Pos ?? crate.Items.Count,
                     });
                     crate.Items.Sort((a, b) => a.Pos.CompareTo(b.Pos));
                 }
@@ -246,6 +247,9 @@ public sealed class DiscoverState
             case "crate-resolve" when e.TrackKey is not null && CrateMatch.CrateOf(e.TrackKey) is { } crateId
                                       && Crates.TryGetValue(crateId, out var owner)
                                       && owner.Items.FirstOrDefault(i => i.Key == e.TrackKey) is { } resolved:
+                // A shipped research result never replaces what Toni found, pasted or picked
+                // himself, even when his event reached this log from another device first.
+                if (e.Resolution?.Via == "research" && !ResearchMayResolve(resolved.Resolution)) break;
                 resolved.Resolution = e.Clear == true ? null : e.Resolution;
                 break;
 
@@ -270,6 +274,15 @@ public sealed class DiscoverState
                 break;
         }
     }
+
+    /// <summary>
+    /// Whether a shipped research result may resolve an item: nothing yet, or only
+    /// an automatic lookup that came to nothing. Never over a find, a paste or a pick.
+    /// </summary>
+    public static bool ResearchMayResolve(CrateResolution? current) =>
+        current is null
+        || (current.Status != CrateStatus.Found && current.Via is not ("pasted" or "picked"))
+        || current.Via == "research";
 
     public static bool IsMonth(string? month) =>
         month is { Length: 7 } && DateOnly.TryParseExact(month + "-01", "yyyy-MM-dd", out _);

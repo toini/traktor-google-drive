@@ -225,8 +225,10 @@ test.describe('Discover', () => {
     await expect(liked.locator('[data-liked-title]')).toHaveText(['Satanas', 'Im no immigrant', 'Madtype shadym t y remix']);
     await expect(page.locator('[data-save-status="Saved"]')).toBeVisible();
     const firstLog = [...calls.appDataCreates.map((c) => c.body), ...calls.appDataUpdates.map((u) => u.body)].join('\n');
-    // One "starter" event per batch: Toni's triage (2026-10-25.1) and the P crate (2026-11-01.1).
-    expect(firstLog.split('\n').filter((l) => l.includes('"t":"starter"'))).toHaveLength(2);
+    // One "starter" event per batch: Toni's triage (2026-10-25.1), the P crate (2026-11-01.1)
+    // and its buy links from a web search (2026-11-01.2).
+    expect(new Set(firstLog.split('\n').filter((l) => l.includes('"t":"starter"')).map((l) => JSON.parse(l).name)))
+      .toEqual(new Set(['2026-10-25.1', '2026-11-01.1', '2026-11-01.2']));
     expect(firstLog).toContain('beatport:4930160');
 
     // Look up reads the release page on a click and resolves title and artist.

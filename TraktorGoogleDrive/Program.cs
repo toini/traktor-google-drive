@@ -34,8 +34,9 @@ builder.Services.AddScoped<AppDataStore>();
 builder.Services.AddScoped<DiscoverStore>();
 builder.Services.AddScoped<DiscoverApi>();
 builder.Services.AddScoped<DiscoverService>();
-// Crates: named lists inside a genre (a friend's set), found on Discogs, Bandcamp and SoundCloud.
+// Crates: named lists inside a genre (a friend's set), found on Bandcamp and Beatport (SoundCloud behind a flag).
 builder.Services.AddScoped<TraktorGoogleDrive.Discover.ICrateLookup, CrateApi>();
+builder.Services.AddScoped<DiscoverFeatures>();
 builder.Services.AddScoped<CrateService>();
 
 await builder.Build().RunAsync();

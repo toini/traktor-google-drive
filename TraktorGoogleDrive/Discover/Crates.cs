@@ -32,6 +32,8 @@ public sealed class CrateItem
     /// <summary>A release name from the source, when it showed one.</summary>
     public string? Release { get; set; }
     public string? Note { get; set; }
+    /// <summary>A link that goes with the note: "Original for sale ↗", "Free on Ektoplazm ↗".</summary>
+    public string? Link { get; set; }
     public int Pos { get; set; }
     public CrateResolution? Resolution { get; set; }
 
@@ -60,7 +62,11 @@ public sealed record CrateCandidate(
 public sealed record CrateResolution
 {
     [JsonPropertyName("status")] public CrateStatus Status { get; init; }
-    /// <summary>"bandcamp" (plays in the player bar) or "soundcloud" (plays in its widget).</summary>
+    /// <summary>
+    /// "bandcamp" (plays in the player bar), "beatport" (a buy link only: Beatport's
+    /// previews need API access, so it is heard on Beatport) or "soundcloud" (plays
+    /// in its widget, behind <c>DiscoverFeatures.SoundCloud</c>).
+    /// </summary>
     [JsonPropertyName("src")] public string? Source { get; init; }
     /// <summary>The track's page: a Bandcamp track or release, or a SoundCloud track.</summary>
     [JsonPropertyName("page")] public string? PageUrl { get; init; }
@@ -73,7 +79,11 @@ public sealed record CrateResolution
     [JsonPropertyName("rtitle")] public string? ReleaseTitle { get; init; }
     [JsonPropertyName("date")] public string? Released { get; init; }
     [JsonPropertyName("dur")] public double? Duration { get; init; }
-    /// <summary>How it was found: "discogs", "guess", "pasted", "picked", "oembed".</summary>
+    /// <summary>The track on Beatport, as a second buy link beside Bandcamp, or the only one.</summary>
+    [JsonPropertyName("bp")] public string? BeatportUrl { get; init; }
+    /// <summary>Free or name-your-price on its store.</summary>
+    [JsonPropertyName("free")] public bool? Free { get; init; }
+    /// <summary>How it was found: "discogs", "guess", "pasted", "picked", "oembed", "research" (a shipped starter batch).</summary>
     [JsonPropertyName("via")] public string? Via { get; init; }
     [JsonPropertyName("discogs")] public string? DiscogsUrl { get; init; }
     /// <summary>"Artist – Release (Label, 2024)" on Discogs, shown when nothing plays.</summary>
@@ -84,6 +94,76 @@ public sealed record CrateResolution
 
 /// <summary>Where one crate item stands, as shown and filtered on.</summary>
 public enum CrateItemState { Pending, Found, Ambiguous, NotFound, Owned }
+
+/// <summary>
+/// What Toni made of a crate track by ear: the "track" events the list's player
+/// writes, read back as one badge. Skipping is "heard once, not for me".
+/// </summary>
+public enum CrateVerdict { Unheard, Skipped, Maybe, Liked, Rated, Buy, Bought }
+
+/// <summary>The chips over a crate's list. "To hear" is the default, so skipped tracks get out of the way.</summary>
+public enum CrateFilter { ToHear, Skipped, Maybe, Liked, ToBuy, NotFound, All }
+
+public static class CrateVerdicts
+{
+    /// <summary>The strongest thing said about a track: bought, then buy, skip, a rating, like, maybe.</summary>
+    public static CrateVerdict Of(TrackState? t) => t switch
+    {
+        null => CrateVerdict.Unheard,
+        { Bought: true } => CrateVerdict.Bought,
+        { Decision: Decision.Buy } => CrateVerdict.Buy,
+        { Pass1: Pass1.Skip } => CrateVerdict.Skipped,
+        { Rating: >= 1 } => CrateVerdict.Rated,
+        { Pass1: Pass1.Like } => CrateVerdict.Liked,
+        { Pass1: Pass1.Maybe } => CrateVerdict.Maybe,
+        _ => CrateVerdict.Unheard,
+    };
+
+    public static bool Matches(CrateFilter filter, CrateItemState state, CrateVerdict verdict) => filter switch
+    {
+        CrateFilter.ToHear => verdict == CrateVerdict.Unheard && state != CrateItemState.Owned,
+        CrateFilter.Skipped => verdict == CrateVerdict.Skipped,
+        CrateFilter.Maybe => verdict == CrateVerdict.Maybe,
+        CrateFilter.Liked => verdict is CrateVerdict.Liked or CrateVerdict.Rated,
+        CrateFilter.ToBuy => verdict == CrateVerdict.Buy,
+        CrateFilter.NotFound => state is CrateItemState.Pending or CrateItemState.NotFound or CrateItemState.Ambiguous,
+        _ => true,
+    };
+
+    public static string Label(CrateFilter f) => f switch
+    {
+        CrateFilter.ToHear => "To hear",
+        CrateFilter.Skipped => "Skipped",
+        CrateFilter.Maybe => "Maybe",
+        CrateFilter.Liked => "Liked",
+        CrateFilter.ToBuy => "To buy",
+        CrateFilter.NotFound => "Not found",
+        _ => "All",
+    };
+
+    /// <summary>The badge: "Unheard", "✗ Skipped", "? Maybe", "♥ Liked", "★4", "🛒 Buy", "✓ Bought".</summary>
+    public static string Badge(CrateVerdict v, int? rating) => v switch
+    {
+        CrateVerdict.Skipped => "✗ Skipped",
+        CrateVerdict.Maybe => "? Maybe",
+        CrateVerdict.Liked => "♥ Liked",
+        CrateVerdict.Rated => "★" + rating,
+        CrateVerdict.Buy => "🛒 Buy",
+        CrateVerdict.Bought => "✓ Bought",
+        _ => "Unheard",
+    };
+
+    public static string Explain(CrateVerdict v) => v switch
+    {
+        CrateVerdict.Skipped => "Heard once, not for me",
+        CrateVerdict.Maybe => "Heard, maybe: decide later",
+        CrateVerdict.Liked => "Heard and liked: rate it",
+        CrateVerdict.Rated => "Rated",
+        CrateVerdict.Buy => "On the buy list",
+        CrateVerdict.Bought => "Bought",
+        _ => "Not heard yet",
+    };
+}
 
 /// <summary>Keys, names and title matching for crates.</summary>
 public static partial class CrateMatch
@@ -163,6 +243,20 @@ public static partial class CrateMatch
     /// <summary>Bandcamp's search page, opened in Toni's own browser tab. The server never calls it (robots.txt).</summary>
     public static string BandcampSearchUrl(CrateItem item) =>
         "https://bandcamp.com/search?item_type=t&q=" + Uri.EscapeDataString($"{FirstArtist(item.Artist)} {SearchTitle(item.Title)}".Trim());
+
+    /// <summary>Beatport's search page, likewise in Toni's tab; the app never fetches Beatport.</summary>
+    public static string BeatportSearchUrl(CrateItem item) =>
+        "https://www.beatport.com/search/tracks?q=" + Uri.EscapeDataString($"{FirstArtist(item.Artist)} {SearchTitle(item.Title)}".Trim());
+
+    /// <summary>A Beatport track or release page: https://www.beatport.com/track/&lt;slug&gt;/&lt;id&gt;.</summary>
+    public static bool IsBeatportUrl(string? url) =>
+        Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var u)
+        && u.Scheme == Uri.UriSchemeHttps
+        && (u.Host.Equals("beatport.com", StringComparison.OrdinalIgnoreCase) || u.Host.Equals("www.beatport.com", StringComparison.OrdinalIgnoreCase))
+        && BeatportPath().IsMatch(u.AbsolutePath);
+
+    [GeneratedRegex(@"^/(?:[a-z]{2}/)?(track|release)/[^/]+/\d+/?$", RegexOptions.IgnoreCase)]
+    private static partial Regex BeatportPath();
 
     /// <summary>SoundCloud's search page, likewise in Toni's tab.</summary>
     public static string SoundCloudSearchUrl(CrateItem item) =>
