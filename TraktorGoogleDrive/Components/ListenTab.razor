@@ -1,4 +1,5 @@
 @using TraktorGoogleDrive.Discover
+@using TraktorGoogleDrive.Services
 @inject DiscoverService Discover
 @inject IJSRuntime JS
 
@@ -9,31 +10,77 @@
    While a preview plays, the card follows the player, and a verdict starts the
    next track (DiscoverPage wires that through PlayingKey and OnCurrentChanged). *@
 <section class="discover-listen" tabindex="0" @ref="root" @onkeydown="OnKey" data-listen>
-    <div class="discover-toolbar">
-        <button class="discover-button" data-refresh-all disabled="@refreshing" @onclick="RefreshAllAsync">
-            @(refreshing ? "Refreshing…" : "Refresh seeds")
-        </button>
-        @foreach (var s in Seeds.Where(s => Discover.ProgressOf(s).Busy))
-        {
-            <span class="discover-hint" data-progress="@s.Name">@s.Name: @Discover.ProgressOf(s).Message</span>
-        }
-        @foreach (var s in Seeds.Where(s => Discover.ProgressOf(s).Error is not null))
-        {
-            <span class="discover-warn" data-seed-error="@s.Name">@s.Name: @Discover.ProgressOf(s).Error</span>
-        }
-    </div>
-
-    @if (Seeds.Count == 0)
+    @if (Seeds.Count > 0)
     {
-        <p class="state-message">No seeds in @Genre yet. Add some under <a href="@($"discover/{Genre}/seeds")">Seeds</a>.</p>
+        <div class="discover-toolbar">
+            <button class="discover-button" data-refresh-all disabled="@Discover.Searching" @onclick="RefreshAllAsync"
+                    title="Look on Bandcamp for releases newer than each watched seed's heard-through date">
+                @(Discover.Searching ? "Checking…" : "Refresh seeds")
+            </button>
+            <span class="discover-hint">Checks your @Plural(Seeds.Count, "watched seed") on Bandcamp for new releases.</span>
+        </div>
     }
-    else if (Current is null)
+
+    <RefreshReport Genre="@Genre" />
+
+    @if (Current is null)
     {
-        <p class="state-message" data-queue-empty>
-            Nothing new to hear. @(Seeds.Any(s => string.IsNullOrWhiteSpace(s.BandcampUrl))
-                ? "Some seeds have no Bandcamp URL yet."
-                : "Refresh the seeds, or load older releases under Seeds.")
-        </p>
+        var searchable = Seeds.Where(s => !string.IsNullOrWhiteSpace(s.BandcampUrl)).ToList();
+        var noUrl = Seeds.Where(s => string.IsNullOrWhiteSpace(s.BandcampUrl) && !s.NotOnBandcamp).ToList();
+        var offsite = Seeds.Where(s => s.NotOnBandcamp).ToList();
+        var notChecked = searchable.Where(s => Discover.ProgressOf(s).RefreshedAt is null).ToList();
+        <div class="discover-empty" data-queue-empty>
+            @if (Seeds.Count == 0)
+            {
+                <p class="discover-empty-why" data-empty-why>You are not watching any labels or artists in @Genre yet, so there is nothing to hear.</p>
+            }
+            else if (searchable.Count == 0)
+            {
+                <p class="discover-empty-why" data-empty-why>Nothing to hear: none of your @Plural(Seeds.Count, "watched seed") can be searched on Bandcamp.</p>
+            }
+            else if (notChecked.Count > 0)
+            {
+                <p class="discover-empty-why" data-empty-why>
+                    Nothing in the queue yet: @(notChecked.Count == searchable.Count ? (searchable.Count == 1 ? "your watched seed has" : $"your {searchable.Count} watched seeds have") : $"{notChecked.Count} of your {searchable.Count} watched seeds have")
+                    not been checked this session (@SeedList(notChecked)). Press <strong>Refresh seeds</strong> to look for new releases.
+                </p>
+            }
+            else
+            {
+                <p class="discover-empty-why" data-empty-why>
+                    You've heard everything from your @Plural(searchable.Count, "watched seed") (@SeedList(searchable)).
+                </p>
+            }
+            @if (noUrl.Count > 0)
+            {
+                <p class="discover-warn" data-missing-url>
+                    No Bandcamp URL, so never searched:
+                    @for (var i = 0; i < noUrl.Count; i++)
+                    {
+                        var s = noUrl[i];
+                        @(i > 0 ? ", " : "")<a href="@($"discover/{Genre}/seeds#{SeedsTab.RowId(s)}")" data-missing-url-seed="@s.Name">@s.Name</a>
+                    }.
+                    Set a URL under Seeds, or mark it “not on Bandcamp”.
+                </p>
+            }
+            @if (offsite.Count > 0)
+            {
+                <p class="discover-hint" data-offsite>
+                    Not on Bandcamp, skipped: @string.Join(", ", offsite.Select(s => s.Name + Via(s))).
+                </p>
+            }
+
+            @{ var suggestions = Discover.Suggestions(Genre); }
+            @if (suggestions.Count > 0)
+            {
+                <h2 class="discover-empty-title">@(Seeds.Count == 0 ? "Add seeds to find new music:" : "Add more seeds to find new music:")</h2>
+                <p class="discover-hint">Suggestions from your collection: “eti lisää” comments first, then the top of @Genre. “Add &amp; search” adds one and reads its new releases into this queue.</p>
+                <div data-listen-suggestions>
+                    <CandidateList Items="suggestions" AllowAddAll="false" />
+                </div>
+            }
+            <p><a href="@($"discover/{Genre}/seeds")" data-to-seeds>All suggestions, playlists and the watch list under Seeds →</a></p>
+        </div>
     }
     else
     {
@@ -107,7 +154,6 @@
     QueueItem? current;
     QueueItem? lastItem;
     string? note;
-    bool refreshing;
     ElementReference root;
     ElementReference noteInput;
 
@@ -209,12 +255,18 @@
         await Notify(current);
     }
 
-    async Task RefreshAllAsync()
-    {
-        refreshing = true;
-        try { await Discover.RefreshGenreAsync(Genre); }
-        finally { refreshing = false; }
-    }
+    Task RefreshAllAsync() => Discover.RefreshGenreAsync(Genre);
+
+    static string Plural(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
+
+    /// <summary>"Carnivor Records, through 2026-10-25; Darker Sounds, all releases read".</summary>
+    string SeedList(IEnumerable<Seed> seeds) => string.Join("; ", seeds.Select(s =>
+        s.Watermark is { } w ? $"{s.Name}, through {w}"
+        : Discover.HasMore(s) ? $"{s.Name}, older releases not read yet"
+        : s.Name));
+
+    string Via(Seed s) =>
+        Discover.WatchedLabelsOf(s.Kind, s.Name, s.Genre) is { Count: > 0 } labels ? $" (releases via {string.Join(", ", labels)})" : "";
 
     async Task OnKey(KeyboardEventArgs e)
     {

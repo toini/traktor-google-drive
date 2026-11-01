@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mockDrive, seedToken } from './drive-mock';
-import { mockDiscover, discoverNml, CARNIVOR, type DiscoverCalls } from './discover-mock';
+import { mockDiscover, discoverNml, watchCarnivor, type DiscoverCalls } from './discover-mock';
 
 // Discover previews in the player bar (ADR 20261025-54 §2): the Listen queue is
 // the player's queue, audio comes from our endpoint (the real one redirects to the
@@ -21,13 +21,7 @@ async function openListen(page: Page, audioSeconds = 4): Promise<{ calls: Discov
   const driveForDiscover: string[] = [];
   page.on('request', (r) => { if (r.url().includes('googleapis.com') && /discover(%3A|:)/.test(r.url())) driveForDiscover.push(r.url()); });
 
-  await page.goto('/discover/H/seeds');
-  await page.locator('[data-section="eti-lisaa"] [data-add-all]').click();
-  const row = page.locator('tr[data-seed="Carnivor Records"]');
-  await row.locator('[data-seed-url]').fill(CARNIVOR);
-  await row.locator('[data-seed-url]').press('Tab');
-  await row.locator('[data-refresh]').click();
-  await expect(row.locator('[data-release-count]')).toHaveText('2');
+  await watchCarnivor(page);
   await page.locator('[data-tab="listen"]').click();
   await expect(cardTitle(page)).toHaveText('Internal Motion (Original Mix)');
   return { calls, driveForDiscover };

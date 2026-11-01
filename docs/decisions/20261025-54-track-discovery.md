@@ -81,6 +81,31 @@ the text below still says "recommended", the decisions list is what settles it.
   parsing the NML again. The snapshot's extras gained `PlayCount` and `LastPlayed`
   (for seed ranking), which bumps `CollectionSnapshot.CurrentVersion` to 2: the
   first load after deploy re-parses once.
+- **Clarity pass (2026-11-01, after Toni's first real use).** On Discover H, Listen said
+  "Nothing new to hear" and "Refresh seeds" seemed to do nothing. The only watched seed
+  (Carnivor) was fully heard, and the rest of the Seeds page was only suggestions. The
+  UI now says so:
+  - A refresh (Listen's "Refresh seeds", a row's Refresh or Load older, any add) shows
+    progress ("Checking Carnivor Records… 1/2 releases"), a request counter and an upper
+    bound on the time left at 2 s a request. When it finishes it shows one line per seed:
+    "no new releases since 2026-10-25", "1 new release queued (2 tracks)", "no Bandcamp
+    URL…", a 404, or the daily cap. A spent cap stops the rest of the run.
+  - An empty Listen says why: not checked this session, everything heard (naming each
+    seed and its heard-through date), seeds with no URL (linked to their row), seeds
+    marked not on Bandcamp. It then offers suggestions inline, "eti lisää" first, then the
+    top of the genre with known Bandcamp pages first, each with **Add & search**.
+  - **Add & search** reads the page's release list *before* adding the seed. A page that
+    does not exist (404, or no releases) is not added, and the reason is shown, such as
+    "Its releases already appear via Carnivor Records, which you watch". With no URL from
+    the collection's "Visit …bandcamp.com" comments, Add asks for one or offers
+    `<slug>.bandcamp.com` as a checked guess. A watched seed with no URL can be checked
+    the same way, or marked **not on Bandcamp** (`seed-url` with `nobc`), and refresh
+    then skips it and says why. Discogs is not used: increment 1 has no Discogs adapter.
+  - **Add all N** first shows its cost: N × (1 list + up to 10 release pages) requests,
+    the time at 2 s each, and the 500/day cap with today's use (`GET /api/discover/status`).
+  - The Seeds page separates the **Watch list** (searched on Refresh) from
+    **Suggestions** ("not searched until you add them"). "Releases 1 of 10" became "read
+    1 of 10 releases (stopped at your heard-through date 2026-10-25)".
 - **Limits of the first cut**: "heard through" is offered only after a refresh has
   read the seed's whole list down to its watermark in this session, because the walk
   reads newest first and anything unread is older (a watermark above it would hide it
