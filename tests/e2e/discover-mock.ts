@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Page, Route } from '@playwright/test';
+import { expect, type Page, type Route } from '@playwright/test';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -10,16 +10,18 @@ export const discoverNml = () => readFileSync(join(here, 'fixtures', 'discover-c
 
 export const H16_UUID = '16161616161616161616161616161616';
 export const CARNIVOR = 'https://carnivorrecords.bandcamp.com';
+/** Darker Sounds: its URL is known from a "Visit …bandcamp.com" comment in the fixture collection. */
+export const DARKER = 'https://darkersounds.bandcamp.com';
 
 type Track = { trackId: number; number: number; title: string; artist: string; duration: number; slug?: string };
 
-function release(slug: string, title: string, artist: string, date: string, tracks: Track[]) {
-  const url = `${CARNIVOR}/album/${slug}`;
+function release(slug: string, title: string, artist: string, date: string, tracks: Track[], base = CARNIVOR, label = 'Carnivor Records') {
+  const url = `${base}/album/${slug}`;
   return {
     source: 'bandcamp', url, type: 'album', id: tracks[0].trackId * 7, title, artist,
-    label: 'Carnivor Records', labelUrl: CARNIVOR, releaseDate: `${date}T00:00:00+00:00`,
+    label, labelUrl: base, releaseDate: `${date}T00:00:00+00:00`,
     tags: ['techno', 'peak time techno'],
-    tracks: tracks.map(({ slug, ...t }) => ({ ...t, trackUrl: `${CARNIVOR}/track/${slug ?? t.title.toLowerCase().replace(/\W+/g, '-')}`, isrc: null, playable: true })),
+    tracks: tracks.map(({ slug, ...t }) => ({ ...t, trackUrl: `${base}/track/${slug ?? t.title.toLowerCase().replace(/\W+/g, '-')}`, isrc: null, playable: true })),
     albumUrl: null, streamingLimit: 3,
   };
 }
@@ -42,6 +44,16 @@ export const RELEASES = {
     { trackId: 776289323, number: 2, title: 'Internal Motion (Original Mix)', artist: 'obwigszyh', duration: 390 },
     { trackId: 1945791144, number: 3, title: 'Burnt Side (Original Mix)', artist: 'obwigszyh', duration: 390 },
   ]),
+  darker: release('dark-matter', 'Dark Matter', 'Hefty', '2025-11-09', [
+    { trackId: 901, number: 1, title: 'Dark Matter', artist: 'Hefty', duration: 360 },
+    { trackId: 902, number: 2, title: 'Event Horizon', artist: 'Hefty', duration: 372 },
+  ], DARKER, 'Darker Sounds'),
+};
+
+/** Release lists by Bandcamp host. Any other host answers 404, as a guessed page that does not exist does. */
+const LISTS: Record<string, { url: string; id: number; title: string; artist: string }[]> = {
+  'carnivorrecords.bandcamp.com': [RELEASES.newer, RELEASES.internalMotion],
+  'darkersounds.bandcamp.com': [RELEASES.darker],
 };
 
 /**
@@ -77,6 +89,12 @@ export type DiscoverMockOptions = {
   realStarter?: boolean;
   /** Length of each preview's silent MP3. */
   audioSeconds?: number;
+  /** Bandcamp requests the server reports as used today (GET /api/discover/status). */
+  usedToday?: number;
+  /** Answer the release list of these hosts with this status (429 is the daily cap). */
+  listStatus?: Record<string, number>;
+  /** Wait this long before answering a release list or page, so progress can be seen. */
+  delayMs?: number;
 };
 
 /**
@@ -133,14 +151,24 @@ export async function mockDiscover(page: Page, opts: DiscoverMockOptions = {}): 
     const auth = route.request().headers()['authorization'] ?? '';
     if (!auth.startsWith('Bearer ')) return route.fulfill({ status: 401, body: '' });
 
+    if (u.pathname === '/api/discover/status') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ bandcamp: { usedToday: opts.usedToday ?? 12, dailyCap: 500 } }),
+      });
+    }
+    if (opts.delayMs && u.pathname.startsWith('/api/discover/bandcamp/')) await new Promise((r) => setTimeout(r, opts.delayMs));
     if (u.pathname === '/api/discover/bandcamp/releases') {
       calls.lists.push(target);
-      if (!target.includes('carnivorrecords')) return route.fulfill({ status: 404, body: '{}' });
+      const host = new URL(target).host;
+      if (opts.listStatus?.[host]) return route.fulfill({ status: opts.listStatus[host], body: '{}' });
+      const list = LISTS[host];
+      if (!list) return route.fulfill({ status: 404, body: '{"error":"Bandcamp has no such page"}' });
       return route.fulfill({
         status: 200, contentType: 'application/json',
         body: JSON.stringify({
-          source: 'bandcamp', page: `${CARNIVOR}/music`,
-          releases: [RELEASES.newer, RELEASES.internalMotion].map((r) => ({ url: r.url, type: 'album', id: r.id, title: r.title, artist: r.artist })),
+          source: 'bandcamp', page: `https://${host}/music`,
+          releases: list.map((r) => ({ url: r.url, type: 'album', id: r.id, title: r.title, artist: r.artist })),
         }),
       });
     }
@@ -201,4 +229,18 @@ export async function mockDiscover(page: Page, opts: DiscoverMockOptions = {}): 
   );
 
   return calls;
+}
+
+/**
+ * Watches Carnivor Records through the "eti lisää" suggestion: Add & search asks
+ * for its Bandcamp page (none is known from the collection), checks it, adds the
+ * seed and reads both releases. One release list and two release pages.
+ */
+export async function watchCarnivor(page: Page) {
+  await page.goto('/discover/H/seeds');
+  const candidate = page.locator('[data-section="eti-lisaa"] [data-candidate="Carnivor Records"]');
+  await candidate.locator('[data-add]').click();
+  await candidate.locator('[data-ask-url-input]').fill(CARNIVOR);
+  await candidate.locator('[data-add-url]').click();
+  await expect(page.locator('tr[data-seed="Carnivor Records"] [data-release-count]')).toHaveText('2');
 }

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { mockDrive, seedToken } from './drive-mock';
-import { mockDiscover, discoverNml, H16_UUID, CARNIVOR, type DiscoverMockOptions } from './discover-mock';
+import { mockDiscover, discoverNml, watchCarnivor, H16_UUID, CARNIVOR, DARKER, type DiscoverMockOptions } from './discover-mock';
 
 // Track discovery (ADR 20261025-54), increment 1: seeds, the Bandcamp release
 // walk through the server, triage, watermarks, owned tracks, the shortlist and
@@ -16,15 +16,22 @@ async function open(page: Page, path = '/discover/H', opts: DiscoverMockOptions 
 
 const seedRow = (page: Page, name: string) => page.locator(`tr[data-seed="${name}"]`);
 
-async function addCarnivor(page: Page) {
-  await page.goto('/discover/H/seeds');
-  const eti = page.locator('[data-section="eti-lisaa"]');
-  await eti.locator('[data-add-all]').click();
-  await seedRow(page, 'Carnivor Records').locator('[data-seed-url]').fill(CARNIVOR);
-  await seedRow(page, 'Carnivor Records').locator('[data-seed-url]').press('Tab');
-  await seedRow(page, 'Carnivor Records').locator('[data-refresh]').click();
-  await expect(seedRow(page, 'Carnivor Records').locator('[data-release-count]')).toHaveText('2');
+const addCarnivor = watchCarnivor;
+
+/** "Add all" asks first: confirm the cost warning. */
+async function addAll(page: Page, section: string) {
+  await page.locator(`[data-section="${section}"] [data-add-all]`).first().click();
+  await page.locator('[data-confirm-add-all]').click();
+  await expect(page.locator('[data-refresh-report][data-running="false"]')).toBeVisible();
 }
+
+const result = (page: Page, name: string) => page.locator(`[data-refresh-results] [data-result="${name}"]`);
+
+/** Toni's state on 2026-11-01: the starter's Carnivor seed, and Obwigszyh added from "eti lisää" with no Bandcamp URL. */
+const OBWIGSZYH_WITHOUT_URL = JSON.stringify({
+  t: 'seed-add', at: '2026-10-31T10:00:00+00:00', dev: '0123456789', n: 1, seed: 'artist:obwigszyh:H', kind: 'Artist',
+  name: 'Obwigszyh', genre: 'H', origin: 'EtiLisaa', reason: 'KOVA LOPPU. eti lisaa',
+});
 
 test.describe('Discover', () => {
   test('the sidebar has a Discover entry per genre, and an empty genre opens on Seeds', async ({ page }) => {
@@ -44,9 +51,12 @@ test.describe('Discover', () => {
     await expect(eti.locator('[data-candidate="Obwigszyh"]')).toContainText('KOVA LOPPU. eti lisaa');
     await expect(eti.locator('[data-candidate="Carnivor Records"]')).toBeVisible();
 
-    await eti.locator('[data-add-all]').click();
-    await expect(page.locator('tr[data-seed]')).toHaveCount(2);
+    await addAll(page, 'eti-lisaa');
+    // Carnivor's guessed page exists; Obwigszyh has no Bandcamp page, so it is not added.
+    await expect(page.locator('tr[data-seed]')).toHaveCount(1);
     await expect(page.locator('tr[data-seed]').first()).toHaveAttribute('data-seed-origin', 'EtiLisaa');
+    await expect(result(page, 'Obwigszyh')).toContainText('no Bandcamp page at obwigszyh.bandcamp.com');
+    await expect(result(page, 'Obwigszyh')).toHaveAttribute('data-result-kind', 'NotAdded');
 
     // Dragon's "1-3 lisää luuppi!" (add a loop) in Z proposes nothing.
     await page.goto('/discover/Z/seeds');
@@ -67,10 +77,14 @@ test.describe('Discover', () => {
     await expect(section.locator('[data-candidate="Noseda"]')).toBeVisible();
     await section.locator('[data-min-stars]').selectOption('4');
 
-    await section.locator('[data-add-all]').click();
-    await expect(page.locator('tr[data-seed]')).toHaveCount(6);
-    // Bandcamp wrote "Visit https://darkersounds.bandcamp.com" into a download: the URL is known.
-    await expect(seedRow(page, 'Darker Sounds').locator('[data-seed-url]')).toHaveValue('https://darkersounds.bandcamp.com');
+    await addAll(page, 'from-playlist');
+    // Bandcamp wrote "Visit https://darkersounds.bandcamp.com" into a download: the URL is known
+    // (for Hefty too, whose track it was). Carnivor's guess exists; the other guesses do not.
+    await expect(seedRow(page, 'Darker Sounds').locator('[data-seed-url]')).toHaveValue(DARKER);
+    await expect(seedRow(page, 'Carnivor Records')).toBeVisible();
+    await expect(seedRow(page, 'Gastspiel Records')).toHaveCount(0);
+    await expect(result(page, 'Gastspiel Records')).toContainText('no Bandcamp page at gastspielrecords.bandcamp.com');
+    await expect(result(page, 'Darker Sounds')).toContainText('1 new release queued (2 tracks)');
   });
 
   test('listen: oldest release first, owned tracks never, verdicts move on, nothing twice', async ({ page }) => {
@@ -199,7 +213,7 @@ test.describe('Discover', () => {
     await mockDiscover(other, { appData: { [calls.appDataCreates[0].name]: log } });
     await seedToken(other);
     await other.goto('/discover/H/seeds');
-    await expect(other.locator('tr[data-seed]')).toHaveCount(2);
+    await expect(other.locator('tr[data-seed]')).toHaveCount(1);
   });
 
   test('the starter list shows on first run, Carnivor is heard through 2026-10-25, and it is not re-applied', async ({ page }) => {
@@ -256,7 +270,139 @@ test.describe('Discover', () => {
     await open(page, '/discover/H/seeds', { appDataScopeMissing: true });
     await expect(page.locator('[data-save-status="NeedsConsent"]')).toBeVisible();
     await expect(page.locator('[data-grant-appdata]')).toBeVisible();
-    await page.locator('[data-section="eti-lisaa"] [data-add-all]').click();
+    await addAll(page, 'eti-lisaa');
+    await expect(page.locator('tr[data-seed]')).toHaveCount(1);
+  });
+
+  // ---------- clarity: what is searched, what a refresh found, what an add costs ----------
+
+  test('an empty Listen says why, offers suggestions, and Add & search queues their releases', async ({ page }) => {
+    const calls = await open(page, '/discover/H/listen', { realStarter: true });
+    const why = page.locator('[data-empty-why]');
+    await expect(why).toContainText('your watched seed has not been checked this session (Carnivor Records, through 2026-10-25)');
+
+    await page.locator('[data-refresh-all]').click();
+    await expect(result(page, 'Carnivor Records')).toContainText('no new releases since 2026-10-25');
+    await expect(why).toContainText("You've heard everything from your 1 watched seed (Carnivor Records, through 2026-10-25).");
+
+    // "Eti lisää" first, then the top of H; Carnivor is already watched.
+    const suggestions = page.locator('[data-listen-suggestions] [data-candidate]');
+    await expect(suggestions.first()).toHaveAttribute('data-candidate', 'Obwigszyh');
+    await expect(page.locator('[data-listen-suggestions] [data-candidate="Carnivor Records"]')).toHaveCount(0);
+    await expect(page.locator('[data-to-seeds]')).toHaveAttribute('href', 'discover/H/seeds');
+
+    // Darker Sounds' page is known from the collection: one click adds it and fills the queue.
+    await page.locator('[data-listen-suggestions] [data-candidate="Darker Sounds"] [data-add]').click();
+    await expect(result(page, 'Darker Sounds')).toContainText('1 new release queued (2 tracks)');
+    await expect(page.locator('[data-queue-count]')).toHaveText('2');
+    await expect(page.locator('[data-current] [data-track-title]')).toHaveText('Dark Matter');
+    expect(calls.lists).toContain(DARKER);
+    expect(calls.storeRequests).toEqual([]);
+  });
+
+  test('refresh shows its progress, then a result per seed, and names the seeds it cannot search', async ({ page }) => {
+    const calls = await open(page, '/discover/H/listen', {
+      realStarter: true, delayMs: 700, appData: { 'discover-0123456789-2026-10.jsonl': OBWIGSZYH_WITHOUT_URL + '\n' },
+    });
+    const missing = page.locator('[data-missing-url-seed="Obwigszyh"]');
+    await expect(missing).toHaveAttribute('href', 'discover/H/seeds#seed-obwigszyh');
+
+    await page.locator('[data-refresh-all]').click();
+    await expect(page.locator('[data-refresh-progress]')).toContainText(/Checking Carnivor Records… (reading the release list|\d+\/2 releases)/);
+    await expect(page.locator('[data-refresh-meter]')).toContainText(/Checking 2 watched seeds · seed 1 of 2 ·\s+\d+ requests? so far ·\s+up to about \d+ s left \(one Bandcamp request every 2 s\)/);
+
+    await expect(result(page, 'Carnivor Records')).toContainText('no new releases since 2026-10-25');
+    await expect(result(page, 'Carnivor Records')).toHaveAttribute('data-result-kind', 'NothingNew');
+    await expect(result(page, 'Obwigszyh')).toContainText('no Bandcamp URL, so it is never searched');
+    await expect(result(page, 'Obwigszyh')).toHaveAttribute('data-result-kind', 'Error');
+    // The list, then the one unheard release page (2020): older than the watermark, so the walk stops.
+    await expect(page.locator('[data-refresh-done]')).toContainText('2 requests');
+    expect(calls.lists).toEqual([CARNIVOR]);
+
+    // The Seeds row says how far the walk went.
+    await page.locator('[data-tab="seeds"]').click();
+    await expect(seedRow(page, 'Carnivor Records').locator('[data-read]'))
+      .toContainText('of 2 releases (stopped at your heard-through date 2026-10-25)');
+
+  });
+
+  test('a watched seed without a URL: the guess is checked, a 404 says so, and it can be marked "not on Bandcamp"', async ({ page }) => {
+    const calls = await open(page, '/discover/H/seeds', {
+      realStarter: true, appData: { 'discover-0123456789-2026-10.jsonl': OBWIGSZYH_WITHOUT_URL + '\n' },
+    });
+    const row = seedRow(page, 'Obwigszyh');
+    await expect(row.locator('[data-no-url]')).toBeVisible();
+    await expect(row.locator('[data-guess]')).toHaveText('Try obwigszyh.bandcamp.com');
+    await row.locator('[data-guess]').click();
+    await expect(row.locator('[data-error]')).toContainText('no Bandcamp page at obwigszyh.bandcamp.com');
+    await expect(row.locator('[data-error]')).toContainText('its releases appear via Carnivor Records, which you watch');
+    await expect(row.locator('[data-seed-url]')).toHaveValue('');   // a wrong guess is not kept
+    expect(calls.lists).toEqual(['https://obwigszyh.bandcamp.com']);
+
+    await row.locator('[data-mark-not-on-bandcamp]').click();
+    await expect(row.locator('[data-not-on-bandcamp]')).toContainText('Its releases appear via Carnivor Records.');
+    await page.locator('[data-tab="listen"]').click();
+    await expect(page.locator('[data-missing-url]')).toHaveCount(0);
+    await expect(page.locator('[data-offsite]')).toContainText('Obwigszyh (releases via Carnivor Records)');
+    await page.locator('[data-refresh-all]').click();
+    await expect(result(page, 'Obwigszyh')).toHaveAttribute('data-result-kind', 'NotOnBandcamp');
+  });
+
+  test('a suggestion with no known Bandcamp page asks for one, and a 404 guess is flagged before adding', async ({ page }) => {
+    const calls = await open(page, '/discover/H/seeds');
+    await watchCarnivor(page);
+    const candidate = page.locator('[data-section="eti-lisaa"] [data-candidate="Obwigszyh"]');
+    await candidate.locator('[data-add]').click();
+    // Asks first: no request is spent until Toni picks the guess or pastes a URL.
+    await expect(candidate.locator('[data-ask-url]')).toContainText('No Bandcamp page known for Obwigszyh.');
+    expect(calls.lists).toEqual([CARNIVOR]);
+
+    await candidate.locator('[data-guess-url]').click();
+    await expect(candidate.locator('[data-add-error]'))
+      .toContainText('not added: no Bandcamp page at obwigszyh.bandcamp.com. Its releases already appear via Carnivor Records, which you watch.');
+    await expect(seedRow(page, 'Obwigszyh')).toHaveCount(0);
+    await expect(candidate.locator('[data-ask-url-input]')).toBeVisible();
+    expect(calls.lists).toEqual([CARNIVOR, 'https://obwigszyh.bandcamp.com']);
+  });
+
+  test('"Add all" on a top list shows the cost first, then adds what has a page and searches it', async ({ page }) => {
+    const calls = await open(page, '/discover/H/seeds', { usedToday: 480 });
+    const labels = page.locator('[data-section="top-lists"] .discover-columns > div').first();
+    const button = labels.locator('[data-add-all]');
+    const n = Number((await button.textContent())!.replace(/\D+/g, ''));
+    expect(n).toBeGreaterThan(1);
+
+    await button.click();
+    const cost = page.locator('[data-add-all-cost]');
+    await expect(cost.locator('[data-cost-requests]')).toHaveText(String(n * 11));
+    await expect(cost).toContainText(`${n} × one release list and up to 10 release pages`);
+    await expect(cost.locator('[data-cost-time]')).toHaveText(n * 11 * 2 < 90 ? `${n * 22} s` : `${Math.ceil((n * 22) / 60)} min`);
+    await expect(cost.locator('[data-cost-cap]')).toContainText('The server allows 500 Bandcamp requests a day; 480 used so far today.');
+    await expect(cost.locator('[data-cost-over]')).toContainText("more than today's 20 left");
+    await expect(cost.locator('[data-cost-unknown]')).toBeVisible();
+    expect(calls.lists).toEqual([]);   // nothing fetched before the confirm
+
+    await cost.locator('[data-cancel-add-all]').click();
+    await expect(cost).toHaveCount(0);
+    await expect(page.locator('tr[data-seed]')).toHaveCount(0);
+
+    await button.click();
+    await page.locator('[data-confirm-add-all]').click();
+    await expect(page.locator('[data-refresh-report][data-running="false"]')).toBeVisible();
+    await expect(page.locator('[data-refresh-results] [data-result]')).toHaveCount(n);
+    await expect(seedRow(page, 'Darker Sounds')).toBeVisible();
+    await expect(seedRow(page, 'Carnivor Records')).toBeVisible();
     await expect(page.locator('tr[data-seed]')).toHaveCount(2);
+    await expect(page.locator('[data-refresh-results] [data-result-kind="NotAdded"]')).toHaveCount(n - 2);
+    await page.locator('[data-tab="listen"]').click();
+    await expect(page.locator('[data-queue-count]')).toHaveText('8');
+  });
+
+  test('a spent daily cap is reported per seed and stops the rest', async ({ page }) => {
+    await open(page, '/discover/H/seeds', { listStatus: { 'darkersounds.bandcamp.com': 429 } });
+    const top = page.locator('[data-section="top-lists"] [data-candidate="Darker Sounds"]').first();
+    await top.locator('[data-add]').click();
+    await expect(top.locator('[data-add-error]')).toContainText("Today's Bandcamp request cap is spent");
+    await expect(seedRow(page, 'Darker Sounds')).toHaveCount(0);
   });
 });

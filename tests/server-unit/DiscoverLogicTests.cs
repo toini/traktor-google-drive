@@ -178,6 +178,24 @@ public class DiscoverStateTests
     }
 
     [Fact]
+    public void Not_on_Bandcamp_clears_the_url_and_setting_a_url_clears_the_mark()
+    {
+        var key = "label:carnivor records:H";
+        var mark = new DiscoverEvent { Type = "seed-url", At = T0.AddMinutes(1), SeedKey = key, NotOnBandcamp = true };
+        var s = DiscoverState.Fold([Seed(), mark]);
+        Assert.True(s.Seeds[key].NotOnBandcamp);
+        Assert.Null(s.Seeds[key].BandcampUrl);
+
+        var url = new DiscoverEvent { Type = "seed-url", At = T0.AddMinutes(2), SeedKey = key, Url = "https://carnivorrecords.bandcamp.com" };
+        s = DiscoverState.Fold([Seed(), mark, url]);
+        Assert.False(s.Seeds[key].NotOnBandcamp);
+        Assert.Equal("https://carnivorrecords.bandcamp.com", s.Seeds[key].BandcampUrl);
+
+        // Logs written before the mark existed read as "not marked".
+        Assert.False(DiscoverState.Fold([Seed()]).Seeds[key].NotOnBandcamp);
+    }
+
+    [Fact]
     public void Jsonl_round_trip_skips_bad_lines()
     {
         var events = new[] { Seed(), Mark("2024-02", 1) };

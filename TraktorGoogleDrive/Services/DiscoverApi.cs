@@ -24,6 +24,8 @@ public sealed class DiscoverApi
     public sealed record Release(string Source, string Url, string Type, long Id, string Title, string Artist,
         string? Label, string? LabelUrl, DateTimeOffset? ReleaseDate, List<string> Tags, List<Track> Tracks,
         string? AlbumUrl, int? StreamingLimit);
+    public sealed record SourceUsage(int UsedToday, int DailyCap);
+    public sealed record StatusResponse(SourceUsage Bandcamp);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -41,6 +43,9 @@ public sealed class DiscoverApi
 
     public Task<Release> GetReleaseAsync(string releaseUrl) =>
         GetAsync<Release>($"api/discover/bandcamp/release?url={Uri.EscapeDataString(releaseUrl)}");
+
+    /// <summary>Bandcamp requests the server made today and its daily cap: for the cost of "Add all".</summary>
+    public Task<StatusResponse> StatusAsync() => GetAsync<StatusResponse>("api/discover/status");
 
     /// <summary>The player's media URL for one Bandcamp track: the server answers with a redirect to the stream.</summary>
     public static string AudioUrl(long trackId, string releaseUrl) =>

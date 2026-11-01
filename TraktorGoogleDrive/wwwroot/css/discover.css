@@ -240,3 +240,22 @@
     .discover-table td { display: block; border: none; padding: 2px 0; }
     .discover-input { width: 100%; }
 }
+
+/* Refresh feedback, the empty Listen state and the "Add all" cost (clarity pass). */
+.discover-help { color: #c9d1d9; font-size: 13px; margin: 8px 0 12px; max-width: 70ch; }
+.discover-report { border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; margin: 8px 0 12px; background: #161b22; }
+.discover-report p { margin: 2px 0; }
+.discover-report-now { font-size: 13px; }
+.discover-results { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.discover-result { padding: 2px 0; }
+.discover-result.good { color: #7ee787; }
+.discover-result.bad { color: #ff7b72; }
+.discover-empty { margin: 16px 0; }
+.discover-empty p { margin: 6px 0; }
+.discover-empty-why { font-size: 14px; }
+.discover-empty-title { font-size: 15px; margin: 16px 0 4px; }
+.discover-cost { border: 1px solid #d29922; border-radius: 6px; padding: 8px 12px; margin: 6px 0; background: #1c1708; font-size: 13px; }
+.discover-cost p { margin: 4px 0; }
+.discover-ask { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.discover-suggestions-title { font-size: 16px; margin: 28px 0 4px; }
+.discover-section h4 { font-size: 13px; margin: 0 0 6px; color: #c9d1d9; }

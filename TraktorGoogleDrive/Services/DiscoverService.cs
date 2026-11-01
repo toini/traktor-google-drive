@@ -51,6 +51,11 @@ public sealed partial class DiscoverService
         public int Walked { get; set; }
         public List<DiscoverApi.ReleaseRef> Refs { get; set; } = [];
         public DateTimeOffset? RefreshedAt { get; set; }
+        public int? ErrorStatus { get; set; }
+        /// <summary>Release pages read by the current step (at most <see cref="ReleasesPerStep"/>).</summary>
+        public int FetchedThisStep { get; set; }
+        /// <summary>The last walk stopped at a release on or before the watermark: everything older is heard.</summary>
+        public bool StoppedAtWatermark { get; set; }
     }
 
     public DiscoverService(CollectionService collection, DiscoverStore store, DiscoverApi api, IJSRuntime js, HttpClient http)
@@ -225,9 +230,8 @@ public sealed partial class DiscoverService
         foreach (var c in candidates) AddSeed(c);
     }
 
-    public void AddManualSeed(SeedKind kind, string name, string genre, string? url) =>
-        AddSeed(new SeedCandidate(kind, name.Trim(), genre, SeedOrigin.Manual, 0, 0, 0, null, 0, "Added by hand"),
-            string.IsNullOrWhiteSpace(url) ? null : url.Trim());
+    public static SeedCandidate ManualCandidate(SeedKind kind, string name, string genre) =>
+        new(kind, name.Trim(), genre, SeedOrigin.Manual, 0, 0, 0, null, 0, "Added by hand");
 
     public void RemoveSeed(Seed seed) =>
         _store.Append(new DiscoverEvent { Type = "seed-remove", At = default, SeedKey = seed.Key });
@@ -273,33 +277,36 @@ public sealed partial class DiscoverService
     {
         var progress = ProgressOf(seed);
         if (progress.Busy) return;
+        progress.Error = null;
+        progress.ErrorStatus = null;
         if (string.IsNullOrWhiteSpace(seed.BandcampUrl))
         {
-            progress.Error = "No Bandcamp URL yet";
+            progress.Error = seed.NotOnBandcamp ? null : NoUrlMessage;
             Changed?.Invoke();
             return;
         }
 
         progress.Busy = true;
-        progress.Error = null;
-        progress.Message = "Reading the release list…";
-        Changed?.Invoke();
+        progress.FetchedThisStep = 0;
+        progress.StoppedAtWatermark = false;
+        if (_active is { } run) run.CurrentProgress = progress;
+        Say(progress, $"Checking {seed.Name}… reading the release list");
         try
         {
             if (force || progress.Refs.Count == 0)
             {
-                var list = await _api.ListReleasesAsync(seed.BandcampUrl, force);
+                var url = seed.BandcampUrl;
+                var list = await CountedAsync(() => _api.ListReleasesAsync(url, force));
                 progress.Refs = list.Releases;
                 progress.Listed = list.Releases.Count;
                 progress.Walked = 0;
             }
             if (progress.Refs.Count == 0)
             {
-                progress.Error = "No releases on that page. Is it the right Bandcamp page?";
+                progress.Error = "no releases on that page. Is it the right Bandcamp page?";
                 return;
             }
 
-            var fetched = 0;
             for (var i = progress.Walked; i < progress.Refs.Count; i++)
             {
                 var r = progress.Refs[i];
@@ -308,11 +315,10 @@ public sealed partial class DiscoverService
 
                 if (!_releases.TryGetValue(r.Url, out var info))
                 {
-                    if (fetched >= step) { progress.Walked = i; break; }
-                    progress.Message = $"Reading {r.Title} ({i + 1} of {progress.Refs.Count})…";
-                    Changed?.Invoke();
-                    var release = await _api.GetReleaseAsync(r.Url);
-                    fetched++;
+                    if (progress.FetchedThisStep >= step) { progress.Walked = i; break; }
+                    Say(progress, $"Checking {seed.Name}… {i + 1}/{progress.Refs.Count} releases");
+                    var release = await CountedAsync(() => _api.GetReleaseAsync(r.Url));
+                    progress.FetchedThisStep++;
                     info = ToInfo(release, seed.Key);
                     _releases[info.Url] = info;
                     ResolveUrlTracks(info);
@@ -322,7 +328,12 @@ public sealed partial class DiscoverService
                 }
 
                 // The grid is newest first: past the watermark, everything below is older.
-                if (DiscoverState.BeforeWatermark(info.Date, seed.Watermark)) { progress.Walked = progress.Refs.Count; break; }
+                if (DiscoverState.BeforeWatermark(info.Date, seed.Watermark))
+                {
+                    progress.StoppedAtWatermark = true;
+                    progress.Walked = progress.Refs.Count;
+                    break;
+                }
             }
             progress.RefreshedAt = DateTimeOffset.UtcNow;
             progress.Message = progress.Walked < progress.Refs.Count
@@ -331,7 +342,8 @@ public sealed partial class DiscoverService
         }
         catch (DiscoverApiException e)
         {
-            progress.Error = e.Message;
+            progress.Error = e.Status == 404 ? $"no Bandcamp page at {HostOf(seed.BandcampUrl)} (404)" : e.Message;
+            progress.ErrorStatus = e.Status;
         }
         finally
         {
@@ -340,14 +352,314 @@ public sealed partial class DiscoverService
         }
     }
 
-    /// <summary>Refreshes every seed of a genre with a URL, "eti lisää" seeds first. Sequential, never concurrent.</summary>
-    public async Task RefreshGenreAsync(string genre)
+    public bool HasMore(Seed seed) => ProgressOf(seed) is { Refs.Count: > 0 } p && p.Walked < p.Refs.Count;
+
+    // ---------- refresh runs: progress, cost and a result per seed ----------
+
+    /// <summary>The server spaces Bandcamp requests this far apart (PoliteFetcher), for time estimates.</summary>
+    public const int SecondsPerRequest = 2;
+
+    /// <summary>The server's daily request cap, when /api/discover/status cannot say.</summary>
+    public const int DefaultDailyCap = 500;
+
+    /// <summary>Most requests one seed can cost per refresh: its release list and one step of release pages.</summary>
+    public const int MaxRequestsPerSeed = 1 + ReleasesPerStep;
+
+    public const string NoUrlMessage = "no Bandcamp URL, so it is never searched. Set one under Seeds, or mark it “not on Bandcamp”";
+
+    public enum OutcomeKind { Queued, NothingNew, NotOnBandcamp, NotAdded, Error }
+
+    /// <summary>What one seed's refresh (or add) came to, in words, so a refresh is never a silent no-op.</summary>
+    public sealed record SeedOutcome(string Name, OutcomeKind Kind, string Text, bool CapSpent = false);
+
+    /// <summary>One "Refresh seeds", "Refresh" or "Add &amp; search": progress while it runs, then a result per seed.</summary>
+    public sealed class RefreshRun
     {
-        foreach (var seed in SeedsOf(genre).Where(s => !string.IsNullOrWhiteSpace(s.BandcampUrl)))
-            await RefreshSeedAsync(seed);
+        public required string Genre { get; init; }
+        public required string Title { get; init; }
+        public required int Total { get; init; }
+        public int Done { get; set; }
+        public string? Current { get; set; }
+        public string? Detail { get; set; }
+        public SeedProgress? CurrentProgress { get; set; }
+        public int Requests { get; set; }
+        public bool Running { get; set; } = true;
+        public DateTimeOffset StartedAt { get; init; }
+        public List<SeedOutcome> Results { get; } = [];
     }
 
-    public bool HasMore(Seed seed) => ProgressOf(seed) is { Refs.Count: > 0 } p && p.Walked < p.Refs.Count;
+    private readonly Dictionary<string, RefreshRun> _runs = new();
+    private RefreshRun? _active;
+
+    /// <summary>The last run in a genre, running or finished in this session.</summary>
+    public RefreshRun? RunOf(string genre) => _runs.GetValueOrDefault(genre);
+
+    /// <summary>A run is going: one at a time, since the server serialises Bandcamp requests anyway.</summary>
+    public bool Searching => _active is not null;
+
+    /// <summary>An upper bound on the requests the active run still needs, for "about N s left".</summary>
+    public static int RequestsLeft(RefreshRun run)
+    {
+        var later = Math.Max(0, run.Total - run.Done - 1) * MaxRequestsPerSeed;
+        var current = run.CurrentProgress is { Busy: true, Refs.Count: > 0 } p
+            ? Math.Min(ReleasesPerStep - p.FetchedThisStep, p.Refs.Count - p.Walked)
+            : MaxRequestsPerSeed;
+        return Math.Max(0, current) + later;
+    }
+
+    private void Say(SeedProgress progress, string message)
+    {
+        progress.Message = message;
+        if (_active is { } run) run.Detail = message;
+        Changed?.Invoke();
+    }
+
+    private async Task<T> CountedAsync<T>(Func<Task<T>> call)
+    {
+        if (_active is { } run) run.Requests++;
+        Changed?.Invoke();
+        return await call();
+    }
+
+    private async Task<RefreshRun?> RunAsync<T>(string genre, string title, IReadOnlyList<T> items, Func<T, string> name,
+        Func<T, Task<SeedOutcome>> step)
+    {
+        if (_active is not null || items.Count == 0) return null;
+        var run = new RefreshRun { Genre = genre, Title = title, Total = items.Count, StartedAt = DateTimeOffset.UtcNow };
+        _runs[genre] = run;
+        _active = run;
+        Changed?.Invoke();
+        try
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                run.Current = name(items[i]);
+                run.Detail = null;
+                run.CurrentProgress = null;
+                Changed?.Invoke();
+                var outcome = await step(items[i]);
+                run.Results.Add(outcome);
+                run.Done = i + 1;
+                if (!outcome.CapSpent) continue;
+                foreach (var rest in items.Skip(i + 1))
+                    run.Results.Add(new SeedOutcome(name(rest), OutcomeKind.Error, "not checked: today's Bandcamp request cap is spent", true));
+                run.Done = items.Count;
+                break;
+            }
+        }
+        finally
+        {
+            run.Running = false;
+            run.Current = null;
+            run.Detail = null;
+            run.CurrentProgress = null;
+            _active = null;
+            Changed?.Invoke();
+        }
+        return run;
+    }
+
+    /// <summary>"Refresh seeds": every seed of the genre, "eti lisää" first, with a result for each, including the ones it cannot search.</summary>
+    public Task RefreshGenreAsync(string genre)
+    {
+        var seeds = SeedsOf(genre);
+        return RunAsync(genre, $"Checking {Plural(seeds.Count, "watched seed")}", seeds, s => s.Name, async s =>
+        {
+            await RefreshSeedAsync(s);
+            return OutcomeFor(s);
+        });
+    }
+
+    /// <summary>One seed's Refresh or Load older, from its row.</summary>
+    public Task RefreshOneAsync(Seed seed, bool force) =>
+        RunAsync(seed.Genre, $"Checking {seed.Name}", [seed], s => s.Name, async s =>
+        {
+            await RefreshSeedAsync(s, force);
+            return OutcomeFor(s);
+        });
+
+    /// <summary>What a seed's last refresh came to, in words.</summary>
+    public SeedOutcome OutcomeFor(Seed seed)
+    {
+        var p = ProgressOf(seed);
+        if (seed.NotOnBandcamp)
+            return new(seed.Name, OutcomeKind.NotOnBandcamp, "marked “not on Bandcamp”, so it is skipped" + ViaText(seed));
+        if (p.Error is { } error)
+            return new(seed.Name, OutcomeKind.Error, error, p.ErrorStatus == 429);
+
+        // By the releases this seed's walk read, not by which seed fetched them first:
+        // a label and an artist on the same page share releases.
+        var read = p.Refs.Take(p.Walked)
+            .Select(r => _releases.TryGetValue(r.Url, out var info) ? info.Url : r.Url)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var queued = Queue(seed.Genre).Where(q => read.Contains(q.Release.Url) || q.Release.SeedKey == seed.Key).ToList();
+        if (queued.Count > 0)
+        {
+            var releases = queued.Select(q => q.Release.Url).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return new(seed.Name, OutcomeKind.Queued, $"{Plural(releases, "new release")} queued ({Plural(queued.Count, "track")})");
+        }
+        var more = HasMore(seed)
+            ? $" Read {p.Walked} of {p.Listed} releases; “Load older” under Seeds reads further back."
+            : "";
+        return seed.Watermark is { } w
+            ? new(seed.Name, OutcomeKind.NothingNew, $"no new releases since {w}.{more}")
+            : new(seed.Name, OutcomeKind.NothingNew, $"nothing new: every release read is heard or already in your collection.{more}");
+    }
+
+    /// <summary>
+    /// Adds a suggestion and searches it at once. Its Bandcamp page is checked first
+    /// (that check is the release list the search needs anyway): a seed whose page
+    /// does not exist is not added, since it could never find anything. With no URL
+    /// given, the collection's "Visit …bandcamp.com" comment is used, else the name
+    /// is guessed as &lt;slug&gt;.bandcamp.com.
+    /// </summary>
+    public async Task<SeedOutcome> AddAndSearchAsync(SeedCandidate candidate, string? url = null)
+    {
+        SeedOutcome? outcome = null;
+        await RunAsync(candidate.Genre, $"Adding {candidate.Name}", [candidate], c => c.Name,
+            async c => outcome = await AddOneAsync(c, url));
+        return outcome ?? new(candidate.Name, OutcomeKind.NotAdded, "another search is still running; try again when it is done");
+    }
+
+    /// <summary>"Add all N", after the cost warning: one after another, each checked before it is added.</summary>
+    public Task AddAllAndSearchAsync(string genre, IReadOnlyList<SeedCandidate> candidates) =>
+        RunAsync(genre, $"Adding {Plural(candidates.Count, "seed")}", candidates, c => c.Name, c => AddOneAsync(c, null));
+
+    /// <summary>"Try &lt;slug&gt;.bandcamp.com" on a watched seed with no URL: kept only if that page exists.</summary>
+    public Task GuessSeedUrlAsync(Seed seed) =>
+        RunAsync(seed.Genre, $"Looking for {seed.Name} on Bandcamp", [seed], s => s.Name, async s =>
+        {
+            var url = GuessUrl(s.Name);
+            var check = await CheckPageAsync(s.Name, url);
+            var p = ProgressOf(s);
+            if (check.Error is { } error)
+            {
+                p.Error = error + ViaText(s);
+                p.ErrorStatus = check.CapSpent ? 429 : 404;
+                Changed?.Invoke();
+                return new SeedOutcome(s.Name, OutcomeKind.Error, p.Error, check.CapSpent);
+            }
+            SetSeedUrl(s, url);
+            var updated = State.Seeds[s.Key];
+            UseList(updated, check.Refs!);
+            await RefreshSeedAsync(updated);
+            return OutcomeFor(updated);
+        });
+
+    /// <summary>Toni says the seed has no Bandcamp page: Refresh skips it and says so.</summary>
+    public void MarkNotOnBandcamp(Seed seed)
+    {
+        ProgressOf(seed).Error = null;
+        _store.Append(new DiscoverEvent { Type = "seed-url", At = default, SeedKey = seed.Key, NotOnBandcamp = true });
+    }
+
+    /// <summary>
+    /// Labels Toni already watches in the seed's genre that carry this artist's
+    /// tracks in the collection: Obwigszyh's releases come out on Carnivor Records,
+    /// so watching Carnivor finds them without a Bandcamp page of his own.
+    /// </summary>
+    public IReadOnlyList<string> WatchedLabelsOf(SeedKind kind, string name, string genre)
+    {
+        if (kind != SeedKind.Artist) return [];
+        var key = Names.EntityKey(name);
+        return _tracks
+            .Where(t => t.Label is not null && t.Genres.Contains(genre) && Names.SplitArtists(t.Artist).Any(a => Names.EntityKey(a) == key))
+            .Select(t => t.Label!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(l => State.Seeds.ContainsKey(SeedCandidate.SeedKey(SeedKind.Label, l, genre)))
+            .ToList();
+    }
+
+    private string ViaText(Seed seed) =>
+        WatchedLabelsOf(seed.Kind, seed.Name, seed.Genre) is { Count: > 0 } labels
+            ? $" (its releases appear via {string.Join(", ", labels)}, which you watch)"
+            : "";
+
+    public static string GuessUrl(string name) => $"https://{Names.BandcampSlugGuess(name)}.bandcamp.com";
+
+    public static string HostOf(string url) => Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : url;
+
+    /// <summary>Suggestions for an empty Listen tab: "eti lisää" first, then the genre's top lists, ones with a known Bandcamp page first.</summary>
+    public IReadOnlyList<SeedCandidate> Suggestions(string genre, int count = 6)
+    {
+        var eti = EtiLisaaCandidates().Where(c => c.Genre == genre);
+        var top = TopCandidates(genre, SeedKind.Label).Take(10).Concat(TopCandidates(genre, SeedKind.Artist).Take(10))
+            .OrderBy(c => KnownUrlFor(c.Kind, c.Name) is null)
+            .ThenByDescending(c => c.Score);
+        return eti.Concat(top).Where(c => !State.Seeds.ContainsKey(c.Key)).DistinctBy(c => c.Key).Take(count).ToList();
+    }
+
+    /// <summary>Requests used today and the daily cap, from the server; the default cap when it cannot say.</summary>
+    public async Task<(int? UsedToday, int DailyCap)> UsageAsync()
+    {
+        try
+        {
+            var status = await _api.StatusAsync();
+            return (status.Bandcamp.UsedToday, status.Bandcamp.DailyCap);
+        }
+        catch (Exception e) when (e is DiscoverApiException or JsonException or NotSupportedException)
+        {
+            return (null, DefaultDailyCap);
+        }
+    }
+
+    private async Task<SeedOutcome> AddOneAsync(SeedCandidate c, string? url)
+    {
+        url = string.IsNullOrWhiteSpace(url) ? KnownUrlFor(c.Kind, c.Name) ?? GuessUrl(c.Name) : url.Trim();
+        var check = await CheckPageAsync(c.Name, url);
+        if (check.Error is { } error)
+        {
+            var via = WatchedLabelsOf(c.Kind, c.Name, c.Genre) is { Count: > 0 } labels
+                ? $" Its releases already appear via {string.Join(", ", labels)}, which you watch."
+                : "";
+            return new(c.Name, OutcomeKind.NotAdded, $"not added: {error}.{via}", check.CapSpent);
+        }
+
+        AddSeed(c, url);
+        var seed = State.Seeds[c.Key];
+        if (!string.Equals(seed.BandcampUrl, url, StringComparison.OrdinalIgnoreCase))
+        {
+            // Already watched (another device, or re-added): use the page just checked.
+            SetSeedUrl(seed, url);
+            seed = State.Seeds[c.Key];
+        }
+        UseList(seed, check.Refs!);
+        await RefreshSeedAsync(seed);
+        return OutcomeFor(seed);
+    }
+
+    private void UseList(Seed seed, List<DiscoverApi.ReleaseRef> refs)
+    {
+        var p = ProgressOf(seed);
+        p.Refs = refs;
+        p.Listed = refs.Count;
+        p.Walked = 0;
+    }
+
+    /// <summary>Reads a Bandcamp page's release list, which both checks the page exists and starts the walk.</summary>
+    private async Task<(List<DiscoverApi.ReleaseRef>? Refs, string? Error, bool CapSpent)> CheckPageAsync(string name, string url)
+    {
+        var host = HostOf(url);
+        if (_active is { } run) run.Detail = $"Checking {name}… looking for {host}";
+        Changed?.Invoke();
+        try
+        {
+            var list = await CountedAsync(() => _api.ListReleasesAsync(url, false));
+            return list.Releases.Count == 0
+                ? (null, $"no releases at {host}. Is it the right Bandcamp page?", false)
+                : (list.Releases, null, false);
+        }
+        catch (DiscoverApiException e) when (e.Status == 404)
+        {
+            return (null, $"no Bandcamp page at {host}", false);
+        }
+        catch (DiscoverApiException e)
+        {
+            return (null, e.Message, e.Status == 429);
+        }
+    }
+
+    private static string Plural(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
 
     private static ReleaseInfo ToInfo(DiscoverApi.Release r, string seedKey) => new(
         r.Source,

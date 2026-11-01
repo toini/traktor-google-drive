@@ -1,7 +1,12 @@
 @using TraktorGoogleDrive.Discover
+@using TraktorGoogleDrive.Services
 @inject DiscoverService Discover
 
-@* Seed candidates with Add, and "never suggest" for names that are not seeds. *@
+@* Seed suggestions. Nothing here is searched until it is added: "Add & search"
+   checks the Bandcamp page first and only then adds the seed and reads its
+   releases into the queue, so a seed that can never find anything is never
+   added. With no known page it asks for a URL or tries <slug>.bandcamp.com.
+   "Add all" shows its cost (requests, minutes, the daily cap) before it runs. *@
 @if (Items.Count == 0)
 {
     <p class="discover-hint">None.</p>
@@ -9,9 +14,42 @@
 else
 {
     var fresh = Items.Where(c => !Discover.State.Seeds.ContainsKey(c.Key)).ToList();
-    @if (fresh.Count > 1)
+    @if (AllowAddAll && fresh.Count > 1)
     {
-        <button class="discover-button" data-add-all @onclick="() => Discover.AddSeeds(fresh)">Add all @fresh.Count</button>
+        @if (cost is null)
+        {
+            <button class="discover-button" data-add-all disabled="@Discover.Searching" @onclick="() => OpenCostAsync(fresh)">Add all @fresh.Count</button>
+        }
+        else
+        {
+            var requests = cost.Count * DiscoverService.MaxRequestsPerSeed;
+            var unknown = cost.Count(c => Discover.KnownUrlFor(c.Kind, c.Name) is null);
+            <div class="discover-cost" data-add-all-cost role="alertdialog" aria-label="Cost of adding @cost.Count seeds">
+                <p>
+                    Add @cost.Count seeds and search them on Bandcamp now? That is up to
+                    <strong data-cost-requests>@requests</strong> requests
+                    (@cost.Count × one release list and up to @DiscoverService.ReleasesPerStep release pages), about
+                    <strong data-cost-time>@RefreshReport.Eta(requests)</strong> at one request every @DiscoverService.SecondsPerRequest s.
+                </p>
+                <p class="discover-hint" data-cost-cap>
+                    The server allows @usage.DailyCap Bandcamp requests a day@(usage.UsedToday is { } used ? $"; {used} used so far today" : "").
+                    @if (usage.UsedToday is { } u && requests > usage.DailyCap - u)
+                    {
+                        <span class="discover-warn" data-cost-over> That is more than today's @(Math.Max(0, usage.DailyCap - u)) left: the rest stop with "cap spent" until tomorrow.</span>
+                    }
+                </p>
+                @if (unknown > 0)
+                {
+                    <p class="discover-hint" data-cost-unknown>
+                        @unknown of them have no known Bandcamp page: each is tried as &lt;name&gt;.bandcamp.com and added only if that page exists.
+                    </p>
+                }
+                <div class="discover-toolbar">
+                    <button class="discover-button buy" data-confirm-add-all @onclick="ConfirmAsync">Add @cost.Count and search</button>
+                    <button class="discover-button" data-cancel-add-all @onclick="() => cost = null">Cancel</button>
+                </div>
+            </div>
+        }
     }
     <ul class="discover-list discover-candidates">
         @foreach (var c in Items)
@@ -24,16 +62,36 @@ else
                         @(c.Kind == SeedKind.Label ? "label" : "artist") ·
                         @if (c.Origin == SeedOrigin.EtiLisaa) { @c.Reason }
                         else { @($"{c.Tracks} track{(c.Tracks == 1 ? "" : "s")}, {c.Rated4} rated 4★+{(ShowScore ? $", {c.Plays} plays, score {c.Score:0.#}" : "")}") }
+                        @(Discover.KnownUrlFor(c.Kind, c.Name) is { } known ? $" · {DiscoverService.HostOf(known)}" : "")
                     </span>
+                    @if (errors.GetValueOrDefault(c.Key) is { } error)
+                    {
+                        <span class="discover-warn" data-add-error>@error</span>
+                    }
                 </div>
                 <div class="discover-row-actions">
                     @if (added)
                     {
                         <span class="discover-hint" data-added>Watching</span>
                     }
+                    else if (asking == c.Key)
+                    {
+                        var guess = DiscoverService.GuessUrl(c.Name);
+                        <div class="discover-ask" data-ask-url>
+                            <span class="discover-hint">No Bandcamp page known for @c.Name.</span>
+                            <button class="discover-button" data-guess-url disabled="@Discover.Searching" title="Checks the page before adding"
+                                    @onclick="() => TryAsync(c, guess)">Try @DiscoverService.HostOf(guess)</button>
+                            <input class="discover-input" data-ask-url-input placeholder="or paste https://….bandcamp.com"
+                                   @bind="askUrl" @bind:event="oninput" />
+                            <button class="discover-button" data-add-url disabled="@(Discover.Searching || string.IsNullOrWhiteSpace(askUrl))"
+                                    @onclick="() => TryAsync(c, askUrl)">Add &amp; search</button>
+                            <button class="discover-button subtle" data-cancel-ask @onclick="() => { asking = null; errors.Remove(c.Key); }">Cancel</button>
+                        </div>
+                    }
                     else
                     {
-                        <button class="discover-button" data-add @onclick="() => Discover.AddSeed(c)">Add</button>
+                        <button class="discover-button" data-add disabled="@Discover.Searching"
+                                title="Add to the watch list and look for its releases now" @onclick="() => AddAsync(c)">Add &amp; search</button>
                         <button class="discover-button subtle" data-never title="Never suggest this name" @onclick="() => Discover.NeverSuggest(c.Name)">✕</button>
                     }
                 </div>
@@ -45,4 +103,51 @@ else
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<SeedCandidate> Items { get; set; } = [];
     [Parameter] public bool ShowScore { get; set; }
+    /// <summary>Offer "Add all N" (with its cost warning). Off for a mixed short list.</summary>
+    [Parameter] public bool AllowAddAll { get; set; } = true;
+
+    readonly Dictionary<string, string> errors = new();
+    string? asking;
+    string askUrl = "";
+    List<SeedCandidate>? cost;
+    (int? UsedToday, int DailyCap) usage = (null, DiscoverService.DefaultDailyCap);
+
+    async Task AddAsync(SeedCandidate c)
+    {
+        errors.Remove(c.Key);
+        if (Discover.KnownUrlFor(c.Kind, c.Name) is null)
+        {
+            // Ask before spending a request on a guess.
+            asking = c.Key;
+            askUrl = "";
+            return;
+        }
+        await TryAsync(c, null);
+    }
+
+    async Task TryAsync(SeedCandidate c, string? url)
+    {
+        errors.Remove(c.Key);
+        var outcome = await Discover.AddAndSearchAsync(c, url);
+        if (outcome.Kind == DiscoverService.OutcomeKind.NotAdded)
+        {
+            errors[c.Key] = outcome.Text;
+            if (Discover.KnownUrlFor(c.Kind, c.Name) is null) asking = c.Key;
+            return;
+        }
+        asking = null;
+    }
+
+    async Task OpenCostAsync(List<SeedCandidate> fresh)
+    {
+        cost = fresh;
+        usage = await Discover.UsageAsync();
+    }
+
+    async Task ConfirmAsync()
+    {
+        if (cost is not { } list) return;
+        cost = null;
+        await Discover.AddAllAndSearchAsync(list[0].Genre, list);
+    }
 }

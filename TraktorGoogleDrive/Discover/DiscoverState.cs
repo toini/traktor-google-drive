@@ -26,6 +26,8 @@ public sealed record DiscoverEvent
     [JsonPropertyName("reason")] public string? Reason { get; init; }
     [JsonPropertyName("url")] public string? Url { get; init; }
     [JsonPropertyName("month")] public string? Month { get; init; }
+    /// <summary>On seed-url: Toni marked the seed as having no Bandcamp page, so a refresh skips it on purpose.</summary>
+    [JsonPropertyName("nobc")] public bool? NotOnBandcamp { get; init; }
 
     // Tracks
     [JsonPropertyName("track")] public string? TrackKey { get; init; }
@@ -61,6 +63,12 @@ public sealed class Seed
     public SeedOrigin Origin { get; set; }
     public string? Reason { get; set; }
     public string? BandcampUrl { get; set; }
+    /// <summary>
+    /// Toni said this seed has no Bandcamp page (an artist on SoundCloud only, say,
+    /// whose releases come out on a label he already watches). Refresh skips it
+    /// and says why, instead of reporting a missing URL.
+    /// </summary>
+    public bool NotOnBandcamp { get; set; }
     /// <summary>"Heard everything through this month", YYYY-MM. Only ever moves forward.</summary>
     public string? Watermark { get; set; }
     public DateTimeOffset AddedAt { get; set; }
@@ -162,6 +170,7 @@ public sealed class DiscoverState
 
             case "seed-url" when e.SeedKey is not null && Seeds.TryGetValue(e.SeedKey, out var s):
                 s.BandcampUrl = string.IsNullOrWhiteSpace(e.Url) ? null : e.Url;
+                s.NotOnBandcamp = s.BandcampUrl is null && e.NotOnBandcamp == true;
                 break;
 
             case "watermark" when e.SeedKey is not null && Seeds.TryGetValue(e.SeedKey, out var w):
