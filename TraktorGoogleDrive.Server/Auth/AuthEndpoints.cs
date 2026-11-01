@@ -100,8 +100,9 @@ public static class AuthEndpoints
             else
             {
                 // Google only returns a refresh token for a new grant. The page then
-                // works for this hour as it always has; signing out (which revokes)
-                // and in again gets one.
+                // works for this hour as it always has. With no cookie there is nothing
+                // for Sign out to revoke: removing the app at myaccount.google.com and
+                // signing in again gets one.
                 log.LogWarning("Code exchange returned no refresh token; this sign-in is not persistent");
             }
 

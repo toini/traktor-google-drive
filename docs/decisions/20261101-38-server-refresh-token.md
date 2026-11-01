@@ -77,8 +77,10 @@ property this service has today.
 - **No refresh token in the exchange** happens because Google returns one only
   for a new grant. Example: a second browser where the app was never signed out,
   so the grant is still live. The server then answers `persistent: false` and sets
-  no cookie. That sign-in works for its hour, the way the token model does. Signing
-  out (which revokes) and signing in again gets a refresh token. The server logs a
+  no cookie. That sign-in works for its hour, the way the token model does. The app's
+  Sign out cannot fix it, because without a cookie the server has nothing to revoke.
+  Remove the app's access at myaccount.google.com (Security → Third-party apps) and
+  sign in again, and the new grant comes with a refresh token. The server logs a
   warning when it happens.
 
 ### 2. Renewal (`POST /api/auth/token`)
@@ -259,8 +261,8 @@ runs, unchanged, against the fallback.
   Google caps live refresh tokens per user and client at 100 and drops the oldest.
 - A revocation reaches the server at its next refresh (within the hour), or at
   once if Drive refuses the token. Google also kills the access tokens.
-- `persistent: false` sign-ins (§1) fall back to hourly behaviour until a Sign out
-  and sign-in. This has not been observed yet. **Watch for the server warning on
+- `persistent: false` sign-ins (§1) fall back to hourly behaviour until the grant is
+  removed at myaccount.google.com and the user signs in again. This has not been observed yet. **Watch for the server warning on
   the first real sign-in.**
 - `max-instances=1` makes the in-memory cache and the rate limiter exact. A second
   instance would only refresh more often. The cookie works on any instance.
