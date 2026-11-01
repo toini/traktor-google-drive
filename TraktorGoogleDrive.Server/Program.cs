@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 
+using TraktorGoogleDrive.Server.Auth;
 using TraktorGoogleDrive.Server.Cast;
 using TraktorGoogleDrive.Server.Discover;
 using TraktorGoogleDrive.Server.Remote;
@@ -19,6 +20,9 @@ builder.Services.AddCastTickets();
 builder.Services.AddDiscover();
 // Crates: finding a named list's tracks on Discogs, Bandcamp (by URL only) and SoundCloud (oEmbed).
 builder.Services.AddDiscoverCrates();
+// Server-held refresh token (ADR 20261101-38). Off, and the page keeps the token
+// model, until GoogleOAuth__ClientSecret and AuthSession__CookieSecret are set.
+builder.Services.AddAuthSession(builder.Configuration);
 
 // Cloud Run sits in front as a TLS-terminating proxy, so without this the app
 // sees scheme=http and the load balancer's IP for every request.
@@ -100,7 +104,10 @@ static void CopyMediaHeaders(HttpResponseMessage upstream, HttpResponse outgoing
     // the response chunked and exempt from Cloud Run's 32 MiB limit.
 }
 
-/// Set by auth.js, scoped to /api/proxy/.
+/// Set by auth.js, scoped to /api/proxy/. Since ADR 20261101-38 the fallback: a
+/// request that carries a server session (tgd_session) is served with the token
+/// the server holds for it, and this cookie is only read without one, i.e. while
+/// the code flow is off or for a tab signed in before it was switched on.
 const string ProxyTokenCookie = "drive_token";
 
 /// What a Cast device fetches: /api/proxy/cast/{fileId}?ticket=…
@@ -215,8 +222,19 @@ app.MapMethods("/api/proxy/drive/{fileId}", ["GET", "HEAD"], async (
     // the request being well formed.
     if (RejectCaller(incomingRequest, outgoingResponse, logger)) return;
 
-    if (!incomingRequest.Cookies.TryGetValue(ProxyTokenCookie, out var token)
-        || string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(fileId))
+    if (string.IsNullOrWhiteSpace(fileId))
+    {
+        outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    // The server session first: its token is always the current one, and the page
+    // never has to have written it anywhere. Then the page-set cookie.
+    var token = await AuthEndpoints.SessionAccessTokenAsync(incomingRequest, cancellationToken);
+    if (token is null && incomingRequest.Cookies.TryGetValue(ProxyTokenCookie, out var pageToken)
+        && !string.IsNullOrWhiteSpace(pageToken))
+        token = pageToken;
+    if (token is null)
     {
         outgoingResponse.StatusCode = StatusCodes.Status400BadRequest;
         return;
@@ -264,6 +282,8 @@ app.MapMethods(CastProxyPath + "{fileId}", ["GET", "HEAD"], async (
 
     await RelayAsync(incomingRequest, outgoingResponse, fileId, token, httpClientFactory, logger, cancellationToken);
 });
+
+app.MapAuthSession();
 
 app.MapCastTickets();
 

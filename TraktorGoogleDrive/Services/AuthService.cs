@@ -19,17 +19,28 @@ public class AuthService
     }
 
     /// <summary>
-    /// Current token, or null if absent or expired.
+    /// Current token, or null if absent or expired and the server has no session
+    /// to renew it from (ADR 20261101-38: with the code flow on, an expired token
+    /// is renewed here, silently, instead of sending the user to /login).
     /// </summary>
     /// <remarks>
-    /// Falls back to reading sessionStorage directly if auth.js is missing its
-    /// helpers. A browser holding a stale cached auth.js against newer WASM used
-    /// to throw here during App.OnInitializedAsync, which left the whole app
-    /// dead on "Checking authentication..." with only a console stack trace.
-    /// Degrading is always better than bricking the shell.
+    /// Falls back to authGetToken, then to reading sessionStorage directly, if
+    /// auth.js is missing its helpers. A browser holding a stale cached auth.js
+    /// against newer WASM used to throw here during App.OnInitializedAsync, which
+    /// left the whole app dead on "Checking authentication..." with only a console
+    /// stack trace. Degrading is always better than bricking the shell.
     /// </remarks>
     public async ValueTask<string?> GetTokenAsync()
     {
+        try
+        {
+            return await _js.InvokeAsync<string?>("authEnsureToken");
+        }
+        catch (JSException)
+        {
+            // An auth.js from before authEnsureToken: the synchronous getter still works.
+        }
+
         try
         {
             return await _js.InvokeAsync<string?>("authGetToken");
@@ -51,6 +62,22 @@ public class AuthService
         {
             _errors.Report("Could not start Google sign-in — auth.js failed to load", ex);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The Sign out button: ends the server session too, revoking the refresh token
+    /// at Google. <see cref="SignOutAsync"/> only forgets this tab's token.
+    /// </summary>
+    public async Task LogOutAsync()
+    {
+        try
+        {
+            await _js.InvokeVoidAsync("authLogout");
+        }
+        catch (JSException)
+        {
+            await SignOutAsync();
         }
     }
 
